@@ -4,6 +4,10 @@
 #import "LGPrefsUIHelpers.h"
 #import <objc/runtime.h>
 
+#if LIQUIDASS_STANDALONE_UI
+NSString * const kLGStandaloneSettingsDismissedNotification = @"kLGStandaloneSettingsDismissedNotification";
+#endif
+
 @interface LGPRootListController ()
 @property (nonatomic, strong) UIScrollView *lg_scrollView;
 @property (nonatomic, strong) UIStackView *lg_stackView;
@@ -49,7 +53,25 @@
     [super viewDidLoad];
     self.title = LGPrefsAppName();
     self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
-    if ([self respondsToSelector:@selector(table)] && self.table) self.table.hidden = YES;
+#if LIQUIDASS_STANDALONE_UI
+    id tableView = nil;
+#else
+    UITableView *tableView = nil;
+#endif
+    if ([self respondsToSelector:@selector(table)]) {
+        tableView = [self valueForKey:@"table"];
+    }
+    if ([tableView isKindOfClass:[UIView class]]) {
+        ((UIView *)tableView).hidden = YES;
+    }
+#if LIQUIDASS_STANDALONE_UI
+    if (self.presentingViewController || self.navigationController.presentingViewController) {
+        self.navigationItem.leftBarButtonItem =
+            [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose
+                                                          target:self
+                                                          action:@selector(handleStandaloneClosePressed)];
+    }
+#endif
     self.navigationItem.rightBarButtonItem = LGMakeResetTextItem(self, @selector(handleResetPressed));
     [self applyNavigationBarStyle];
     LGInstallScrollableStack(self, 32.0, 14.0, &_lg_scrollView, &_lg_stackView);
@@ -461,6 +483,13 @@
     LGSetRespringBarDismissed(YES);
     [self updateRespringBarAnimated:YES];
 }
+
+#if LIQUIDASS_STANDALONE_UI
+- (void)handleStandaloneClosePressed {
+    [[NSNotificationCenter defaultCenter] postNotificationName:kLGStandaloneSettingsDismissedNotification object:nil];
+    [self.navigationController dismissViewControllerAnimated:YES completion:nil];
+}
+#endif
 
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];

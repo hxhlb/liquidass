@@ -292,7 +292,7 @@ NSString *LGDefaultRenderingModeForKey(NSString *key) {
 }
 
 BOOL LG_globalEnabled(void) {
-    return LG_prefBool(@"Global.Enabled", NO);
+    return LG_prefBool(@"Global.Enabled", YES);
 }
 
 BOOL LG_prefersLiveCapture(NSString *key) {

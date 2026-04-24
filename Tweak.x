@@ -5,6 +5,10 @@
 #import <unistd.h>
 #import "Runtime/LGLiquidGlassRuntime.h"
 #import "Runtime/LGSnapshotCaptureSupport.h"
+#if LIQUIDASS_STANDALONE_UI
+#import "LiquidAssPrefs/LGPRootListController.h"
+extern NSString * const kLGStandaloneSettingsDismissedNotification;
+#endif
 
 static BOOL LG_isAtLeastiOS16(void);
 static CFStringRef const LGInvalidateSnapshotCachesNotification = CFSTR("love.litten.liquidass/InvalidateSnapshotCaches");
@@ -32,6 +36,324 @@ typedef NS_OPTIONS(NSUInteger, SBSRelaunchActionOptions) {
 
 @interface PBUISnapshotReplicaView : UIView
 @end
+
+#if LIQUIDASS_STANDALONE_UI
+@interface LGStandaloneButtonWindow : UIWindow
+@property (nonatomic, weak) UIView *interactiveView;
+@end
+
+@implementation LGStandaloneButtonWindow
+
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    UIView *targetView = self.interactiveView;
+    if (!targetView || self.hidden || !self.userInteractionEnabled) {
+        return nil;
+    }
+    CGPoint convertedPoint = [targetView convertPoint:point fromView:self];
+    UIView *hitView = [targetView hitTest:convertedPoint withEvent:event];
+    return hitView ?: nil;
+}
+
+@end
+
+@interface LGStandaloneMenuButton : UIButton
+@property (nonatomic, copy) void (^tapHandler)(void);
+@end
+
+@implementation LGStandaloneMenuButton {
+    CGPoint _dragStartCenter;
+    CGPoint _dragStartPoint;
+    BOOL _dragging;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    self = [super initWithFrame:frame];
+    if (!self) return nil;
+
+    self.backgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.78];
+    self.layer.cornerRadius = CGRectGetWidth(frame) * 0.5;
+    self.layer.cornerCurve = kCACornerCurveContinuous;
+    self.layer.masksToBounds = YES;
+    self.layer.shadowColor = [UIColor.blackColor colorWithAlphaComponent:0.32].CGColor;
+    self.layer.shadowOpacity = 1.0;
+    self.layer.shadowRadius = 14.0;
+    self.layer.shadowOffset = CGSizeMake(0.0, 8.0);
+    self.titleLabel.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightHeavy];
+    self.titleLabel.numberOfLines = 2;
+    self.titleLabel.textAlignment = NSTextAlignmentCenter;
+    self.titleLabel.adjustsFontSizeToFitWidth = YES;
+    self.titleLabel.minimumScaleFactor = 0.55;
+    self.contentEdgeInsets = UIEdgeInsetsMake(10.0, 8.0, 10.0, 8.0);
+    [self setTitle:@"Liquid\nAss" forState:UIControlStateNormal];
+    [self setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    [self addTarget:self action:@selector(handleTouchUpInside) forControlEvents:UIControlEventTouchUpInside];
+    return self;
+}
+
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [super touchesBegan:touches withEvent:event];
+    UITouch *touch = touches.anyObject;
+    if (!touch) return;
+    _dragging = NO;
+    _dragStartCenter = self.center;
+    _dragStartPoint = [touch locationInView:self.window];
+}
+
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [super touchesMoved:touches withEvent:event];
+    UITouch *touch = touches.anyObject;
+    if (!touch) return;
+    CGPoint currentPoint = [touch locationInView:self.window];
+    CGFloat deltaX = currentPoint.x - _dragStartPoint.x;
+    CGFloat deltaY = currentPoint.y - _dragStartPoint.y;
+    if (!_dragging && hypot(deltaX, deltaY) > 6.0) {
+        _dragging = YES;
+    }
+    if (!_dragging) return;
+    self.center = CGPointMake(_dragStartCenter.x + deltaX, _dragStartCenter.y + deltaY);
+}
+
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [super touchesEnded:touches withEvent:event];
+    if (_dragging) {
+        [self snapToEdgeAnimated:YES];
+    }
+}
+
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [super touchesCancelled:touches withEvent:event];
+    if (_dragging) {
+        [self snapToEdgeAnimated:YES];
+    }
+}
+
+- (void)handleTouchUpInside {
+    if (_dragging) return;
+    if (self.tapHandler) self.tapHandler();
+}
+
+- (void)snapToEdgeAnimated:(BOOL)animated {
+    UIWindow *window = self.window;
+    if (!window) return;
+    CGRect bounds = window.bounds;
+    UIEdgeInsets insets = window.safeAreaInsets;
+    CGFloat margin = 18.0;
+    CGFloat halfWidth = CGRectGetWidth(self.bounds) * 0.5;
+    CGFloat halfHeight = CGRectGetHeight(self.bounds) * 0.5;
+    CGFloat minX = insets.left + margin + halfWidth;
+    CGFloat maxX = CGRectGetWidth(bounds) - insets.right - margin - halfWidth;
+    CGFloat minY = insets.top + margin + halfHeight;
+    CGFloat maxY = CGRectGetHeight(bounds) - insets.bottom - margin - halfHeight;
+    CGPoint targetCenter = self.center;
+    targetCenter.x = (targetCenter.x <= CGRectGetMidX(bounds)) ? minX : maxX;
+    targetCenter.y = fmax(minY, fmin(maxY, targetCenter.y));
+    void (^animations)(void) = ^{
+        self.center = targetCenter;
+    };
+    if (animated) {
+        [UIView animateWithDuration:0.22 delay:0.0 usingSpringWithDamping:0.9 initialSpringVelocity:0.0 options:UIViewAnimationOptionCurveEaseOut animations:animations completion:nil];
+    } else {
+        animations();
+    }
+}
+
+@end
+
+@interface LGStandalonePresentationObserver : NSObject <UIAdaptivePresentationControllerDelegate>
+@property (nonatomic, copy) dispatch_block_t onDismiss;
+@end
+
+@implementation LGStandalonePresentationObserver
+
+- (void)presentationControllerDidDismiss:(UIPresentationController *)presentationController {
+    (void)presentationController;
+    if (self.onDismiss) self.onDismiss();
+}
+
+@end
+
+@interface LGStandalonePanelHostController : UIViewController
+@end
+
+@implementation LGStandalonePanelHostController
+
+- (void)loadView {
+    UIView *view = [[UIView alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    view.backgroundColor = UIColor.clearColor;
+    self.view = view;
+}
+
+@end
+
+static LGStandaloneButtonWindow *sLGStandaloneButtonWindow = nil;
+static UIWindow *sLGStandalonePanelWindow = nil;
+static LGStandalonePanelHostController *sLGStandalonePanelHostController = nil;
+static LGStandaloneMenuButton *sLGStandaloneMenuButton = nil;
+static LGStandalonePresentationObserver *sLGStandalonePresentationObserver = nil;
+static __weak UIViewController *sLGStandalonePresentedController = nil;
+#define LG_STANDALONE_BUTTON_WINDOW_LEVEL (UIWindowLevelAlert + 500.0)
+#define LG_STANDALONE_PANEL_WINDOW_LEVEL (UIWindowLevelAlert + 600.0)
+
+static UIWindowScene *LG_activeStandaloneScene(void) {
+    static Class sceneClass;
+    if (!sceneClass) sceneClass = [UIWindowScene class];
+    UIWindowScene *fallbackScene = nil;
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:sceneClass]) continue;
+        UIWindowScene *windowScene = (UIWindowScene *)scene;
+        if (!fallbackScene) fallbackScene = windowScene;
+        if (scene.activationState == UISceneActivationStateForegroundActive) {
+            return windowScene;
+        }
+    }
+    return fallbackScene;
+}
+
+static void LG_showStandaloneMenuButton(void);
+
+static void LG_restoreStandaloneMenuButton(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (sLGStandalonePanelWindow) {
+            sLGStandalonePanelWindow.hidden = YES;
+            sLGStandalonePanelWindow.rootViewController = nil;
+            sLGStandalonePanelWindow = nil;
+            sLGStandalonePanelHostController = nil;
+        }
+        if (!sLGStandaloneButtonWindow) return;
+        sLGStandaloneButtonWindow.hidden = NO;
+        sLGStandaloneButtonWindow.userInteractionEnabled = YES;
+        [sLGStandaloneButtonWindow makeKeyAndVisible];
+        [sLGStandaloneButtonWindow resignKeyWindow];
+    });
+}
+
+static void LG_hideStandaloneMenuButton(void) {
+    if (!sLGStandaloneButtonWindow) return;
+    sLGStandaloneButtonWindow.userInteractionEnabled = NO;
+    [sLGStandaloneButtonWindow resignKeyWindow];
+    sLGStandaloneButtonWindow.hidden = YES;
+}
+
+static void LG_presentStandaloneSettings(void) {
+    UIWindowScene *scene = LG_activeStandaloneScene();
+    if (!scene || sLGStandalonePresentedController) {
+        return;
+    }
+
+    LG_hideStandaloneMenuButton();
+
+    if (sLGStandalonePanelWindow) {
+        sLGStandalonePanelWindow.hidden = YES;
+        sLGStandalonePanelWindow.rootViewController = nil;
+        sLGStandalonePanelWindow = nil;
+        sLGStandalonePanelHostController = nil;
+    }
+
+    sLGStandalonePanelWindow = [[UIWindow alloc] initWithWindowScene:scene];
+    sLGStandalonePanelWindow.backgroundColor = UIColor.clearColor;
+    sLGStandalonePanelWindow.windowLevel = LG_STANDALONE_PANEL_WINDOW_LEVEL;
+    sLGStandalonePanelHostController = [LGStandalonePanelHostController new];
+    sLGStandalonePanelWindow.rootViewController = sLGStandalonePanelHostController;
+    [sLGStandalonePanelWindow makeKeyAndVisible];
+
+    LGPRootListController *rootPrefsController = [[LGPRootListController alloc] init];
+    UINavigationController *navigationController = [[UINavigationController alloc] initWithRootViewController:rootPrefsController];
+    navigationController.modalPresentationStyle = UIModalPresentationPageSheet;
+    if (@available(iOS 15.0, *)) {
+        UISheetPresentationController *sheet = navigationController.sheetPresentationController;
+        if (sheet) {
+            sheet.detents = @[[UISheetPresentationControllerDetent mediumDetent], [UISheetPresentationControllerDetent largeDetent]];
+            sheet.prefersGrabberVisible = YES;
+            sheet.preferredCornerRadius = 30.0;
+        }
+    }
+
+    sLGStandalonePresentationObserver = [LGStandalonePresentationObserver new];
+    sLGStandalonePresentationObserver.onDismiss = ^{
+        sLGStandalonePresentedController = nil;
+        sLGStandalonePresentationObserver = nil;
+        LG_restoreStandaloneMenuButton();
+    };
+    navigationController.presentationController.delegate = sLGStandalonePresentationObserver;
+    sLGStandalonePresentedController = navigationController;
+    [sLGStandalonePanelHostController presentViewController:navigationController animated:YES completion:nil];
+}
+
+static void LG_configureStandaloneMenuButtonFrame(void) {
+    if (!sLGStandaloneButtonWindow || !sLGStandaloneMenuButton) return;
+    CGRect bounds = sLGStandaloneButtonWindow.bounds;
+    UIEdgeInsets insets = sLGStandaloneButtonWindow.safeAreaInsets;
+    CGFloat size = 64.0;
+    CGFloat x = CGRectGetWidth(bounds) - insets.right - size - 18.0;
+    CGFloat y = insets.top + 120.0;
+    sLGStandaloneMenuButton.frame = CGRectMake(x, y, size, size);
+    [sLGStandaloneMenuButton snapToEdgeAnimated:NO];
+}
+
+static void LG_showStandaloneMenuButton(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindowScene *scene = LG_activeStandaloneScene();
+        if (!scene) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                LG_showStandaloneMenuButton();
+            });
+            return;
+        }
+        if (!sLGStandaloneButtonWindow) {
+            sLGStandaloneButtonWindow = [[LGStandaloneButtonWindow alloc] initWithWindowScene:scene];
+            sLGStandaloneButtonWindow.backgroundColor = UIColor.clearColor;
+            sLGStandaloneButtonWindow.windowLevel = LG_STANDALONE_BUTTON_WINDOW_LEVEL;
+
+            sLGStandaloneMenuButton = [[LGStandaloneMenuButton alloc] initWithFrame:CGRectMake(0.0, 0.0, 64.0, 64.0)];
+            sLGStandaloneMenuButton.tapHandler = ^{
+                LG_presentStandaloneSettings();
+            };
+            [sLGStandaloneButtonWindow addSubview:sLGStandaloneMenuButton];
+            sLGStandaloneButtonWindow.interactiveView = sLGStandaloneMenuButton;
+        } else if (sLGStandaloneButtonWindow.windowScene != scene) {
+            sLGStandaloneButtonWindow.hidden = YES;
+            sLGStandaloneButtonWindow = [[LGStandaloneButtonWindow alloc] initWithWindowScene:scene];
+            sLGStandaloneButtonWindow.backgroundColor = UIColor.clearColor;
+            sLGStandaloneButtonWindow.windowLevel = LG_STANDALONE_BUTTON_WINDOW_LEVEL;
+            [sLGStandaloneButtonWindow addSubview:sLGStandaloneMenuButton];
+            sLGStandaloneButtonWindow.interactiveView = sLGStandaloneMenuButton;
+        }
+        LG_configureStandaloneMenuButtonFrame();
+        sLGStandaloneButtonWindow.hidden = NO;
+        sLGStandaloneButtonWindow.userInteractionEnabled = YES;
+        [sLGStandaloneButtonWindow makeKeyAndVisible];
+        [sLGStandaloneButtonWindow resignKeyWindow];
+    });
+}
+
+static void LG_installStandaloneMenuButtonIfNeeded(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        LG_showStandaloneMenuButton();
+        [[NSNotificationCenter defaultCenter] addObserverForName:kLGStandaloneSettingsDismissedNotification
+                                                          object:nil
+                                                           queue:[NSOperationQueue mainQueue]
+                                                      usingBlock:^(__unused NSNotification *note) {
+            sLGStandalonePresentedController = nil;
+            sLGStandalonePresentationObserver = nil;
+            LG_restoreStandaloneMenuButton();
+        }];
+        [[NSNotificationCenter defaultCenter] addObserverForName:UISceneDidActivateNotification
+                                                          object:nil
+                                                           queue:[NSOperationQueue mainQueue]
+                                                      usingBlock:^(__unused NSNotification *note) {
+            if (sLGStandalonePresentedController) return;
+            LG_showStandaloneMenuButton();
+        }];
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
+                                                          object:nil
+                                                           queue:[NSOperationQueue mainQueue]
+                                                      usingBlock:^(__unused NSNotification *note) {
+            if (sLGStandalonePresentedController) return;
+            LG_showStandaloneMenuButton();
+        }];
+    });
+}
+#endif
 
 static const NSInteger kLGMaxViewTraversalDepth = 96;
 
@@ -1307,6 +1629,9 @@ static void LG_requestRespring(void) {
                                                       usingBlock:^(__unused NSNotification *note) {
             LG_handleMemoryWarning();
         }];
+#if LIQUIDASS_STANDALONE_UI
+        LG_installStandaloneMenuButtonIfNeeded();
+#endif
     });
     LGObservePreferenceChanges(^{
         LG_preferencesChanged(NULL, NULL, NULL, NULL, NULL);

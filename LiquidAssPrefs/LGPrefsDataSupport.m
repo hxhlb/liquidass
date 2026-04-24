@@ -14,9 +14,369 @@ static NSString * const kLGNeedsRespringKey = @"LGPrefsNeedsRespring";
 static NSString * const kLGRespringBarDismissedKey = @"LGPrefsRespringBarDismissed";
 static const char *LGInvalidateSnapshotCachesNotificationCString = "love.litten.liquidass/InvalidateSnapshotCaches";
 
+static NSDictionary<NSString *, NSString *> *LGEmbeddedEnglishStrings(void) {
+    static NSDictionary<NSString *, NSString *> *strings;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        strings = @{
+            @"prefs.app_name": @"Liquid (Gl)ass",
+            @"prefs.control.enabled": @"Enabled",
+            @"prefs.control.bezel_width": @"Bezel Width",
+            @"prefs.control.blur": @"Blur",
+            @"prefs.control.corner_radius": @"Corner Radius",
+            @"prefs.control.glass_thickness": @"Glass Thickness",
+            @"prefs.control.light_tint_alpha": @"Light Tint Alpha",
+            @"prefs.control.dark_tint_alpha": @"Dark Tint Alpha",
+            @"prefs.control.refractive_index": @"Refractive Index",
+            @"prefs.control.refraction": @"Refraction",
+            @"prefs.control.specular": @"Specular",
+            @"prefs.control.quality": @"Quality",
+            @"prefs.control.fps_limit": @"FPS Limit",
+            @"prefs.control.rendering_method": @"Rendering Method",
+            @"prefs.control.font_weight": @"Font Weight",
+            @"prefs.control.font_style": @"Font Style",
+            @"prefs.control.size_boost": @"Size Boost",
+            @"prefs.control.embolden": @"Embolden",
+            @"prefs.control.clock_gap": @"Clock Gap",
+            @"prefs.control.variable_font": @"iOS 26 Clock",
+            @"prefs.control.variable_font_weight": @"Weight",
+            @"prefs.control.variable_font_width": @"Width",
+            @"prefs.control.variable_font_height": @"Height",
+            @"prefs.control.variable_font_softness": @"Softness",
+            @"prefs.control.floating_radius": @"Floating Radius",
+            @"prefs.control.full_screen_radius": @"Full Screen Radius",
+            @"prefs.control.home_button_radius": @"Home Button Radius",
+            @"prefs.control.icon_spacing": @"Icon Spacing",
+            @"prefs.control.row_inset": @"Row Inset",
+            @"prefs.subtitle.enabled": @"Turn this glass view on or off.",
+            @"prefs.subtitle.bezel_width": @"Thickness of the glass view edge.",
+            @"prefs.subtitle.blur": @"Softness of the glass view.",
+            @"prefs.subtitle.corner_radius": @"Roundness of the glass view.",
+            @"prefs.subtitle.glass_thickness": @"Depth of the glass volume, visually it does not change anything much.",
+            @"prefs.subtitle.light_tint_alpha": @"White overlay strength in light mode.",
+            @"prefs.subtitle.dark_tint_alpha": @"Black overlay strength in dark mode.",
+            @"prefs.subtitle.refractive_index": @"Optical density of the glass effect.",
+            @"prefs.subtitle.refraction": @"Backdrop bending through the glass view.",
+            @"prefs.subtitle.specular": @"Highlight strength on the glass view.",
+            @"prefs.subtitle.quality": @"Texture downscale for the glass view. Lower values improve performance but reduce visual quality.",
+            @"prefs.subtitle.fps_limit_120": @"Caps live glass rendering between 30 and 120 FPS. Lower values improve performance and battery life.",
+            @"prefs.subtitle.fps_limit_60": @"Caps live glass rendering between 30 and 60 FPS. Lower values improve performance.",
+            @"prefs.subtitle.floating_radius": @"Roundness of the glass view in floating mode.",
+            @"prefs.subtitle.full_screen_radius": @"Roundness of the glass view in full-screen mode.",
+            @"prefs.subtitle.home_button_radius": @"Roundness of the glass view on home button devices.",
+            @"prefs.subtitle.icon_spacing": @"Gap between icon and label.",
+            @"prefs.subtitle.row_inset": @"Left and right padding for action rows.",
+            @"prefs.subtitle.rendering_method": @"Choose whether this surface samples from cached snapshots or live backdrop capture.",
+            @"prefs.subtitle.font_weight": @"Weight used for the legacy iOS 15 and lower glass clock.",
+            @"prefs.subtitle.font_style": @"Switches the legacy iOS 15 clock between the regular and rounded styles.",
+            @"prefs.subtitle.size_boost": @"Scales the legacy clock size relative to the stock layout.",
+            @"prefs.subtitle.embolden": @"Artificially thickens the legacy clock mask for a fuller look.",
+            @"prefs.subtitle.clock_gap": @"Vertical gap between the legacy clock and the date text.",
+            @"prefs.subtitle.variable_font": @"Uses the iOS 26-style adaptive clock font for the glass clock when available.",
+            @"prefs.subtitle.variable_font_weight": @"Weight axis value for the iOS 26 clock font.",
+            @"prefs.subtitle.variable_font_width": @"Width axis value for the iOS 26 clock font.",
+            @"prefs.subtitle.variable_font_height": @"Height axis value for the iOS 26 clock font.",
+            @"prefs.subtitle.variable_font_softness": @"Softness axis value for the iOS 26 clock font.",
+            @"prefs.font_style.current.title": @"Regular",
+            @"prefs.font_style.rounded.title": @"Rounded",
+            @"prefs.subtitle.global_enabled": @"Master switch for every surface.",
+            @"prefs.rendering.snapshot.title": @"Snapshot",
+            @"prefs.rendering.live_capture.title": @"Live Capture",
+            @"prefs.section.dock.title": @"Dock",
+            @"prefs.section.dock.subtitle": @"Dock materials, shape variants, rendering quality, etc.",
+            @"prefs.section.folder_icons.title": @"Folder Icons",
+            @"prefs.section.folder_icons.subtitle": @"Closed folder icon materials, tint, rendering quality, etc.",
+            @"prefs.section.folder_open.title": @"Folder Open",
+            @"prefs.section.folder_open.subtitle": @"Opened folder materials rendering quality, etc.",
+            @"prefs.section.app_icons.title": @"App Icons",
+            @"prefs.section.app_icons.subtitle": @"App icon underlay materials, tint, rendering quality, etc.",
+            @"prefs.section.context_menu.title": @"Context Menu",
+            @"prefs.section.context_menu.subtitle": @"Menu materials, tint, row layout, rendering quality, etc.",
+            @"prefs.section.search_pill.title": @"Search Pill",
+            @"prefs.section.search_pill.subtitle": @"Homescreen search pill materials, tint, rendering quality, etc.",
+            @"prefs.section.widgets.title": @"Widgets",
+            @"prefs.section.widgets.subtitle": @"Widget materials, tint, rendering quality, etc.",
+            @"prefs.section.category_pods.title": @"Category Pods",
+            @"prefs.section.category_pods.subtitle": @"Category pod materials rendering quality, etc.",
+            @"prefs.section.search_field.title": @"Search Field",
+            @"prefs.section.search_field.subtitle": @"Search field materials rendering quality, etc.",
+            @"prefs.section.main.title": @"Main Controls",
+            @"prefs.section.main.subtitle": @"Configure the tweak across each major surface.",
+            @"prefs.section.misc.title": @"Miscellaneous",
+            @"prefs.section.misc.subtitle": @"Respring and More Options (¯\\\\_(ツ)_/¯)",
+            @"prefs.section.experimental_rendering.title": @"Rendering Methods",
+            @"prefs.section.experimental_rendering.subtitle": @"Choose snapshot or live capture for each surface. This is experimental and can be heavy.",
+            @"prefs.section.experimental_features.title": @"Experimental Features",
+            @"prefs.section.experimental_features.subtitle": @"Other unstable or niche options.",
+            @"prefs.section.surface_tint_override.title": @"Per-Surface Tint Override",
+            @"prefs.section.surface_tint_override.subtitle": @"Override tint mode for individual surfaces. Follow System uses the current system appearance.",
+            @"prefs.button.reset": @"Reset",
+            @"prefs.button.cancel": @"Cancel",
+            @"prefs.button.respring": @"Respring",
+            @"prefs.button.later": @"Later",
+            @"prefs.button.invalidate": @"Invalidate",
+            @"prefs.button.reopen_settings": @"Reopen",
+            @"prefs.button.ok": @"OK",
+            @"prefs.button.go_to_top": @"Go to top",
+            @"prefs.button.apply": @"Apply",
+            @"prefs.reset_confirm.title": @"Confirm Reset?",
+            @"prefs.reset_confirm.body": @"This action will reset all preferences to their defaults. Do you wish to continue?",
+            @"prefs.respring_confirm.title": @"Confirm Respring",
+            @"prefs.respring_confirm.body": @"Do you wish to respring now? Any running background apps or processes might close if you do.",
+            @"prefs.invalidate_caches_confirm.title": @"Invalidate Snapshot Caches?",
+            @"prefs.invalidate_caches_confirm.body": @"This is useful when there are sampling alignment issues that needs a refresh to fix. Do you want to continue?",
+            @"prefs.reopen_settings.title": @"Reopen Settings",
+            @"prefs.reopen_settings.body": @"This change applies the next time Settings starts. Reopen Settings now?",
+            @"prefs.respring_bar.title": @"Respring Recommended",
+            @"prefs.respring_bar.subtitle": @"It is recommended to respring with the changes you made.",
+            @"prefs.info.title": @"Info",
+            @"prefs.jump_to.title": @"Jump To",
+            @"prefs.value_prompt.title": @"Set Value",
+            @"prefs.value_prompt.message": @"Enter a value between %@ and %@.",
+            @"prefs.range_format": @"Range: %@ to %@",
+            @"prefs.hero.eyebrow": @"Nothing more ass than...",
+            @"prefs.hero.subtitle": @"Assest tweak ever created.",
+            @"prefs.surface.homescreen.title": @"Homescreen",
+            @"prefs.surface.homescreen.subtitle": @"Dock, folders, context menus, widgets, and app icon underlays.",
+            @"prefs.surface.lockscreen.title": @"Lockscreen",
+            @"prefs.surface.lockscreen.subtitle": @"Notifications and quick action materials.",
+            @"prefs.section.lockscreen_notifications.title": @"Notifications",
+            @"prefs.section.lockscreen_notifications.subtitle": @"Notification platters and swipe action materials.",
+            @"prefs.section.banner.title": @"Banners",
+            @"prefs.section.banner.subtitle": @"Top notification banner materials and rendering.",
+            @"prefs.section.lockscreen_quick_actions.title": @"Quick Actions",
+            @"prefs.section.lockscreen_quick_actions.subtitle": @"Bottom flashlight and camera button materials.",
+            @"prefs.section.lockscreen_clock.title": @"Clock",
+            @"prefs.section.lockscreen_clock.subtitle": @"Custom lockscreen glass clock controls.",
+            @"prefs.surface.app_library.title": @"App Library",
+            @"prefs.surface.app_library.subtitle": @"Category pods and search field materials.",
+            @"prefs.misc.respring.title": @"Respring",
+            @"prefs.misc.respring.subtitle": @"Do a respring after any changes if on iOS 16 or later since live updating is broken.",
+            @"prefs.misc.about.title": @"More Options",
+            @"prefs.misc.about.subtitle": @"Language, about, version details, donate, etc.",
+            @"prefs.misc.options_section.title": @"Extra stuff",
+            @"prefs.misc.options_section.subtitle": @"Experimental features and other stuff.",
+            @"prefs.misc.experimental.title": @"Experimental",
+            @"prefs.misc.experimental.subtitle": @"Rendering methods and unstable features.",
+            @"prefs.misc.language.title": @"Language",
+            @"prefs.misc.language.subtitle": @"Select the language for this preferences UI.",
+            @"prefs.misc.app_library_composite.title": @"AL samples app icons",
+            @"prefs.misc.app_library_composite.subtitle": @"Also samples homescreen icons and not just the wallpaper in App Library. Accurate to iOS 26 but can look weird on certain setups.",
+            @"prefs.misc.debug_logging.title": @"Debug Logging",
+            @"prefs.misc.debug_logging.subtitle": @"Enable verbose diagnostic logs written to /tmp/LiquidAss.log",
+            @"prefs.misc.invalidate_caches.title": @"Invalidate Snapshot Caches",
+            @"prefs.misc.invalidate_caches.subtitle": @"Clears cached snapshots then rebuild them fresh.",
+            @"prefs.misc.tint_override_per_surface.title": @"Per-Surface Tint Override",
+            @"prefs.misc.tint_override_per_surface.subtitle": @"Show individual tint override controls for each surface.",
+            @"prefs.tint_override.system.title": @"Follow System",
+            @"prefs.tint_override.light.title": @"Force Light Tint",
+            @"prefs.tint_override.dark.title": @"Force Dark Tint",
+            @"prefs.misc.settings_controls.title": @"Settings Sliders and Switches",
+            @"prefs.misc.settings_controls.subtitle": @"[EXPERIMENTAL] Enable the custom liquid controls inside the Settings app."
+        };
+    });
+    return strings;
+}
+
+static NSDictionary<NSString *, NSString *> *LGEmbeddedSimplifiedChineseStrings(void) {
+    static NSDictionary<NSString *, NSString *> *strings;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        strings = @{
+            @"prefs.app_name": @"Liquid Glass 液态玻璃",
+            @"prefs.control.enabled": @"启用",
+            @"prefs.control.bezel_width": @"边框宽度",
+            @"prefs.control.blur": @"模糊",
+            @"prefs.control.corner_radius": @"圆角半径",
+            @"prefs.control.glass_thickness": @"玻璃厚度",
+            @"prefs.control.light_tint_alpha": @"浅色着色透明度",
+            @"prefs.control.dark_tint_alpha": @"深色着色透明度",
+            @"prefs.control.refractive_index": @"折射率",
+            @"prefs.control.refraction": @"折射",
+            @"prefs.control.specular": @"高光",
+            @"prefs.control.quality": @"质量",
+            @"prefs.control.fps_limit": @"FPS 帧率限制",
+            @"prefs.control.rendering_method": @"渲染方式",
+            @"prefs.control.font_weight": @"字体粗细",
+            @"prefs.control.font_style": @"字体样式",
+            @"prefs.control.size_boost": @"放大字体",
+            @"prefs.control.embolden": @"加粗",
+            @"prefs.control.clock_gap": @"时间间距",
+            @"prefs.control.variable_font": @"iOS 26 时钟",
+            @"prefs.control.variable_font_weight": @"字重",
+            @"prefs.control.variable_font_width": @"宽度",
+            @"prefs.control.variable_font_height": @"高度",
+            @"prefs.control.variable_font_softness": @"柔和度",
+            @"prefs.control.floating_radius": @"悬浮圆角",
+            @"prefs.control.full_screen_radius": @"全屏圆角",
+            @"prefs.control.home_button_radius": @"Home 按钮圆角",
+            @"prefs.control.icon_spacing": @"图标间距",
+            @"prefs.control.row_inset": @"行内边距",
+            @"prefs.subtitle.enabled": @"开启或关闭此玻璃视图",
+            @"prefs.subtitle.bezel_width": @"玻璃视图边缘的厚度",
+            @"prefs.subtitle.blur": @"玻璃视图的柔和程度",
+            @"prefs.subtitle.corner_radius": @"玻璃视图的圆润程度",
+            @"prefs.subtitle.glass_thickness": @"玻璃体积的深度，视觉上变化不大",
+            @"prefs.subtitle.light_tint_alpha": @"浅色模式下的白色叠加强度",
+            @"prefs.subtitle.dark_tint_alpha": @"深色模式下的黑色叠加强度",
+            @"prefs.subtitle.refractive_index": @"玻璃效果的光学密度",
+            @"prefs.subtitle.refraction": @"背景在玻璃视图中的弯曲效果",
+            @"prefs.subtitle.specular": @"玻璃视图上的高光强度",
+            @"prefs.subtitle.quality": @"玻璃视图的纹理缩放较低的值可提升性能，但会降低视觉质量",
+            @"prefs.subtitle.fps_limit_120": @"将实时玻璃渲染限制在 30 到 120 FPS 之间较低的值可提升性能和电池续航",
+            @"prefs.subtitle.fps_limit_60": @"将实时玻璃渲染限制在 30 到 60 FPS 之间较低的值可提升性能",
+            @"prefs.subtitle.floating_radius": @"悬浮模式下玻璃视图的圆角程度",
+            @"prefs.subtitle.full_screen_radius": @"全屏模式下玻璃视图的圆角程度",
+            @"prefs.subtitle.home_button_radius": @"带 Home 按钮设备上玻璃视图的圆角程度",
+            @"prefs.subtitle.icon_spacing": @"图标与标签之间的间距",
+            @"prefs.subtitle.row_inset": @"操作行的左右内边距",
+            @"prefs.subtitle.rendering_method": @"选择该界面使用缓存快照还是实时背景捕捉",
+            @"prefs.subtitle.font_weight": @"用于旧版 iOS 15 及以下玻璃时钟的字重",
+            @"prefs.subtitle.font_style": @"在常规样式和圆角样式之间切换旧版 iOS 15 时钟",
+            @"prefs.subtitle.size_boost": @"相对于系统布局缩放旧版时钟大小",
+            @"prefs.subtitle.embolden": @"人为加粗旧版时钟遮罩以获得更饱满的外观",
+            @"prefs.subtitle.clock_gap": @"旧版时钟与日期文本之间的垂直间距",
+            @"prefs.subtitle.variable_font": @"可用时为玻璃时钟使用 iOS 26 风格的自适应时钟字体",
+            @"prefs.subtitle.variable_font_weight": @"iOS 26 时钟字体的字重轴值",
+            @"prefs.subtitle.variable_font_width": @"iOS 26 时钟字体的宽度轴值",
+            @"prefs.subtitle.variable_font_height": @"iOS 26 时钟字体的高度轴值",
+            @"prefs.subtitle.variable_font_softness": @"iOS 26 时钟字体的柔和度轴值",
+            @"prefs.font_style.current.title": @"常规",
+            @"prefs.font_style.rounded.title": @"圆角",
+            @"prefs.subtitle.global_enabled": @"插件总开关",
+            @"prefs.section.dock.title": @"Dock 栏",
+            @"prefs.section.dock.subtitle": @"Dock 材质、形状变体、渲染质量等",
+            @"prefs.section.folder_icons.title": @"文件夹图标",
+            @"prefs.section.folder_icons.subtitle": @"关闭状态文件夹图标的材质、着色、渲染质量等",
+            @"prefs.section.folder_open.title": @"打开的文件夹",
+            @"prefs.section.folder_open.subtitle": @"打开状态文件夹的材质渲染质量等",
+            @"prefs.section.app_icons.title": @"应用图标",
+            @"prefs.section.app_icons.subtitle": @"应用图标底层材质、着色、渲染质量等",
+            @"prefs.section.context_menu.title": @"上下文菜单",
+            @"prefs.section.context_menu.subtitle": @"菜单材质、着色、行布局、渲染质量等",
+            @"prefs.section.search_pill.title": @"搜索胶囊",
+            @"prefs.section.search_pill.subtitle": @"主屏幕搜索胶囊的材质、着色、渲染质量等",
+            @"prefs.section.widgets.title": @"小组件",
+            @"prefs.section.widgets.subtitle": @"小组件材质、着色、渲染质量等",
+            @"prefs.section.category_pods.title": @"分类卡片",
+            @"prefs.section.category_pods.subtitle": @"分类卡片材质渲染质量等",
+            @"prefs.section.search_field.title": @"搜索栏",
+            @"prefs.section.search_field.subtitle": @"搜索栏材质渲染质量等",
+            @"prefs.section.main.title": @"主菜单",
+            @"prefs.section.main.subtitle": @"为各个主要界面自定义玻璃特效",
+            @"prefs.section.misc.title": @"杂项",
+            @"prefs.section.misc.subtitle": @"注销及更多选项",
+            @"prefs.section.experimental_rendering.title": @"渲染方式",
+            @"prefs.section.experimental_rendering.subtitle": @"为每个界面选择快照或实时捕捉。此为实验性功能，可能消耗较多资源",
+            @"prefs.section.experimental_features.title": @"实验性功能",
+            @"prefs.section.experimental_features.subtitle": @"其他不稳定或特定场景使用的选项",
+            @"prefs.section.surface_tint_override.title": @"按界面单独覆盖色调",
+            @"prefs.section.surface_tint_override.subtitle": @"为单个界面覆盖色调模式。跟随系统将使用当前系统外观",
+            @"prefs.button.reset": @"重置",
+            @"prefs.button.cancel": @"取消",
+            @"prefs.button.respring": @"注销",
+            @"prefs.button.later": @"稍后",
+            @"prefs.button.invalidate": @"使其失效",
+            @"prefs.button.reopen_settings": @"重新打开",
+            @"prefs.button.ok": @"确定",
+            @"prefs.button.go_to_top": @"回到顶部",
+            @"prefs.button.apply": @"应用",
+            @"prefs.reset_confirm.title": @"确认重置？",
+            @"prefs.reset_confirm.body": @"此操作将把所有设置恢复为默认值是否继续？",
+            @"prefs.respring_confirm.title": @"确认注销",
+            @"prefs.respring_confirm.body": @"是否现在注销？如果执行，正在运行的后台应用或进程可能会关闭",
+            @"prefs.invalidate_caches_confirm.title": @"使快照缓存失效？",
+            @"prefs.invalidate_caches_confirm.body": @"当采样对齐出现问题并需要刷新来修复时，这个选项会很有用。是否继续？",
+            @"prefs.reopen_settings.title": @"重新打开设置",
+            @"prefs.reopen_settings.body": @"此更改将在下次打开设置时生效现在重新打开设置？",
+            @"prefs.respring_bar.title": @"建议注销界面",
+            @"prefs.respring_bar.subtitle": @"建议在更改后注销以应用设置",
+            @"prefs.info.title": @"信息",
+            @"prefs.jump_to.title": @"跳转到",
+            @"prefs.value_prompt.title": @"设置数值",
+            @"prefs.value_prompt.message": @"请输入 %@ 到 %@ 之间的数值",
+            @"prefs.range_format": @"范围：%@ 到 %@",
+            @"prefs.hero.eyebrow": @"插件之巅，孤独求败！",
+            @"prefs.hero.subtitle": @"史上最牛逼的插件，没有之一！",
+            @"prefs.surface.homescreen.title": @"主屏幕",
+            @"prefs.surface.homescreen.subtitle": @"Dock、文件夹、上下文菜单、小组件以及应用图标底层",
+            @"prefs.surface.lockscreen.title": @"锁屏",
+            @"prefs.surface.lockscreen.subtitle": @"通知和快捷操作材质",
+            @"prefs.section.lockscreen_notifications.title": @"通知",
+            @"prefs.section.lockscreen_notifications.subtitle": @"通知卡片和滑动操作的材质",
+            @"prefs.section.banner.title": @"横幅",
+            @"prefs.section.banner.subtitle": @"顶部通知横幅的材质与渲染",
+            @"prefs.section.lockscreen_quick_actions.title": @"快捷操作",
+            @"prefs.section.lockscreen_quick_actions.subtitle": @"底部手电筒和相机按钮的材质",
+            @"prefs.section.lockscreen_clock.title": @"时间",
+            @"prefs.section.lockscreen_clock.subtitle": @"自定义锁屏玻璃时间的控件",
+            @"prefs.surface.app_library.title": @"资源库",
+            @"prefs.surface.app_library.subtitle": @"分类卡片和搜索栏材质",
+            @"prefs.misc.respring.title": @"注销",
+            @"prefs.misc.respring.subtitle": @"在 iOS 16 及以上系统中，每次更改后建议执行一次注销，因为实时更新存在问题",
+            @"prefs.misc.about.title": @"更多选项",
+            @"prefs.misc.about.subtitle": @"语言、关于、版本信息、捐赠等",
+            @"prefs.misc.options_section.title": @"额外内容",
+            @"prefs.misc.options_section.subtitle": @"实验性功能及其他内容",
+            @"prefs.misc.language.title": @"语言",
+            @"prefs.misc.language.subtitle": @"选择此设置界面的语言",
+            @"prefs.misc.experimental.title": @"实验性功能",
+            @"prefs.misc.experimental.subtitle": @"渲染方式及实验性功能",
+            @"prefs.misc.app_library_composite.title": @"资源库示例图标",
+            @"prefs.misc.app_library_composite.subtitle": @"在资源库中同时采样主屏幕图标，而不仅是壁纸效果接近 iOS 26，但在某些布局下可能显示异常",
+            @"prefs.misc.debug_logging.title": @"调试日志",
+            @"prefs.misc.debug_logging.subtitle": @"启用写入 /tmp/LiquidAss.log 的详细诊断日志",
+            @"prefs.misc.invalidate_caches.title": @"使快照缓存失效",
+            @"prefs.misc.invalidate_caches.subtitle": @"清除已缓存的快照，然后重新构建它们。",
+            @"prefs.misc.tint_override_per_surface.title": @"单独调节各界面色调",
+            @"prefs.misc.tint_override_per_surface.subtitle": @"显示每个界面的独立色调覆盖控制项",
+            @"prefs.tint_override.system.title": @"跟随系统",
+            @"prefs.tint_override.light.title": @"强制浅色模式",
+            @"prefs.tint_override.dark.title": @"强制深色模式",
+            @"prefs.misc.settings_controls.title": @"设置滑块与开关",
+            @"prefs.misc.settings_controls.subtitle": @"[实验性] 在设置应用中启用自定义液态控件",
+            @"prefs.rendering.snapshot.title": @"快照",
+            @"prefs.rendering.live_capture.title": @"动态捕捉"
+        };
+    });
+    return strings;
+}
+
+static NSString *LGNormalizedEmbeddedLanguageCode(NSString *languageCode) {
+    if (!languageCode.length) return @"en";
+    NSString *normalized = languageCode.lowercaseString;
+    if ([normalized hasPrefix:@"zh"]) {
+        if ([normalized containsString:@"hans"] || [normalized isEqualToString:@"zh"] || [normalized hasPrefix:@"zh-cn"] || [normalized hasPrefix:@"zh-sg"]) {
+            return @"zh-Hans";
+        }
+    }
+    return @"en";
+}
+
+static NSString *LGDefaultEmbeddedLanguageCode(void) {
+    NSString *preferred = NSLocale.preferredLanguages.firstObject;
+    return LGNormalizedEmbeddedLanguageCode(preferred);
+}
+
+static NSDictionary<NSString *, NSString *> *LGEmbeddedStringsForLanguageCode(NSString *languageCode) {
+    NSString *normalized = LGNormalizedEmbeddedLanguageCode(languageCode);
+    if ([normalized isEqualToString:@"zh-Hans"]) {
+        return LGEmbeddedSimplifiedChineseStrings();
+    }
+    return LGEmbeddedEnglishStrings();
+}
+
+static NSBundle *LGPreferencesBaseBundle(void) {
+    NSBundle *baseBundle = [NSBundle bundleForClass:[LGPRootListController class]];
+    if (!baseBundle || baseBundle == NSBundle.mainBundle) {
+        return nil;
+    }
+    return baseBundle;
+}
+
 static NSBundle *LGActiveLocalizationBundle(void) {
     NSString *languageCode = [LGPrefsUIStateDefaults() stringForKey:kLGPrefsLanguageKey];
-    NSBundle *baseBundle = [NSBundle bundleForClass:[LGPRootListController class]];
+    NSBundle *baseBundle = LGPreferencesBaseBundle();
     if (!languageCode.length || [languageCode isEqualToString:@"en"]) {
         return baseBundle;
     }
@@ -51,13 +411,17 @@ static NSArray<NSDictionary *> *LGAvailableLanguageChoices(void) {
     static NSArray<NSDictionary *> *choices;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        NSBundle *baseBundle = [NSBundle bundleForClass:[LGPRootListController class]];
+        NSBundle *baseBundle = LGPreferencesBaseBundle();
         NSMutableOrderedSet<NSString *> *codes = [NSMutableOrderedSet orderedSetWithObject:@"en"];
-        for (NSString *path in [baseBundle pathsForResourcesOfType:@"lproj" inDirectory:nil]) {
-            NSString *languageCode = [[path lastPathComponent] stringByDeletingPathExtension];
-            if (languageCode.length && ![languageCode isEqualToString:@"Base"]) {
-                [codes addObject:languageCode];
+        if (baseBundle) {
+            for (NSString *path in [baseBundle pathsForResourcesOfType:@"lproj" inDirectory:nil]) {
+                NSString *languageCode = [[path lastPathComponent] stringByDeletingPathExtension];
+                if (languageCode.length && ![languageCode isEqualToString:@"Base"]) {
+                    [codes addObject:languageCode];
+                }
             }
+        } else {
+            [codes addObject:@"zh-Hans"];
         }
 
         NSMutableArray<NSDictionary *> *dynamicChoices = [NSMutableArray arrayWithCapacity:codes.count];
@@ -132,10 +496,17 @@ void LGObservePrefsNotifications(id target) {
 
 NSString *LGLocalized(NSString *key) {
     NSBundle *bundle = LGActiveLocalizationBundle();
-    NSString *localized = [bundle localizedStringForKey:key value:key table:nil];
-    if (localized.length) return localized;
-    NSBundle *baseBundle = [NSBundle bundleForClass:[LGPRootListController class]];
-    return [baseBundle localizedStringForKey:key value:key table:nil];
+    NSString *localized = [bundle localizedStringForKey:key value:nil table:nil];
+    if (localized.length && ![localized isEqualToString:key]) return localized;
+    NSString *languageCode = LGCurrentPrefsLanguageCode();
+    NSString *embedded = LGEmbeddedStringsForLanguageCode(languageCode)[key];
+    if (embedded.length) return embedded;
+    embedded = LGEmbeddedEnglishStrings()[key];
+    if (embedded.length) return embedded;
+    NSBundle *baseBundle = LGPreferencesBaseBundle();
+    localized = [baseBundle localizedStringForKey:key value:nil table:nil];
+    if (localized.length && ![localized isEqualToString:key]) return localized;
+    return key;
 }
 
 NSString *LGPrefsAppName(void) {
@@ -144,7 +515,7 @@ NSString *LGPrefsAppName(void) {
 
 NSString *LGCurrentPrefsLanguageCode(void) {
     NSString *languageCode = [LGPrefsUIStateDefaults() stringForKey:kLGPrefsLanguageKey];
-    return languageCode.length ? languageCode : @"en";
+    return languageCode.length ? languageCode : LGDefaultEmbeddedLanguageCode();
 }
 
 void LGSetCurrentPrefsLanguageCode(NSString *languageCode) {
