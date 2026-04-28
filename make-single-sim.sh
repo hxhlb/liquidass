@@ -1,0 +1,1 @@
+make sim-local DEBUG=0 LIQUIDASS_STANDALONE_UI=1 

@@ -64,20 +64,69 @@ typedef NS_OPTIONS(NSUInteger, SBSRelaunchActionOptions) {
     CGPoint _dragStartCenter;
     CGPoint _dragStartPoint;
     BOOL _dragging;
+    LiquidGlassView *_glassView;
+    UIView *_tintView;
+    UIView *_rimView;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (!self) return nil;
 
-    self.backgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.78];
+    self.backgroundColor = UIColor.clearColor;
     self.layer.cornerRadius = CGRectGetWidth(frame) * 0.5;
     self.layer.cornerCurve = kCACornerCurveContinuous;
-    self.layer.masksToBounds = YES;
-    self.layer.shadowColor = [UIColor.blackColor colorWithAlphaComponent:0.32].CGColor;
+    self.layer.masksToBounds = NO;
+    self.layer.shadowColor = [UIColor.blackColor colorWithAlphaComponent:0.28].CGColor;
     self.layer.shadowOpacity = 1.0;
-    self.layer.shadowRadius = 14.0;
-    self.layer.shadowOffset = CGSizeMake(0.0, 8.0);
+    self.layer.shadowRadius = 18.0;
+    self.layer.shadowOffset = CGSizeMake(0.0, 10.0);
+
+    CGPoint backdropOrigin = CGPointZero;
+    UIImage *backdrop = LG_getHomescreenSnapshot(&backdropOrigin);
+    if (!backdrop) {
+        backdrop = LG_getWallpaperImage(&backdropOrigin);
+    }
+
+    _glassView = [[LiquidGlassView alloc] initWithFrame:self.bounds wallpaper:backdrop wallpaperOrigin:backdropOrigin];
+    _glassView.userInteractionEnabled = NO;
+    _glassView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    _glassView.cornerRadius = CGRectGetWidth(frame) * 0.5;
+    _glassView.bezelWidth = 12.0;
+    _glassView.glassThickness = 42.0;
+    _glassView.refractionScale = 1.35;
+    _glassView.refractiveIndex = 1.45;
+    _glassView.specularOpacity = 0.16;
+    _glassView.blur = 2.0;
+    _glassView.wallpaperScale = 1.0;
+    _glassView.releasesWallpaperAfterUpload = NO;
+    if (_glassView) {
+        [self insertSubview:_glassView atIndex:0];
+    }
+
+    _tintView = [[UIView alloc] initWithFrame:CGRectZero];
+    _tintView.userInteractionEnabled = NO;
+    _tintView.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor * _Nonnull(UITraitCollection * _Nonnull trait) {
+        if (trait.userInterfaceStyle == UIUserInterfaceStyleDark) {
+            return [UIColor colorWithWhite:1.0 alpha:0.07];
+        }
+        return [UIColor colorWithWhite:1.0 alpha:0.13];
+    }];
+    [self addSubview:_tintView];
+
+    _rimView = [[UIView alloc] initWithFrame:CGRectZero];
+    _rimView.userInteractionEnabled = NO;
+    _rimView.backgroundColor = UIColor.clearColor;
+    _rimView.layer.cornerCurve = kCACornerCurveContinuous;
+    _rimView.layer.borderWidth = 0.75;
+    _rimView.layer.borderColor = [UIColor colorWithDynamicProvider:^UIColor * _Nonnull(UITraitCollection * _Nonnull trait) {
+        if (trait.userInterfaceStyle == UIUserInterfaceStyleDark) {
+            return [UIColor colorWithWhite:1.0 alpha:0.26];
+        }
+        return [UIColor colorWithWhite:1.0 alpha:0.62];
+    }].CGColor;
+    [self addSubview:_rimView];
+
     self.titleLabel.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightHeavy];
     self.titleLabel.numberOfLines = 2;
     self.titleLabel.textAlignment = NSTextAlignmentCenter;
@@ -85,9 +134,60 @@ typedef NS_OPTIONS(NSUInteger, SBSRelaunchActionOptions) {
     self.titleLabel.minimumScaleFactor = 0.55;
     self.contentEdgeInsets = UIEdgeInsetsMake(10.0, 8.0, 10.0, 8.0);
     [self setTitle:@"Liquid\nAss" forState:UIControlStateNormal];
-    [self setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    [self setTitleColor:[UIColor labelColor] forState:UIControlStateNormal];
     [self addTarget:self action:@selector(handleTouchUpInside) forControlEvents:UIControlEventTouchUpInside];
     return self;
+}
+
+- (void)didMoveToWindow {
+    [super didMoveToWindow];
+    [self refreshGlassBackdrop];
+}
+
+- (void)refreshGlassBackdrop {
+    if (!_glassView || !self.window) return;
+    CGPoint backdropOrigin = CGPointZero;
+    UIImage *backdrop = LG_getHomescreenSnapshot(&backdropOrigin);
+    if (!backdrop) {
+        backdrop = LG_getWallpaperImage(&backdropOrigin);
+    }
+    if (backdrop) {
+        _glassView.wallpaperImage = backdrop;
+        _glassView.wallpaperOrigin = backdropOrigin;
+    }
+    [_glassView updateOrigin];
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGFloat radius = CGRectGetWidth(self.bounds) * 0.5;
+    self.layer.cornerRadius = radius;
+    self.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:self.bounds cornerRadius:radius].CGPath;
+
+    _glassView.frame = self.bounds;
+    _glassView.cornerRadius = radius;
+    _glassView.bezelWidth = 12.0;
+    _glassView.glassThickness = 42.0;
+    _glassView.refractionScale = 1.35;
+    _glassView.refractiveIndex = 1.45;
+    _glassView.specularOpacity = 0.16;
+    _glassView.blur = 2.0;
+    [_glassView updateOrigin];
+
+    _tintView.frame = self.bounds;
+    _tintView.layer.cornerRadius = radius;
+    _tintView.layer.cornerCurve = kCACornerCurveContinuous;
+
+    CGFloat inset = 1.0;
+    _rimView.frame = CGRectInset(self.bounds, inset, inset);
+    _rimView.layer.cornerRadius = MAX(0.0, radius - inset);
+
+    [self sendSubviewToBack:_glassView];
+}
+
+- (void)setHighlighted:(BOOL)highlighted {
+    [super setHighlighted:highlighted];
+    _tintView.alpha = highlighted ? 0.70 : 1.0;
 }
 
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
@@ -111,6 +211,7 @@ typedef NS_OPTIONS(NSUInteger, SBSRelaunchActionOptions) {
     }
     if (!_dragging) return;
     self.center = CGPointMake(_dragStartCenter.x + deltaX, _dragStartCenter.y + deltaY);
+    [_glassView updateOrigin];
 }
 
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
@@ -149,6 +250,7 @@ typedef NS_OPTIONS(NSUInteger, SBSRelaunchActionOptions) {
     targetCenter.y = fmax(minY, fmin(maxY, targetCenter.y));
     void (^animations)(void) = ^{
         self.center = targetCenter;
+        [self->_glassView updateOrigin];
     };
     if (animated) {
         [UIView animateWithDuration:0.22 delay:0.0 usingSpringWithDamping:0.9 initialSpringVelocity:0.0 options:UIViewAnimationOptionCurveEaseOut animations:animations completion:nil];
