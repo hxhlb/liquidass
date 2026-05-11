@@ -9,11 +9,14 @@ void LGTraverseViews(UIView *root, void (^block)(UIView *view));
 UIColor *LGDefaultTintColorForView(UIView *view, CGFloat lightAlpha, CGFloat darkAlpha);
 UIColor *LGDefaultTintColorForViewWithOverrideKey(UIView *view, CGFloat lightAlpha, CGFloat darkAlpha, NSString *overrideKey);
 NSInteger LGPreferredFramesPerSecondForKey(NSString *key, NSInteger minFPS);
+NSInteger LGPreferredLiveCaptureFramesPerSecond(CGFloat framesPerSecond);
 typedef struct {
+    NSInteger activeCount;
+    NSInteger preferredFPS;
+    CFTimeInterval lastTickTimestamp;
+    __strong NSString *enabledPreferenceKey;
     __strong CADisplayLink *link;
     __strong id driver;
-    // Main-thread only. All mutations are expected to happen behind LGAssertMainThread()-guarded helpers.
-    NSInteger activeCount;
 } LGDisplayLinkState;
 UIView *LGEnsureTintOverlayView(UIView *host,
                                 const void *associationKey,
@@ -36,4 +39,10 @@ void LGStopDisplayLink(CADisplayLink *__strong *linkStorage,
 void LGStartDisplayLinkState(LGDisplayLinkState *state,
                              NSInteger preferredFPS,
                              dispatch_block_t tickBlock);
+void LGStartDisplayLinkStateWithPreferenceKey(LGDisplayLinkState *state,
+                                              NSInteger preferredFPS,
+                                              NSString *enabledPreferenceKey,
+                                              dispatch_block_t tickBlock);
 void LGStopDisplayLinkState(LGDisplayLinkState *state);
+void LGDisplayLinkStateDidChangeActivity(LGDisplayLinkState *state);
+void LGSetDisplayLinkStatePreferredFPS(LGDisplayLinkState *state, NSInteger preferredFPS);

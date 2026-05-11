@@ -3,7 +3,7 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = LiquidAssRWB
 
-LiquidAssRWB_FILES = Tweak.x
+LiquidAssRWB_FILES = Tweak.x ../Shared/LGRWBSupport.m
 LiquidAssRWB_CFLAGS = -fobjc-arc
 LiquidAssRWB_FRAMEWORKS = UIKit
 

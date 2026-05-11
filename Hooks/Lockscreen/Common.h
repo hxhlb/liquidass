@@ -8,6 +8,8 @@ void LGInvalidateLockscreenSnapshotCache(void);
 void LGRefreshLockSnapshotAfterDelay(NSTimeInterval delay);
 void LGRemoveLockscreenGlass(UIView *host);
 void LGCleanupLockscreenHost(UIView *host);
+NSArray<UIView *> *LGLockscreenAttachedHosts(void);
+void LGLockscreenRefreshAttachedHosts(void);
 CGFloat LGLockscreenResolvedCornerRadius(UIView *view, CGFloat fallback);
 LiquidGlassView *LGLockscreenEnsureConfiguredGlass(UIView *host,
                                                    CGPoint wallpaperOrigin,
@@ -64,3 +66,4 @@ void LGAttachLockHostIfNeeded(UIView *view);
 void LGDetachLockHostIfNeeded(UIView *view);
 void LGLockscreenRefreshAllHosts(void);
 void LGRefreshBannerPlatterHosts(void);
+void LGRefreshAllClockHosts(void);

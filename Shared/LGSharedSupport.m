@@ -1,6 +1,8 @@
 #import "LGSharedSupport.h"
 #import "LGMetalShaderSource.h"
+#import <objc/runtime.h>
 #import <os/lock.h>
+#import <stdlib.h>
 
 NSString * const LGPrefsDomain = @"dylv.liquidassprefs";
 CFStringRef const LGPrefsChangedNotification = CFSTR("dylv.liquidassprefs/Reload");
@@ -32,8 +34,38 @@ static NSString * const LGPrefsDidReloadInProcessNotification = @"dylv.liquidass
 static NSDictionary<NSString *, id> *sLGCachedPreferences = nil;
 static os_unfair_lock sLGPrefsLock = OS_UNFAIR_LOCK_INIT;
 static dispatch_once_t sLGPrefsSetupOnce;
-static const unsigned long long kLGMaxLogFileBytes = 1024 * 1024;
-static const unsigned long long kLGLogRetentionBytes = 512 * 1024;
+static dispatch_queue_t sLGPrefsWriteQueue;
+static dispatch_queue_t sLGLogQueue;
+static NSFileHandle *sLGLogHandle;
+static NSString * const kLGDynamicDefaultPrefix = @"__dynamic_default.";
+static void *kLGImageStableCacheKeyAssociation = &kLGImageStableCacheKeyAssociation;
+static os_unfair_lock sLGProfileLock = OS_UNFAIR_LOCK_INIT;
+static NSMutableDictionary<NSString *, NSMutableDictionary<NSString *, NSNumber *> *> *sLGProfileStats = nil;
+static NSMutableDictionary<NSString *, NSNumber *> *sLGPendingDynamicDefaultWrites = nil;
+static BOOL sLGDynamicDefaultFlushScheduled = NO;
+static CFTimeInterval sLGProfileWindowStart = 0.0;
+static const CFTimeInterval kLGProfileFlushInterval = 2.0;
+static const CFTimeInterval kLGDynamicDefaultFlushDelay = 0.25;
+
+static void LGCloseLogHandle(void) {
+    if (!sLGLogHandle) return;
+    if (@available(iOS 13.0, *)) {
+        [sLGLogHandle closeAndReturnError:nil];
+    } else {
+        [sLGLogHandle closeFile];
+    }
+    sLGLogHandle = nil;
+}
+
+static void LGCloseLogHandleAtExit(void) {
+    if (!sLGLogQueue) {
+        LGCloseLogHandle();
+        return;
+    }
+    dispatch_sync(sLGLogQueue, ^{
+        LGCloseLogHandle();
+    });
+}
 
 static NSString *LGLogFilePath(void) {
     static NSString *sPath = nil;
@@ -44,27 +76,17 @@ static NSString *LGLogFilePath(void) {
     return sPath;
 }
 
-static void LGPrepareLogFileForProcess(void) {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        NSString *path = LGLogFilePath();
-        if (!path.length) return;
-        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
-    });
-}
-
 static void LGAppendLogLine(NSString *line) {
     NSString *path = LGLogFilePath();
     if (!path.length || !line.length) return;
-    LGPrepareLogFileForProcess();
 
-    static dispatch_queue_t sLogQueue;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        sLogQueue = dispatch_queue_create("dylv.liquidass.logfile", DISPATCH_QUEUE_SERIAL);
+        sLGLogQueue = dispatch_queue_create("dylv.liquidass.logfile", DISPATCH_QUEUE_SERIAL);
+        atexit(LGCloseLogHandleAtExit);
     });
 
-    dispatch_async(sLogQueue, ^{
+    dispatch_async(sLGLogQueue, ^{
         NSFileManager *fm = [NSFileManager defaultManager];
         if (![fm fileExistsAtPath:path]) {
             NSError *createError = nil;
@@ -75,65 +97,29 @@ static void LGAppendLogLine(NSString *line) {
             }
         }
 
-        NSError *handleError = nil;
-        NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
-        if (!handle) {
+        NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
+        if (!data.length) {
+            return;
+        }
+
+        if (!sLGLogHandle) {
+            sLGLogHandle = [NSFileHandle fileHandleForWritingAtPath:path];
+        }
+        if (!sLGLogHandle) {
             NSLog(@"[LiquidAss] log file open failed %@", path);
             return;
         }
 
-        NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
-        if (!data.length) {
-            [handle closeAndReturnError:nil];
-            return;
-        }
-
-        NSDictionary<NSFileAttributeKey, id> *attributes = [fm attributesOfItemAtPath:path error:nil];
-        unsigned long long fileSize = [attributes[NSFileSize] unsignedLongLongValue];
-        if (fileSize + data.length > kLGMaxLogFileBytes) {
-            [handle closeAndReturnError:nil];
-
-            NSError *rewriteError = nil;
-            NSData *existingData = [NSData dataWithContentsOfFile:path options:0 error:&rewriteError];
-            if (!existingData && rewriteError) {
-                NSLog(@"[LiquidAss] log file read failed %@", rewriteError.localizedDescription ?: @"unknown");
-            }
-
-            NSData *retainedData = existingData;
-            if (existingData.length > kLGLogRetentionBytes) {
-                NSRange tailRange = NSMakeRange((NSUInteger)(existingData.length - kLGLogRetentionBytes),
-                                               (NSUInteger)kLGLogRetentionBytes);
-                retainedData = [existingData subdataWithRange:tailRange];
-            }
-            if (![retainedData isKindOfClass:[NSData class]]) {
-                retainedData = NSData.data;
-            }
-
-            NSMutableData *rotatedData = [NSMutableData dataWithCapacity:retainedData.length + data.length];
-            if (retainedData.length) [rotatedData appendData:retainedData];
-            [rotatedData appendData:data];
-
-            NSError *writeError = nil;
-            [rotatedData writeToFile:path options:NSDataWritingAtomic error:&writeError];
-            if (writeError) {
-                NSLog(@"[LiquidAss] log file rotation failed %@", writeError.localizedDescription ?: @"unknown");
-            }
-            return;
-        }
-
+        NSError *handleError = nil;
         if (@available(iOS 13.0, *)) {
-            [handle seekToEndReturningOffset:nil error:&handleError];
+            [sLGLogHandle seekToEndReturningOffset:nil error:&handleError];
             if (!handleError) {
-                [handle writeData:data error:&handleError];
+                [sLGLogHandle writeData:data error:&handleError];
             }
-            NSError *closeError = nil;
-            [handle closeAndReturnError:&closeError];
-            if (!handleError) handleError = closeError;
         } else {
             @try {
-                [handle seekToEndOfFile];
-                [handle writeData:data];
-                [handle closeFile];
+                [sLGLogHandle seekToEndOfFile];
+                [sLGLogHandle writeData:data];
             } @catch (NSException *exception) {
                 handleError = [NSError errorWithDomain:@"dylv.liquidass.logfile"
                                                   code:1
@@ -142,6 +128,7 @@ static void LGAppendLogLine(NSString *line) {
         }
 
         if (handleError) {
+            LGCloseLogHandle();
             NSLog(@"[LiquidAss] log file append failed %@", handleError.localizedDescription ?: @"unknown");
         }
     });
@@ -158,6 +145,39 @@ static NSDictionary<NSString *, id> *LGCopyPreferencesDictionary(void) {
         return @{};
     }
     return dictionary;
+}
+
+static void LGScheduleDynamicDefaultFlush(void) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        sLGPrefsWriteQueue = dispatch_queue_create("dylv.liquidass.prefswrite", DISPATCH_QUEUE_SERIAL);
+    });
+
+    dispatch_async(sLGPrefsWriteQueue, ^{
+        if (sLGDynamicDefaultFlushScheduled) return;
+        sLGDynamicDefaultFlushScheduled = YES;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kLGDynamicDefaultFlushDelay * NSEC_PER_SEC)),
+                       sLGPrefsWriteQueue, ^{
+            NSDictionary<NSString *, NSNumber *> *pending = [sLGPendingDynamicDefaultWrites copy];
+            sLGPendingDynamicDefaultWrites = nil;
+            sLGDynamicDefaultFlushScheduled = NO;
+            if (!pending.count) return;
+
+            for (NSString *key in pending) {
+                NSNumber *value = pending[key];
+                if (!key.length || !value) continue;
+                CFPreferencesSetAppValue((__bridge CFStringRef)key,
+                                         (__bridge CFPropertyListRef)value,
+                                         (__bridge CFStringRef)LGPrefsDomain);
+            }
+            CFPreferencesAppSynchronize((__bridge CFStringRef)LGPrefsDomain);
+        });
+    });
+}
+
+static NSString *LGDynamicDefaultKey(NSString *key) {
+    if (!key.length) return nil;
+    return [kLGDynamicDefaultPrefix stringByAppendingString:key];
 }
 
 static void LGPreferencesChanged(CFNotificationCenterRef center,
@@ -226,7 +246,7 @@ NSArray<UIWindow *> *LGApplicationWindows(UIApplication *app) {
         return windows;
     }
 
-    NSArray<UIWindow *> *windows = app.windows;
+    NSArray<UIWindow *> *windows = LGApplicationWindows(app);
     return [windows isKindOfClass:[NSArray class]] ? windows : @[];
 }
 
@@ -254,10 +274,21 @@ void LGObservePreferenceChanges(dispatch_block_t block) {
 static id LGPreferenceValue(NSString *key) {
     if (!key.length) return nil;
     LGEnsurePreferenceCacheInitialized();
+    NSDictionary<NSString *, id> *preferences = nil;
     os_unfair_lock_lock(&sLGPrefsLock);
-    id value = sLGCachedPreferences[key];
+    preferences = sLGCachedPreferences;
     os_unfair_lock_unlock(&sLGPrefsLock);
-    return value;
+    return preferences[key];
+}
+
+BOOL LGHasExplicitPreferenceValue(NSString *key) {
+    if (!key.length) return NO;
+    LGEnsurePreferenceCacheInitialized();
+    NSDictionary<NSString *, id> *preferences = nil;
+    os_unfair_lock_lock(&sLGPrefsLock);
+    preferences = sLGCachedPreferences;
+    os_unfair_lock_unlock(&sLGPrefsLock);
+    return preferences[key] != nil;
 }
 
 BOOL LG_prefBool(NSString *key, BOOL fallback) {
@@ -284,8 +315,45 @@ NSString *LG_prefString(NSString *key, NSString *fallback) {
     return fallback;
 }
 
+CGFloat LGDynamicDefaultFloat(NSString *key, CGFloat fallback) {
+    NSString *dynamicKey = LGDynamicDefaultKey(key);
+    if (!dynamicKey.length) return fallback;
+    return LG_prefFloat(dynamicKey, fallback);
+}
+
+void LGCacheDynamicDefaultFloat(NSString *key, CGFloat value) {
+    if (!key.length) return;
+    if (!isfinite(value) || value <= 0.0) return;
+
+    NSString *dynamicKey = LGDynamicDefaultKey(key);
+    if (!dynamicKey.length) return;
+
+    CGFloat existing = LG_prefFloat(dynamicKey, -1.0);
+    if (fabs(existing - value) <= 0.01) return;
+
+    NSNumber *boxedValue = @(value);
+    os_unfair_lock_lock(&sLGPrefsLock);
+    NSMutableDictionary<NSString *, id> *mutablePrefs = [sLGCachedPreferences mutableCopy] ?: [NSMutableDictionary dictionary];
+    mutablePrefs[dynamicKey] = boxedValue;
+    sLGCachedPreferences = [mutablePrefs copy];
+    os_unfair_lock_unlock(&sLGPrefsLock);
+
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        sLGPrefsWriteQueue = dispatch_queue_create("dylv.liquidass.prefswrite", DISPATCH_QUEUE_SERIAL);
+    });
+    dispatch_async(sLGPrefsWriteQueue, ^{
+        if (!sLGPendingDynamicDefaultWrites) {
+            sLGPendingDynamicDefaultWrites = [NSMutableDictionary dictionary];
+        }
+        sLGPendingDynamicDefaultWrites[dynamicKey] = boxedValue;
+        LGScheduleDynamicDefaultFlush();
+    });
+}
+
 NSString *LGDefaultRenderingModeForKey(NSString *key) {
-    if ([key isEqualToString:@"Banner.RenderingMode"]) {
+    if ([key isEqualToString:@"Banner.RenderingMode"] ||
+        [key isEqualToString:@"ControlCenter.RenderingMode"]) {
         return LGRenderingModeLiveCapture;
     }
     return LGRenderingModeSnapshot;
@@ -324,6 +392,79 @@ void LGAssertMainThread(void) {
     NSCAssert([NSThread isMainThread], @"liquidass main thread only");
 }
 
+BOOL LGProfilingEnabled(void) {
+    return LG_prefBool(@"DebugProfiling.Enabled", NO);
+}
+
+CFTimeInterval LGProfileBegin(void) {
+    if (!LGProfilingEnabled()) return 0.0;
+    return CACurrentMediaTime();
+}
+
+void LGProfileEnd(NSString *key, CFTimeInterval startTime) {
+    if (startTime <= 0.0 || !key.length || !LGProfilingEnabled()) return;
+
+    CFTimeInterval now = CACurrentMediaTime();
+    CFTimeInterval elapsed = now - startTime;
+    if (elapsed < 0.0) elapsed = 0.0;
+
+    NSDictionary<NSString *, NSDictionary<NSString *, NSNumber *> *> *snapshot = nil;
+    CFTimeInterval windowDuration = 0.0;
+
+    os_unfair_lock_lock(&sLGProfileLock);
+    if (!sLGProfileStats) {
+        sLGProfileStats = [NSMutableDictionary dictionary];
+    }
+    if (sLGProfileWindowStart <= 0.0) {
+        sLGProfileWindowStart = now;
+    }
+
+    NSMutableDictionary<NSString *, NSNumber *> *bucket = sLGProfileStats[key];
+    if (!bucket) {
+        bucket = [@{@"count": @0, @"total": @0.0, @"max": @0.0} mutableCopy];
+        sLGProfileStats[key] = bucket;
+    }
+
+    NSUInteger count = bucket[@"count"].unsignedIntegerValue + 1;
+    double total = bucket[@"total"].doubleValue + elapsed;
+    double maxValue = MAX(bucket[@"max"].doubleValue, elapsed);
+    bucket[@"count"] = @(count);
+    bucket[@"total"] = @(total);
+    bucket[@"max"] = @(maxValue);
+
+    windowDuration = now - sLGProfileWindowStart;
+    if (windowDuration >= kLGProfileFlushInterval && sLGProfileStats.count > 0) {
+        snapshot = [sLGProfileStats copy];
+        [sLGProfileStats removeAllObjects];
+        sLGProfileWindowStart = now;
+    }
+    os_unfair_lock_unlock(&sLGProfileLock);
+
+    if (!snapshot.count || windowDuration <= 0.0) return;
+
+    NSArray<NSString *> *sortedKeys = [snapshot keysSortedByValueUsingComparator:^NSComparisonResult(NSDictionary<NSString *, NSNumber *> *lhs,
+                                                                                                     NSDictionary<NSString *, NSNumber *> *rhs) {
+        return [rhs[@"total"] compare:lhs[@"total"]];
+    }];
+    NSMutableArray<NSString *> *parts = [NSMutableArray arrayWithCapacity:sortedKeys.count];
+    for (NSString *bucketKey in sortedKeys) {
+        NSDictionary<NSString *, NSNumber *> *stats = snapshot[bucketKey];
+        double totalMs = stats[@"total"].doubleValue * 1000.0;
+        double maxMs = stats[@"max"].doubleValue * 1000.0;
+        NSUInteger countValue = stats[@"count"].unsignedIntegerValue;
+        double avgMs = countValue > 0 ? totalMs / (double)countValue : 0.0;
+        double cps = windowDuration > 0.0 ? (double)countValue / windowDuration : 0.0;
+        [parts addObject:[NSString stringWithFormat:@"%@ avg=%.2fms max=%.2fms count=%lu cps=%.1f total=%.2fms",
+                          bucketKey,
+                          avgMs,
+                          maxMs,
+                          (unsigned long)countValue,
+                          cps,
+                          totalMs]];
+    }
+    LGLog(@"profile window=%.2fs %@", windowDuration, [parts componentsJoinedByString:@" | "]);
+}
+
 CGColorSpaceRef LGSharedRGBColorSpace(void) {
     static CGColorSpaceRef sColorSpace = nil;
     static dispatch_once_t onceToken;
@@ -351,6 +492,19 @@ NSNumber *LGTextureScaleKey(CGFloat scale) {
 NSNumber *LGBlurSettingKey(CGFloat blur) {
     NSInteger milli = (NSInteger)lrint(fmax(0.0, blur) * 1000.0);
     return @(MAX(milli, 0));
+}
+
+NSString *LGImageStableCacheKey(UIImage *image) {
+    if (!image) return nil;
+    return objc_getAssociatedObject(image, kLGImageStableCacheKeyAssociation);
+}
+
+void LGSetImageStableCacheKey(UIImage *image, NSString *cacheKey) {
+    if (!image) return;
+    objc_setAssociatedObject(image,
+                             kLGImageStableCacheKeyAssociation,
+                             [cacheKey copy],
+                             OBJC_ASSOCIATION_COPY_NONATOMIC);
 }
 
 @implementation LGTextureCacheEntry
@@ -505,27 +659,4 @@ id<MTLRenderPipelineState> LGCreateGlassRenderPipeline(id<MTLDevice> device,
     color.sourceAlphaBlendFactor = MTLBlendFactorOne;
     color.destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
     return [device newRenderPipelineStateWithDescriptor:descriptor error:error];
-}
-
-BOOL LGCreateGlassBlurPipelines(id<MTLDevice> device,
-                                id<MTLLibrary> library,
-                                id<MTLComputePipelineState> __strong *outHorizontal,
-                                id<MTLComputePipelineState> __strong *outVertical,
-                                NSError **error) {
-    if (outHorizontal) *outHorizontal = nil;
-    if (outVertical) *outVertical = nil;
-    if (!device || !library) return NO;
-
-    id<MTLFunction> blurH = [library newFunctionWithName:@"blurH"];
-    id<MTLFunction> blurV = [library newFunctionWithName:@"blurV"];
-    if (!blurH || !blurV) return NO;
-
-    id<MTLComputePipelineState> horizontal = [device newComputePipelineStateWithFunction:blurH error:error];
-    if (!horizontal) return NO;
-    id<MTLComputePipelineState> vertical = [device newComputePipelineStateWithFunction:blurV error:error];
-    if (!vertical) return NO;
-
-    if (outHorizontal) *outHorizontal = horizontal;
-    if (outVertical) *outVertical = vertical;
-    return YES;
 }

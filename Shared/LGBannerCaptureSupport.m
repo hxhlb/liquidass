@@ -42,6 +42,25 @@ void LGLog(NSString *format, ...);
 
 @end
 
+static CGFloat LGLiveCaptureScaleForRect(CGRect captureRect, CGFloat screenScale) {
+    CGFloat configuredScale = LG_prefFloat(@"LiveCapture.ScaleFactor", 0.35);
+    CGFloat minimumScale = LG_prefFloat(@"LiveCapture.MinimumScale", 0.55);
+    CGFloat maximumScale = LG_prefFloat(@"LiveCapture.MaximumScale", 1.0);
+    CGFloat maximumPixels = LG_prefFloat(@"LiveCapture.MaximumPixels", 180000.0);
+
+    CGFloat captureScale = screenScale * MAX(0.1, configuredScale);
+    captureScale = MIN(MAX(captureScale, MAX(0.1, minimumScale)), MAX(0.1, maximumScale));
+
+    CGFloat width = CGRectGetWidth(captureRect);
+    CGFloat height = CGRectGetHeight(captureRect);
+    CGFloat estimatedPixels = width * height * captureScale * captureScale;
+    if (maximumPixels > 1000.0 && estimatedPixels > maximumPixels) {
+        captureScale *= sqrt(maximumPixels / estimatedPixels);
+        captureScale = MAX(0.1, captureScale);
+    }
+    return captureScale;
+}
+
 void LGRemoveLiveBackdropCaptureView(UIView *host, const void *associationKey) {
     LGAssertMainThread();
     if (!host || !associationKey) return;
@@ -102,18 +121,27 @@ BOOL LGCaptureLiveBackdropTextureForHost(UIView *host,
     }
 
     backdropView.frame = captureRect;
-    if (backdropView.superview != superview) {
-        [superview insertSubview:backdropView belowSubview:host];
-    } else {
-        NSInteger hostIndex = [superview.subviews indexOfObjectIdenticalTo:host];
-        NSInteger backdropIndex = [superview.subviews indexOfObjectIdenticalTo:backdropView];
-        if (hostIndex != NSNotFound && backdropIndex != NSNotFound && backdropIndex >= hostIndex) {
+    @try {
+        if (backdropView.superview != superview) {
             [superview insertSubview:backdropView belowSubview:host];
+        } else {
+            NSInteger hostIndex = [superview.subviews indexOfObjectIdenticalTo:host];
+            NSInteger backdropIndex = [superview.subviews indexOfObjectIdenticalTo:backdropView];
+            if (hostIndex != NSNotFound && backdropIndex != NSNotFound && backdropIndex >= hostIndex) {
+                [superview insertSubview:backdropView belowSubview:host];
+            }
         }
+    } @catch (NSException *exception) {
+        LGDebugLog(@"live capture bail reason=insert-exception host=%@ superview=%@ exception=%@",
+                   NSStringFromClass(host.class),
+                   NSStringFromClass(superview.class),
+                   exception.reason ?: exception.name);
+        [backdropView removeFromSuperview];
+        return NO;
     }
 
     CGFloat screenScale = host.window.screen.scale ?: UIScreen.mainScreen.scale ?: 2.0f;
-    CGFloat captureScale = MAX(0.7f, MIN(screenScale, screenScale * 0.5f));
+    CGFloat captureScale = LGLiveCaptureScaleForRect(captureRect, screenScale);
     size_t pixelWidth = MAX((size_t)1, (size_t)lrint(CGRectGetWidth(captureRect) * captureScale));
     size_t pixelHeight = MAX((size_t)1, (size_t)lrint(CGRectGetHeight(captureRect) * captureScale));
 
@@ -217,4 +245,29 @@ BOOL LGApplyRenderingModeToGlassHost(UIView *host,
                NSStringFromCGPoint(snapshotOrigin),
                NSStringFromCGSize(snapshot.size));
     return YES;
+}
+
+BOOL LGShouldRefreshLiveCaptureForHost(UIView *host,
+                                       NSString *renderingModeKey,
+                                       const void *lastCaptureTimeKey,
+                                       CGFloat framesPerSecond,
+                                       BOOL hadGlass) {
+    if (!host || !renderingModeKey.length || !lastCaptureTimeKey) return YES;
+    if (!LG_prefersLiveCapture(renderingModeKey)) return YES;
+    if (!hadGlass) return YES;
+
+    CGFloat fps = MAX(1.0, framesPerSecond);
+    NSNumber *lastCaptureNumber = objc_getAssociatedObject(host, lastCaptureTimeKey);
+    if (!lastCaptureNumber) return YES;
+
+    CFTimeInterval now = CACurrentMediaTime();
+    return (now - lastCaptureNumber.doubleValue) >= (1.0 / fps);
+}
+
+void LGMarkLiveCaptureRefreshedForHost(UIView *host, const void *lastCaptureTimeKey) {
+    if (!host || !lastCaptureTimeKey) return;
+    objc_setAssociatedObject(host,
+                             lastCaptureTimeKey,
+                             @(CACurrentMediaTime()),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }

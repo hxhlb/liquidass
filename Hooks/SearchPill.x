@@ -32,14 +32,16 @@ static BOOL LGIsHomescreenSearchPillMaterialView(UIView *view) {
 }
 
 static CGFloat LGSearchPillCornerRadius(void) {
-    return LG_prefFloat(@"SearchPill.CornerRadius", 15.0);
+    return LGDynamicDefaultFloat(@"SearchPill.CornerRadius", 15.0);
 }
 
 static void LGSearchPillRememberOriginalState(UIView *view) {
     if (!objc_getAssociatedObject(view, kSearchPillOriginalAlphaKey))
         objc_setAssociatedObject(view, kSearchPillOriginalAlphaKey, @(view.alpha), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    if (!objc_getAssociatedObject(view, kSearchPillOriginalCornerRadiusKey))
+    if (!objc_getAssociatedObject(view, kSearchPillOriginalCornerRadiusKey)) {
         objc_setAssociatedObject(view, kSearchPillOriginalCornerRadiusKey, @(view.layer.cornerRadius), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        LGCacheDynamicDefaultFloat(@"SearchPill.CornerRadius", view.layer.cornerRadius);
+    }
     if (!objc_getAssociatedObject(view, kSearchPillOriginalClipsKey))
         objc_setAssociatedObject(view, kSearchPillOriginalClipsKey, @(view.clipsToBounds), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
@@ -106,10 +108,15 @@ static void LGSearchPillEnsureTintOverlay(UIView *host) {
 }
 
 static void LGSearchPillInject(UIView *host) {
-    if (!LGIsHomescreenSearchPillMaterialView(host)) return;
+    CFTimeInterval profileStart = LGProfileBegin();
+    if (!LGIsHomescreenSearchPillMaterialView(host)) {
+        LGProfileEnd(@"search_pill.inject", profileStart);
+        return;
+    }
     if (!host.window || !LGSearchPillEnabled()) {
         LGRemoveSearchPillGlass(host);
         LGSearchPillRestoreOriginalState(host);
+        LGProfileEnd(@"search_pill.inject", profileStart);
         return;
     }
 
@@ -117,6 +124,7 @@ static void LGSearchPillInject(UIView *host) {
     if (!snapshot && !LG_prefersLiveCapture(@"SearchPill.RenderingMode")) {
         LG_refreshHomescreenSnapshot();
         LGSearchPillScheduleRetry(host);
+        LGProfileEnd(@"search_pill.inject", profileStart);
         return;
     }
 
@@ -152,9 +160,11 @@ static void LGSearchPillInject(UIView *host) {
                                          snapshot,
                                          CGPointZero)) {
         LGSearchPillScheduleRetry(host);
+        LGProfileEnd(@"search_pill.inject", profileStart);
         return;
     }
     objc_setAssociatedObject(host, kSearchPillRetryKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    LGProfileEnd(@"search_pill.inject", profileStart);
 }
 
 %group LGSearchPillSpringBoard

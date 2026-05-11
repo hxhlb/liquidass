@@ -3,8 +3,40 @@
 #import "LGPrefsUIHelpers.h"
 #import "LGPrefsLiquidSlider.h"
 #import "LGPrefsLiquidSwitch.h"
+#import "../Shared/LGRWBSupport.h"
 #import "../Shared/LGSharedSupport.h"
 #import <objc/runtime.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+
+static NSURL *LGTemporaryPreferencesExportURL(void) {
+    NSString *filename = [NSString stringWithFormat:@"liquidass-preferences-%@.json",
+                          [[NSUUID UUID].UUIDString lowercaseString]];
+    return [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:filename]];
+}
+
+static void *kLGPanelItemKey = &kLGPanelItemKey;
+
+static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
+    NSString *visibleKey = item[@"visible_key"];
+    NSArray *visibleValues = item[@"visible_values"];
+    if (!visibleKey.length || visibleValues.count == 0) return YES;
+
+    id fallback = item[@"visible_default"];
+    id storedValue = LGReadPreferenceObject(visibleKey, fallback);
+    NSString *currentValue = nil;
+    if ([storedValue isKindOfClass:[NSString class]]) {
+        currentValue = storedValue;
+    } else if ([storedValue respondsToSelector:@selector(stringValue)]) {
+        currentValue = [storedValue stringValue];
+    } else if ([storedValue respondsToSelector:@selector(description)]) {
+        currentValue = [storedValue description];
+    }
+    if (!currentValue.length && [fallback isKindOfClass:[NSString class]]) {
+        currentValue = fallback;
+    }
+    if (!currentValue.length) return NO;
+    return [visibleValues containsObject:currentValue];
+}
 
 @implementation LGPSurfaceController {
     NSString *_screenTitle;
@@ -21,6 +53,76 @@
     UIView *_scrollTopButton;
     NSLayoutConstraint *_scrollTopBottomConstraint;
     BOOL _scrollTopButtonVisible;
+}
+
+- (void)updateVisibleValueControlledItemsAnimated:(BOOL)animated {
+    for (UIView *panel in _contentStack.arrangedSubviews) {
+        UIStackView *stack = nil;
+        for (UIView *subview in panel.subviews) {
+            if ([subview isKindOfClass:[UIStackView class]]) {
+                stack = (UIStackView *)subview;
+                break;
+            }
+        }
+        if (!stack) continue;
+
+        NSArray<UIView *> *arrangedSubviews = stack.arrangedSubviews;
+        BOOL hasPanelItems = NO;
+        for (UIView *subview in arrangedSubviews) {
+            if (objc_getAssociatedObject(subview, kLGPanelItemKey) != nil) {
+                hasPanelItems = YES;
+                break;
+            }
+        }
+        if (!hasPanelItems) continue;
+
+        for (UIView *subview in arrangedSubviews) {
+            NSDictionary *item = objc_getAssociatedObject(subview, kLGPanelItemKey);
+            if (!item) continue;
+            BOOL visible = LGItemVisibleForCurrentPreferences(item);
+            void (^changes)(void) = ^{
+                subview.hidden = !visible;
+                subview.alpha = visible ? 1.0 : 0.0;
+            };
+            if (animated) {
+                [UIView animateWithDuration:0.16
+                                      delay:0.0
+                                    options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionAllowUserInteraction
+                                 animations:changes
+                                 completion:nil];
+            } else {
+                changes();
+            }
+        }
+
+        NSArray<UIView *> *visibleBodies = [arrangedSubviews filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(UIView *evaluatedObject, NSDictionary *bindings) {
+            (void)bindings;
+            return objc_getAssociatedObject(evaluatedObject, kLGPanelItemKey) != nil && !evaluatedObject.hidden;
+        }]];
+
+        for (NSUInteger i = 0; i < arrangedSubviews.count; i++) {
+            UIView *subview = arrangedSubviews[i];
+            if (objc_getAssociatedObject(subview, kLGPanelItemKey) != nil) continue;
+            BOOL previousVisible = NO;
+            BOOL nextVisible = NO;
+            for (NSInteger left = (NSInteger)i - 1; left >= 0; left--) {
+                UIView *candidate = arrangedSubviews[(NSUInteger)left];
+                if (objc_getAssociatedObject(candidate, kLGPanelItemKey) != nil) {
+                    previousVisible = !candidate.hidden;
+                    break;
+                }
+            }
+            for (NSUInteger right = i + 1; right < arrangedSubviews.count; right++) {
+                UIView *candidate = arrangedSubviews[right];
+                if (objc_getAssociatedObject(candidate, kLGPanelItemKey) != nil) {
+                    nextVisible = !candidate.hidden;
+                    break;
+                }
+            }
+            BOOL visible = previousVisible && nextVisible && visibleBodies.count > 1;
+            subview.hidden = !visible;
+        }
+    }
 }
 
 - (void)reloadLocalizedContent {
@@ -49,6 +151,11 @@
         _screenSubtitle = [LGLocalized(@"prefs.misc.experimental.subtitle") copy];
         _accentColor = [UIColor systemOrangeColor];
         _items = [LGExperimentalItems() copy];
+    } else if ([_screenIdentifier isEqualToString:@"LiveCapture"]) {
+        _screenTitle = [LGLocalized(@"prefs.misc.live_capture.title") copy];
+        _screenSubtitle = [LGLocalized(@"prefs.misc.live_capture.subtitle") copy];
+        _accentColor = [UIColor systemTealColor];
+        _items = [LGLiveCaptureItems() copy];
     }
     self.title = _screenTitle;
 }
@@ -73,9 +180,9 @@
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
     [self configureCustomBackButton];
-    self.navigationItem.rightBarButtonItem = LGMakeResetTextItem(self, @selector(handleResetPressed));
+    self.navigationItem.rightBarButtonItem = LGMakeTextBarButtonItem(LGLocalized(@"prefs.button.reset"), self, @selector(handleResetPressed));
     [self applyNavigationBarStyle];
-    LGInstallScrollableStack(self, 24.0, 12.0, &_scrollView, &_contentStack);
+    LGInstallScrollableStack(self, 23.25, 12.0, &_scrollView, &_contentStack);
     _scrollView.delegate = self;
     LGInstallBottomRespringBar(self, &_respringBar);
     _scrollTopButton = [self makeScrollTopButton];
@@ -108,10 +215,16 @@
     if (_screenIdentifier.length) {
         LGSetLastSurfaceIdentifier(_screenIdentifier);
     }
+    LGRefreshCircularBackItem(self.navigationItem.leftBarButtonItem);
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    LGRefreshCircularBackItem(self.navigationItem.leftBarButtonItem);
 }
 
 - (void)configureCustomBackButton {
@@ -129,7 +242,37 @@
 }
 
 - (void)handleResetPressed {
-    LGPresentResetConfirmation(self);
+    LGPresentResetConfirmationWithBody(self, [self resetConfirmationBodyText], @selector(performAnimatedSurfacePreferenceReset));
+}
+
+- (void)performAnimatedPreferenceReset {
+    [self animateVisibleControlsToDefaults];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.67 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        LGResetAllPreferences();
+    });
+}
+
+- (NSArray<NSString *> *)currentPreferenceKeys {
+    NSMutableOrderedSet<NSString *> *keys = [NSMutableOrderedSet orderedSet];
+    for (NSDictionary *item in _items) {
+        NSString *key = item[@"key"];
+        if (!key.length) continue;
+        [keys addObject:key];
+    }
+    return keys.array;
+}
+
+- (NSString *)resetConfirmationBodyText {
+    NSString *scope = _screenTitle.length ? _screenTitle.lowercaseString : LGLocalized(@"prefs.button.reset");
+    return [NSString stringWithFormat:LGLocalized(@"prefs.reset_confirm.surface_body_format"), scope];
+}
+
+- (void)performAnimatedSurfacePreferenceReset {
+    [self animateVisibleControlsToDefaults];
+    NSArray<NSString *> *keys = [self currentPreferenceKeys];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.67 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        LGResetPreferencesForKeys(keys);
+    });
 }
 
 - (void)handleRespringPressed {
@@ -152,8 +295,113 @@
     [self.navigationController pushViewController:controller animated:YES];
 }
 
+- (void)openLiveCaptureConfiguration {
+    LGPSurfaceController *controller = [[LGPSurfaceController alloc] initWithTitle:LGLocalized(@"prefs.misc.live_capture.title")
+                                                                          subtitle:LGLocalized(@"prefs.misc.live_capture.subtitle")
+                                                                         tintColor:[UIColor systemTealColor]
+                                                                        identifier:@"LiveCapture"
+                                                                             items:LGLiveCaptureItems()];
+    [self.navigationController pushViewController:controller animated:YES];
+}
+
 - (void)invalidateSnapshotCaches {
     LGPresentInvalidateCachesConfirmation(self);
+}
+
+- (void)exportPreferences {
+    NSString *jsonString = LGExportPreferencesJSONString();
+    if (!jsonString.length) {
+        LGPresentInfoSheet(self,
+                           LGLocalized(@"prefs.misc.export_prefs.title"),
+                           LGLocalized(@"prefs.export_prefs.error"));
+        return;
+    }
+
+    NSURL *exportURL = LGTemporaryPreferencesExportURL();
+    NSError *writeError = nil;
+    if (![jsonString writeToURL:exportURL atomically:YES encoding:NSUTF8StringEncoding error:&writeError]) {
+        LGPresentInfoSheet(self,
+                           LGLocalized(@"prefs.misc.export_prefs.title"),
+                           writeError.localizedDescription ?: LGLocalized(@"prefs.export_prefs.error"));
+        return;
+    }
+
+    UIActivityViewController *activityController =
+        [[UIActivityViewController alloc] initWithActivityItems:@[exportURL] applicationActivities:nil];
+    if (activityController.popoverPresentationController) {
+        activityController.popoverPresentationController.sourceView = self.view;
+        activityController.popoverPresentationController.sourceRect =
+            CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 1.0, 1.0);
+    }
+    [self presentViewController:activityController animated:YES completion:nil];
+}
+
+- (void)importPreferences {
+    UIDocumentPickerViewController *picker =
+        [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON]];
+    picker.delegate = self;
+    picker.allowsMultipleSelection = NO;
+    [self presentViewController:picker animated:YES completion:nil];
+}
+
+- (void)editThirdPartyAppRWB {
+    NSString *existing = [LGReadPreferenceObject(@"RWB.ThirdPartyBundleIDs", LGRWBDefaultWidgetBundleIDsText()) isKindOfClass:[NSString class]]
+        ? LGReadPreferenceObject(@"RWB.ThirdPartyBundleIDs", LGRWBDefaultWidgetBundleIDsText())
+        : LGRWBDefaultWidgetBundleIDsText();
+    LGPresentMultilineTextInputSheet(self,
+                                     LGLocalized(@"prefs.misc.rwb_third_party.title"),
+                                     LGLocalized(@"prefs.misc.rwb_third_party.editor_body"),
+                                     existing,
+                                     LGLocalized(@"prefs.misc.rwb_third_party.placeholder"),
+                                     ^(NSString *text) {
+        NSMutableOrderedSet<NSString *> *lines = [NSMutableOrderedSet orderedSet];
+        [[text componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]] enumerateObjectsUsingBlock:^(NSString *rawLine, NSUInteger idx, BOOL *stop) {
+            (void)idx;
+            (void)stop;
+            NSString *line = [rawLine stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (!line.length) return;
+            [lines addObject:line];
+        }];
+        NSString *normalized = [[lines array] componentsJoinedByString:@"\n"];
+        if (normalized.length) {
+            LGWritePreferenceObject(@"RWB.ThirdPartyBundleIDs", normalized);
+        } else {
+            LGRemovePreference(@"RWB.ThirdPartyBundleIDs");
+        }
+    });
+}
+
+- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    (void)controller;
+    NSURL *url = urls.firstObject;
+    if (!url) return;
+
+    BOOL scoped = [url startAccessingSecurityScopedResource];
+    NSError *readError = nil;
+    NSString *jsonString = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:&readError];
+    if (scoped) [url stopAccessingSecurityScopedResource];
+
+    if (!jsonString.length) {
+        LGPresentInfoSheet(self,
+                           LGLocalized(@"prefs.misc.import_prefs.title"),
+                           readError.localizedDescription ?: LGLocalized(@"prefs.import_prefs.error_read"));
+        return;
+    }
+
+    NSError *error = nil;
+    if (!LGImportPreferencesJSONString(jsonString, &error)) {
+        LGPresentInfoSheet(self,
+                           LGLocalized(@"prefs.misc.import_prefs.title"),
+                           error.localizedDescription ?: LGLocalized(@"prefs.import_prefs.error_invalid"));
+        return;
+    }
+
+    [self reloadLocalizedContent];
+    [self reloadVisibleSettings];
+    [self updateRespringBarAnimated:NO];
+    LGPresentInfoSheet(self,
+                       LGLocalized(@"prefs.misc.import_prefs.title"),
+                       LGLocalized(@"prefs.import_prefs.success"));
 }
 
 - (void)dealloc {
@@ -252,8 +500,11 @@
     [button setImage:[UIImage systemImageNamed:@"chevron.up" withConfiguration:config] forState:UIControlStateNormal];
     button.tintColor = [UIColor labelColor];
     button.semanticContentAttribute = UISemanticContentAttributeForceRightToLeft;
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wdeprecated-declarations"
     button.contentEdgeInsets = UIEdgeInsetsMake(0.0, 12.0, 0.0, 12.0);
     button.imageEdgeInsets = UIEdgeInsetsMake(0.0, 6.0, 0.0, -6.0);
+    #pragma clang diagnostic pop
     [button addTarget:self action:@selector(handleScrollTopPressed) forControlEvents:UIControlEventTouchUpInside];
     [blurView.contentView addSubview:button];
 
@@ -357,6 +608,17 @@
         NSDictionary *item = _items[index];
         NSString *type = item[@"type"];
         if ([type isEqualToString:@"section"]) {
+            NSString *sectionTitle = item[@"title"] ?: @"";
+            NSString *sectionSubtitle = item[@"subtitle"] ?: @"";
+            if (!sectionTitle.length && !sectionSubtitle.length) {
+                UIView *spacer = [[UIView alloc] initWithFrame:CGRectZero];
+                spacer.backgroundColor = UIColor.clearColor;
+                spacer.translatesAutoresizingMaskIntoConstraints = NO;
+                [spacer.heightAnchor constraintEqualToConstant:18.0].active = YES;
+                [_contentStack addArrangedSubview:spacer];
+                index += 1;
+                continue;
+            }
             [_contentStack addArrangedSubview:[self sectionViewForItem:item]];
             NSMutableArray<NSDictionary *> *groupItems = [NSMutableArray array];
             index += 1;
@@ -379,6 +641,7 @@
             [self appendSurfaceGroupItems:groupItems];
         }
     }
+    [self updateVisibleValueControlledItemsAnimated:NO];
     [self updateScrollTopButtonAnimated:NO];
 }
 
@@ -548,7 +811,10 @@
         button.backgroundColor = [_accentColor colorWithAlphaComponent:(self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark ? 0.16 : 0.10)];
         button.layer.cornerRadius = 19.0;
         button.layer.cornerCurve = kCACornerCurveContinuous;
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wdeprecated-declarations"
         button.contentEdgeInsets = UIEdgeInsetsMake(0.0, 14.0, 0.0, 14.0);
+        #pragma clang diagnostic pop
         [button.heightAnchor constraintEqualToConstant:38.0].active = YES;
         [button addTarget:self action:@selector(handleJumpChipPressed:) forControlEvents:UIControlEventTouchUpInside];
         objc_setAssociatedObject(button, @selector(handleJumpChipPressed:), title, OBJC_ASSOCIATION_COPY_NONATOMIC);
@@ -602,6 +868,7 @@
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView {
     if (scrollView == _scrollView) {
         [self updateScrollTopButtonAnimated:YES];
+        LGRefreshCircularBackItem(self.navigationItem.leftBarButtonItem);
     }
 }
 
@@ -705,7 +972,8 @@
             LGWritePreferenceAndMaybeRequireRespring(item[@"key"], @(sender.isOn));
             [self handleRespringStateChanged:nil];
         }
-        if ([item[@"key"] isEqualToString:@"Tint.Override.PerSurfaceEnabled"]) {
+        if ([item[@"key"] isEqualToString:@"Tint.Override.PerSurfaceEnabled"] ||
+            [item[@"key"] isEqualToString:@"DisplayLink.PerSurfaceEnabled"]) {
             [self reloadLocalizedContent];
             [self reloadVisibleSettings];
         }
@@ -828,6 +1096,9 @@
                                                    currentValue:selectedValue
                                                      menuButton:strongMenuButton
                                                     titleUpdate:applyMenuSelectionTitle];
+                if ([item[@"reload_on_change"] boolValue]) {
+                    [strongSelf updateVisibleValueControlledItemsAnimated:YES];
+                }
                 [strongSelf updateRespringBarAnimated:YES];
             }
         }];
@@ -852,7 +1123,11 @@
     menuButton.showsMenuAsPrimaryAction = YES;
     menuButton.tintColor = _accentColor;
     menuButton.titleLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wdeprecated-declarations"
     menuButton.contentEdgeInsets = UIEdgeInsetsMake(4.0, 8.0, 4.0, 8.0);
+    menuButton.imageEdgeInsets = UIEdgeInsetsMake(0.0, 6.0, 0.0, -6.0);
+    #pragma clang diagnostic pop
     menuButton.backgroundColor = UIColor.clearColor;
     menuButton.layer.cornerRadius = 0.0;
 
@@ -874,7 +1149,6 @@
         [menuButton setTitle:selectedTitle forState:UIControlStateNormal];
         [menuButton setImage:[UIImage systemImageNamed:@"chevron.down"] forState:UIControlStateNormal];
         menuButton.semanticContentAttribute = UISemanticContentAttributeForceRightToLeft;
-        menuButton.imageEdgeInsets = UIEdgeInsetsMake(0.0, 6.0, 0.0, -6.0);
     }
 
     __weak typeof(self) weakSelf = self;
@@ -1008,7 +1282,10 @@
     button.translatesAutoresizingMaskIntoConstraints = NO;
     button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentFill;
     button.contentVerticalAlignment = UIControlContentVerticalAlignmentFill;
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wdeprecated-declarations"
     button.contentEdgeInsets = UIEdgeInsetsZero;
+    #pragma clang diagnostic pop
     NSString *actionName = item[@"action"];
     if (actionName.length) {
         SEL action = NSSelectorFromString(actionName);
@@ -1071,7 +1348,7 @@
 - (UIView *)groupedPanelForItems:(NSArray<NSDictionary *> *)items {
     UIView *card = [[UIView alloc] initWithFrame:CGRectZero];
     card.backgroundColor = LGSubpageCardBackgroundColor();
-    card.layer.cornerRadius = 24.0;
+    card.layer.cornerRadius = 23.25;
     card.layer.cornerCurve = kCACornerCurveContinuous;
     card.layer.masksToBounds = YES;
 
@@ -1089,7 +1366,9 @@
     ]];
 
     for (NSUInteger i = 0; i < items.count; i++) {
-        [stack addArrangedSubview:[self controlBodyForItem:items[i]]];
+        UIView *body = [self controlBodyForItem:items[i]];
+        objc_setAssociatedObject(body, kLGPanelItemKey, items[i], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [stack addArrangedSubview:body];
         if (i + 1 < items.count) {
             UIView *dividerRow = [[UIView alloc] initWithFrame:CGRectZero];
             dividerRow.translatesAutoresizingMaskIntoConstraints = NO;

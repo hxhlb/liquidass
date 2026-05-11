@@ -31,6 +31,7 @@ BOOL LGRespringBarDismissed(void);
 void LGSetRespringBarDismissed(BOOL dismissed);
 void LGSetNeedsRespring(BOOL needsRespring);
 void LGPostInvalidateSnapshotCachesNotification(void);
+void LGForceSynchronizePreferences(void);
 
 NSNumber *LGReadPreference(NSString *key, NSNumber *fallback);
 void LGWritePreference(NSString *key, NSNumber *value);
@@ -72,6 +73,12 @@ NSArray<NSDictionary *> *LGWidgetItems(void);
 NSArray<NSDictionary *> *LGHomescreenItems(void);
 NSArray<NSDictionary *> *LGAllSurfaceItems(void);
 NSArray<NSDictionary *> *LGExperimentalItems(void);
+NSArray<NSDictionary *> *LGLiveCaptureItems(void);
 NSArray<NSDictionary *> *LGMoreOptionsItems(void);
 
+NSString *LGExportPreferencesJSONString(void);
+BOOL LGImportPreferencesJSONString(NSString *jsonString, NSError **error);
+
 void LGResetAllPreferences(void);
+void LGResetPreferencesForKeys(NSArray<NSString *> *keys);
+CGFloat LGCornerRadiusDefaultForKey(NSString *key, CGFloat fallback);

@@ -61,14 +61,17 @@ static NSInteger LG_preferredFPSForUpdateGroup(LGUpdateGroup group) {
 
 static id<MTLDevice>               sDevice;
 static id<MTLRenderPipelineState>  sPipeline;
-static id<MTLComputePipelineState> sBlurHPipeline;
-static id<MTLComputePipelineState> sBlurVPipeline;
-static id<MTLCommandQueue>         sSharedCommandQueue;
-static MTLComputePassDescriptor   *sComputePassDesc;
+static id<MTLCommandQueue>         sCommandQueues[LGUpdateGroupWidgets + 1];
 static NSMapTable *sTextureCache = nil;
+static NSMutableDictionary<NSNumber *, MPSImageGaussianBlur *> *sBlurKernelCache = nil;
 static id<MTLTexture> sOpaqueMaskTexture = nil;
 static dispatch_once_t sRuntimeInitOnce;
-static _Atomic(BOOL) sRuntimeReady = NO;
+static atomic_bool sRuntimeReady = false;
+
+static id<MTLCommandQueue> LGCommandQueueForUpdateGroup(LGUpdateGroup group) {
+    NSInteger index = (group >= LGUpdateGroupAll && group <= LGUpdateGroupWidgets) ? group : LGUpdateGroupAll;
+    return sCommandQueues[index] ?: sCommandQueues[LGUpdateGroupAll];
+}
 
 static BOOL LGEnsureRuntimeReady(void) {
     LGPrewarmPipelines();
@@ -81,6 +84,7 @@ static void LG_clearTextureCache(void) {
 
 void LGClearGlassTextureCache(void) {
     LG_clearTextureCache();
+    [sBlurKernelCache removeAllObjects];
 }
 
 static LGTextureCacheEntry *LG_getCacheForImage(UIImage *image, CGFloat scale) {
@@ -95,6 +99,19 @@ static void LG_setCacheForImage(UIImage *image, CGFloat scale, LGTextureCacheEnt
         [sTextureCache setObject:variants forKey:image];
     }
     variants[LGTextureScaleKey(scale)] = cache;
+}
+
+static MPSImageGaussianBlur *LGGaussianBlurKernelForSigma(float sigma) {
+    if (!sBlurKernelCache) {
+        sBlurKernelCache = [NSMutableDictionary dictionary];
+    }
+    NSNumber *key = LGBlurSettingKey(sigma);
+    MPSImageGaussianBlur *kernel = sBlurKernelCache[key];
+    if (kernel) return kernel;
+    kernel = [[MPSImageGaussianBlur alloc] initWithDevice:sDevice sigma:sigma];
+    kernel.edgeMode = MPSImageEdgeModeClamp;
+    sBlurKernelCache[key] = kernel;
+    return kernel;
 }
 
 void LGPrewarmPipelines(void) {
@@ -118,18 +135,15 @@ void LGPrewarmPipelines(void) {
             return;
         }
 
-        if (!LGCreateGlassBlurPipelines(sDevice, lib, &sBlurHPipeline, &sBlurVPipeline, &err)) {
-            LGLog(@"metal blur pipeline build failed %@", err.localizedDescription ?: @"unknown");
-            return;
-        }
-
-        sSharedCommandQueue = [sDevice newCommandQueue];
-        if (!sSharedCommandQueue) {
+        sCommandQueues[LGUpdateGroupAll] = [sDevice newCommandQueue];
+        if (!sCommandQueues[LGUpdateGroupAll]) {
             LGLog(@"metal command queue creation failed");
             return;
         }
+        for (NSInteger group = LGUpdateGroupDock; group <= LGUpdateGroupWidgets; group++) {
+            sCommandQueues[group] = [sDevice newCommandQueue] ?: sCommandQueues[LGUpdateGroupAll];
+        }
 
-        sComputePassDesc = [MTLComputePassDescriptor computePassDescriptor];
         LG_clearTextureCache();
 
         MTLTextureDescriptor *maskDesc =
@@ -147,7 +161,7 @@ void LGPrewarmPipelines(void) {
                                   bytesPerRow:sizeof(pixel)];
         }
 
-        atomic_store_explicit(&sRuntimeReady, YES, memory_order_release);
+        atomic_store_explicit(&sRuntimeReady, true, memory_order_release);
     });
 }
 
@@ -458,7 +472,23 @@ void LGPrewarmPipelines(void) {
                                     screenRect.size.height * scale);
         }
     } else {
-        CALayer *pres = self.layer.presentationLayer ?: self.layer;
+        CALayer *baseLayer = self.layer;
+        CALayer *pres = baseLayer.presentationLayer ?: baseLayer;
+        if (pres == baseLayer) {
+            CGRect nullRect = CGRectNull;
+            CGSize drawableSize = _mtkView.drawableSize;
+            if (_hasCachedVisualMetrics
+                && CGRectEqualToRect(_cachedVisualRectPx, nullRect)
+                && fabs(_cachedDrawableSizePx.width - drawableSize.width) < 0.5f
+                && fabs(_cachedDrawableSizePx.height - drawableSize.height) < 0.5f) {
+                return NO;
+            }
+            _cachedVisualRectPx = nullRect;
+            _cachedDrawableSizePx = drawableSize;
+            _cachedVisualScale = 1.0f;
+            _hasCachedVisualMetrics = YES;
+            return YES;
+        }
         CALayer *root = pres;
         while (root.superlayer)
             root = root.superlayer.presentationLayer ?: root.superlayer;
@@ -661,8 +691,7 @@ void LGPrewarmPipelines(void) {
     }
 
     float sigma = MAX(radius * 0.5f, 0.1f);
-    MPSImageGaussianBlur *blur = [[MPSImageGaussianBlur alloc] initWithDevice:sDevice sigma:sigma];
-    blur.edgeMode = MPSImageEdgeModeClamp;
+    MPSImageGaussianBlur *blur = LGGaussianBlurKernelForSigma(sigma);
     [blur encodeToCommandBuffer:cmdBuf sourceTexture:_bgTexture destinationTexture:_blurredTexture];
 }
 
@@ -682,17 +711,33 @@ void LGPrewarmPipelines(void) {
 }
 
 - (void)drawInMTKView:(MTKView *)view {
+    CFTimeInterval profileStart = 0.0;
+    BOOL shouldProfile = (_updateGroup == LGUpdateGroupLockscreen);
+    if (shouldProfile) profileStart = LGProfileBegin();
     if (!_bgTexture && self.wallpaperImage) [self _reloadTexture];
     if (_bgTexture && !_blurredTexture) [self _ensureBlurTexture];
-    if (!sPipeline || !_bgTexture || !_blurredTexture) return;
+    if (!sPipeline || !_bgTexture || !_blurredTexture) {
+        if (shouldProfile) LGProfileEnd(@"lockscreen.draw", profileStart);
+        return;
+    }
     [self _refreshVisualMetrics];
     CGSize drawableSize = _cachedDrawableSizePx;
-    if (drawableSize.width < 1 || drawableSize.height < 1) return;
+    if (drawableSize.width < 1 || drawableSize.height < 1) {
+        if (shouldProfile) LGProfileEnd(@"lockscreen.draw", profileStart);
+        return;
+    }
     id<CAMetalDrawable> drawable = view.currentDrawable;
     MTLRenderPassDescriptor *passDesc = view.currentRenderPassDescriptor;
-    if (!drawable || !passDesc) return;
-    id<MTLCommandBuffer> cmdBuf = [sSharedCommandQueue commandBuffer];
-    if (!cmdBuf) return;
+    if (!drawable || !passDesc) {
+        if (shouldProfile) LGProfileEnd(@"lockscreen.draw", profileStart);
+        return;
+    }
+    id<MTLCommandQueue> commandQueue = LGCommandQueueForUpdateGroup(_updateGroup);
+    id<MTLCommandBuffer> cmdBuf = [commandQueue commandBuffer];
+    if (!cmdBuf) {
+        if (shouldProfile) LGProfileEnd(@"lockscreen.draw", profileStart);
+        return;
+    }
 
     CGFloat scale = UIScreen.mainScreen.scale;
     CGFloat screenW = UIScreen.mainScreen.bounds.size.width * scale;
@@ -720,7 +765,11 @@ void LGPrewarmPipelines(void) {
     }
     float imgW = (float)_bgTexture.width;
     float imgH = (float)_bgTexture.height;
-    float fillScale = fmaxf((float)screenW / imgW, (float)screenH / imgH);
+    float samplingW = (float)samplingWallpaperPixelSize.width;
+    float samplingH = (float)samplingWallpaperPixelSize.height;
+    float fillScale = (_usesExternalWallpaperTexture && samplingW > 1.0f && samplingH > 1.0f)
+        ? fmaxf(samplingW / imgW, samplingH / imgH)
+        : fmaxf((float)screenW / imgW, (float)screenH / imgH);
     float blurPx = (float)_blur * (float)scale / fillScale;
 
     if ((_needsBlurBake || blurPx != _lastBakedBlurRadius) && _cacheEntry) {
@@ -768,7 +817,6 @@ void LGPrewarmPipelines(void) {
         .hasShapeMask = _shapeMaskTexture ? 1.0f : 0.0f,
     };
     [enc setRenderPipelineState:sPipeline];
-    [enc setVertexBytes:&u length:sizeof(u) atIndex:0];
     [enc setFragmentBytes:&u length:sizeof(u) atIndex:0];
     [enc setFragmentTexture:_blurredTexture atIndex:0];
     [enc setFragmentTexture:(_shapeMaskTexture ?: sOpaqueMaskTexture) atIndex:1];
@@ -776,6 +824,7 @@ void LGPrewarmPipelines(void) {
     [enc endEncoding];
     [cmdBuf presentDrawable:drawable];
     [cmdBuf commit];
+    if (shouldProfile) LGProfileEnd(@"lockscreen.draw", profileStart);
 }
 
 - (void)dealloc {

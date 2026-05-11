@@ -3,6 +3,8 @@
 #import <MetalKit/MetalKit.h>
 #import "Shared/LGSharedSupport.h"
 
+#define LG_EXPORT __attribute__((visibility("default")))
+
 typedef NS_ENUM(NSInteger, LGUpdateGroup) {
     // keeps each ticker from redrawing everything else
     LGUpdateGroupAll = 0,
@@ -14,6 +16,7 @@ typedef NS_ENUM(NSInteger, LGUpdateGroup) {
     LGUpdateGroupAppLibrary,
     LGUpdateGroupAppIcons,
     LGUpdateGroupWidgets,
+    LGUpdateGroupControlCenter,
 };
 
 UIView  *LG_findSubviewOfClass(UIView *root, Class cls);
@@ -27,6 +30,7 @@ BOOL     LG_hasHomescreenWallpaperAsset(void);
 void     LGLog(NSString *format, ...);
 UIImage *LG_getWallpaperImage(CGPoint *outOriginInScreenPts);
 UIImage *LG_getHomescreenSnapshot(CGPoint *outOriginInScreenPts);
+UIImage *LG_getHomescreenIconCompositeSnapshot(CGPoint *outOriginInScreenPts);
 UIImage *LG_getContextMenuSnapshot(void);
 UIImage *LG_getCachedContextMenuSnapshot(void);
 UIImage *LG_getStrictCachedContextMenuSnapshot(void);
@@ -66,5 +70,9 @@ void     LGInvalidateLockscreenSnapshotCache(void);
                                      actions:(void (^)(CGContextRef context))actions;
 - (void)updateOrigin;
 - (void)scheduleDraw;
+
+LG_EXPORT void LG_registerGlassView(UIView *view, LGUpdateGroup group);
+LG_EXPORT void LG_unregisterGlassView(UIView *view, LGUpdateGroup group);
+LG_EXPORT void LG_updateRegisteredGlassViews(LGUpdateGroup group);
 
 @end

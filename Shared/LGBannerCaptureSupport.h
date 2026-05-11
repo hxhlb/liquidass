@@ -16,3 +16,9 @@ BOOL LGApplyRenderingModeToGlassHost(UIView *host,
                                      const void *associationKey,
                                      UIImage *snapshot,
                                      CGPoint snapshotOrigin);
+BOOL LGShouldRefreshLiveCaptureForHost(UIView *host,
+                                       NSString *renderingModeKey,
+                                       const void *lastCaptureTimeKey,
+                                       CGFloat framesPerSecond,
+                                       BOOL hadGlass);
+void LGMarkLiveCaptureRefreshedForHost(UIView *host, const void *lastCaptureTimeKey);

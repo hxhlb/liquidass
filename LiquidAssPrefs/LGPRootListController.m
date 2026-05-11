@@ -16,6 +16,17 @@ NSString * const kLGStandaloneSettingsDismissedNotification = @"kLGStandaloneSet
 @property (nonatomic, strong) UISwitch *lg_globalToggle;
 @end
 
+static NSString * const kLGRuntimeCacheUsageBytesKey = @"__runtime_cache_usage_bytes";
+
+static NSString *LGFormatRuntimeCacheUsage(unsigned long long bytes) {
+    NSByteCountFormatter *formatter = [[NSByteCountFormatter alloc] init];
+    formatter.countStyle = NSByteCountFormatterCountStyleMemory;
+    formatter.allowedUnits = NSByteCountFormatterUseMB | NSByteCountFormatterUseGB | NSByteCountFormatterUseKB;
+    formatter.includesUnit = YES;
+    formatter.includesCount = YES;
+    return [formatter stringFromByteCount:(long long)bytes];
+}
+
 @implementation LGPRootListController
 
 - (void)reloadRootLocalizedContent {
@@ -42,6 +53,7 @@ NSString * const kLGStandaloneSettingsDismissedNotification = @"kLGStandaloneSet
     [self.lg_stackView addArrangedSubview:[self groupedRootNavPanelForButtons:self.lg_menuButtons]];
     [self.lg_stackView addArrangedSubview:miscSection];
     [self.lg_stackView addArrangedSubview:[self groupedRootNavPanelForButtons:@[respringButton, aboutButton]]];
+    [self.lg_stackView addArrangedSubview:[self runtimeCacheFooterView]];
     [self updateMenuAvailability];
 }
 
@@ -53,11 +65,7 @@ NSString * const kLGStandaloneSettingsDismissedNotification = @"kLGStandaloneSet
     [super viewDidLoad];
     self.title = LGPrefsAppName();
     self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
-#if LIQUIDASS_STANDALONE_UI
     id tableView = nil;
-#else
-    UITableView *tableView = nil;
-#endif
     if ([self respondsToSelector:@selector(table)]) {
         tableView = [self valueForKey:@"table"];
     }
@@ -72,7 +80,7 @@ NSString * const kLGStandaloneSettingsDismissedNotification = @"kLGStandaloneSet
                                                           action:@selector(handleStandaloneClosePressed)];
     }
 #endif
-    self.navigationItem.rightBarButtonItem = LGMakeResetTextItem(self, @selector(handleResetPressed));
+    self.navigationItem.rightBarButtonItem = LGMakeTextBarButtonItem(LGLocalized(@"prefs.button.reset_all"), self, @selector(handleResetPressed));
     [self applyNavigationBarStyle];
     LGInstallScrollableStack(self, 32.0, 14.0, &_lg_scrollView, &_lg_stackView);
     LGInstallBottomRespringBar(self, &_lg_respringBar);
@@ -111,6 +119,12 @@ NSString * const kLGStandaloneSettingsDismissedNotification = @"kLGStandaloneSet
 
 - (void)handleBackPressed {
     [self.navigationController popViewControllerAnimated:YES];
+}
+
+- (void)performAnimatedPreferenceReset {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.67 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        LGResetAllPreferences();
+    });
 }
 
 - (BOOL)isGlobalEnabled {
@@ -208,7 +222,7 @@ NSString * const kLGStandaloneSettingsDismissedNotification = @"kLGStandaloneSet
 - (UIView *)globalToggleCard {
     UIView *card = [[UIView alloc] initWithFrame:CGRectZero];
     card.backgroundColor = LGSubpageCardBackgroundColor();
-    card.layer.cornerRadius = 24.0;
+    card.layer.cornerRadius = 23.25;
     card.layer.cornerCurve = kCACornerCurveContinuous;
 
     UIStackView *stack = [[UIStackView alloc] initWithFrame:CGRectZero];
@@ -267,6 +281,33 @@ NSString * const kLGStandaloneSettingsDismissedNotification = @"kLGStandaloneSet
 
 - (void)applyNavigationBarStyle {
     LGApplyNavigationBarAppearance(self.navigationItem);
+}
+
+- (UIView *)runtimeCacheFooterView {
+    unsigned long long bytes = 0;
+    id storedValue = LGReadPreferenceObject(kLGRuntimeCacheUsageBytesKey, @(0));
+    if ([storedValue isKindOfClass:[NSNumber class]]) {
+        bytes = [(NSNumber *)storedValue unsignedLongLongValue];
+    }
+
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
+    label.numberOfLines = 0;
+    label.textAlignment = NSTextAlignmentCenter;
+    label.textColor = [UIColor tertiaryLabelColor];
+    label.font = [UIFont systemFontOfSize:12.0 weight:UIFontWeightMedium];
+    label.text = [NSString stringWithFormat:LGLocalized(@"prefs.root.runtime_cache_footer"),
+                  LGFormatRuntimeCacheUsage(bytes)];
+
+    UIView *container = [[UIView alloc] initWithFrame:CGRectZero];
+    [container addSubview:label];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    [NSLayoutConstraint activateConstraints:@[
+        [label.topAnchor constraintEqualToAnchor:container.topAnchor constant:2.0],
+        [label.leadingAnchor constraintEqualToAnchor:container.leadingAnchor constant:12.0],
+        [label.trailingAnchor constraintEqualToAnchor:container.trailingAnchor constant:-12.0],
+        [label.bottomAnchor constraintEqualToAnchor:container.bottomAnchor constant:-8.0],
+    ]];
+    return container;
 }
 
 - (UIView *)heroCard {
@@ -343,7 +384,7 @@ NSString * const kLGStandaloneSettingsDismissedNotification = @"kLGStandaloneSet
 - (UIView *)groupedRootNavPanelForButtons:(NSArray<UIButton *> *)buttons {
     UIView *card = [[UIView alloc] initWithFrame:CGRectZero];
     card.backgroundColor = LGSubpageCardBackgroundColor();
-    card.layer.cornerRadius = 24.0;
+    card.layer.cornerRadius = 23.25;
     card.layer.cornerCurve = kCACornerCurveContinuous;
     card.layer.masksToBounds = YES;
 
@@ -385,7 +426,7 @@ NSString * const kLGStandaloneSettingsDismissedNotification = @"kLGStandaloneSet
 - (UIView *)navCardWithTitle:(NSString *)title subtitle:(NSString *)subtitle color:(UIColor *)color symbolName:(NSString *)symbolName action:(SEL)action {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     button.backgroundColor = LGSubpageCardBackgroundColor();
-    button.layer.cornerRadius = 24.0;
+    button.layer.cornerRadius = 23.25;
     button.layer.cornerCurve = kCACornerCurveContinuous;
     button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
     if (action) {

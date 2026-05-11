@@ -7,6 +7,7 @@
 static const NSInteger kWidgetTintTag       = 0x71D0;
 
 static void LGWidgetsRefreshAllHosts(void);
+static void LGWidgetsRefreshAttachedHosts(void);
 static BOOL LGIsWidgetGlassHostView(UIView *view);
 static void LGRestoreWidgetOriginalState(UIView *view);
 static void *kWidgetAttachedKey = &kWidgetAttachedKey;
@@ -15,13 +16,19 @@ static void *kWidgetTintKey = &kWidgetTintKey;
 static void *kWidgetOriginalAlphaKey = &kWidgetOriginalAlphaKey;
 static void *kWidgetOriginalCornerRadiusKey = &kWidgetOriginalCornerRadiusKey;
 static void *kWidgetOriginalClipsKey = &kWidgetOriginalClipsKey;
+static void *kWidgetOriginalMasksKey = &kWidgetOriginalMasksKey;
 static void *kWidgetOriginalCornerCurveKey = &kWidgetOriginalCornerCurveKey;
+static void *kWidgetMaterialOriginalHiddenKey = &kWidgetMaterialOriginalHiddenKey;
+static void *kWidgetMaterialOriginalAlphaKey = &kWidgetMaterialOriginalAlphaKey;
+static void *kWidgetMaterialOriginalLayerOpacityKey = &kWidgetMaterialOriginalLayerOpacityKey;
+static void *kWidgetLastLiveCaptureTimeKey = &kWidgetLastLiveCaptureTimeKey;
 static void *kWidgetBackdropViewKey = &kWidgetBackdropViewKey;
 
 static LGDisplayLinkState sWidgetDisplayLinkState = {0};
+static NSHashTable<UIView *> *sWidgetHosts = nil;
 
 LG_ENABLED_BOOL_PREF_FUNC(LGWidgetEnabled, "Widgets.Enabled", NO)
-LG_FLOAT_PREF_FUNC(LGWidgetCornerRadius, "Widgets.CornerRadius", 20.2)
+static CGFloat LGWidgetCornerRadius(void) { return LGDynamicDefaultFloat(@"Widgets.CornerRadius", 20.2); }
 LG_FLOAT_PREF_FUNC(LGWidgetBezelWidth, "Widgets.BezelWidth", 18.0)
 LG_FLOAT_PREF_FUNC(LGWidgetGlassThickness, "Widgets.GlassThickness", 150.0)
 LG_FLOAT_PREF_FUNC(LGWidgetRefractionScale, "Widgets.RefractionScale", 1.8)
@@ -31,6 +38,14 @@ LG_FLOAT_PREF_FUNC(LGWidgetBlur, "Widgets.Blur", 8.0)
 LG_FLOAT_PREF_FUNC(LGWidgetWallpaperScale, "Widgets.WallpaperScale", 0.5)
 LG_FLOAT_PREF_FUNC(LGWidgetLightTintAlpha, "Widgets.LightTintAlpha", 0.1)
 LG_FLOAT_PREF_FUNC(LGWidgetDarkTintAlpha, "Widgets.DarkTintAlpha", 0.3)
+LG_FLOAT_PREF_FUNC(LGWidgetLiveCaptureFPS, "Widgets.LiveCaptureFPS", 8.0)
+
+static NSHashTable<UIView *> *LGWidgetHostRegistry(void) {
+    if (!sWidgetHosts) {
+        sWidgetHosts = [NSHashTable weakObjectsHashTable];
+    }
+    return sWidgetHosts;
+}
 
 @interface CHSWidget : NSObject
 @property (nonatomic, copy, readonly) NSString *extensionBundleIdentifier;
@@ -62,9 +77,49 @@ static BOOL LGViewBelongsToWidgetStack(UIView *view) {
     return NO;
 }
 
+static UIView *LGWidgetFindDescendantNamed(UIView *view, NSString *className) {
+    if (!view) return nil;
+    for (UIView *subview in view.subviews) {
+        if ([NSStringFromClass(subview.class) isEqualToString:className]) return subview;
+        UIView *match = LGWidgetFindDescendantNamed(subview, className);
+        if (match) return match;
+    }
+    return nil;
+}
+
+static BOOL LGWidgetScrollViewContainsWidgetContainer(UIView *view) {
+    if (!view) return NO;
+    if ([NSStringFromClass(view.class) isEqualToString:@"SBHWidgetContainerView"]) return YES;
+    for (UIView *subview in view.subviews) {
+        if (LGWidgetScrollViewContainsWidgetContainer(subview)) return YES;
+    }
+    return NO;
+}
+
+static BOOL LGWidgetHasAncestorClassNamedWithinDepth(UIView *view, NSString *className, NSInteger maxDepth) {
+    UIView *ancestor = view.superview;
+    NSInteger depth = 0;
+    while (ancestor && depth < maxDepth) {
+        if ([NSStringFromClass(ancestor.class) isEqualToString:className]) return YES;
+        ancestor = ancestor.superview;
+        depth++;
+    }
+    return NO;
+}
+
 static void LGStartWidgetDisplayLink(void) {
-    LGStartDisplayLinkState(&sWidgetDisplayLinkState, LGPreferredFramesPerSecondForKey(@"Homescreen.FPS", 30), ^{
-        if (LG_prefersLiveCapture(@"Widgets.RenderingMode")) LGWidgetsRefreshAllHosts();
+    NSInteger fps = LG_prefersLiveCapture(@"Widgets.RenderingMode")
+        ? LGPreferredLiveCaptureFramesPerSecond(LGWidgetLiveCaptureFPS())
+        : LGPreferredFramesPerSecondForKey(@"Homescreen.FPS", 1);
+    LGStartDisplayLinkStateWithPreferenceKey(&sWidgetDisplayLinkState,
+                                             fps,
+                                             @"DisplayLink.Widgets.Enabled",
+                                             ^{
+        NSInteger nextFPS = LG_prefersLiveCapture(@"Widgets.RenderingMode")
+            ? LGPreferredLiveCaptureFramesPerSecond(LGWidgetLiveCaptureFPS())
+            : LGPreferredFramesPerSecondForKey(@"Homescreen.FPS", 1);
+        LGSetDisplayLinkStatePreferredFPS(&sWidgetDisplayLinkState, nextFPS);
+        if (LG_prefersLiveCapture(@"Widgets.RenderingMode")) LGWidgetsRefreshAttachedHosts();
         else LG_updateRegisteredGlassViews(LGUpdateGroupWidgets);
     });
 }
@@ -93,24 +148,38 @@ static UIViewController *LGNearestWidgetStackControllerForView(UIView *view) {
     return nil;
 }
 
-static BOOL LGWidgetViewContainsLargeMaterialHost(UIView *view, NSInteger depth) {
-    if (!view || depth > 24) return NO;
-    if (LGWidgetHostUsesStockMaterialBlur(view) &&
-        view.bounds.size.width >= 120.0 &&
-        view.bounds.size.height >= 120.0) {
-        return YES;
-    }
+static BOOL LGWidgetContainerLooksLikeHomescreenWidgetHost(UIView *view) {
+    if (!view) return NO;
+    if (![NSStringFromClass(view.class) isEqualToString:@"UIView"]) return NO;
+    if (view.bounds.size.width < 120.0 || view.bounds.size.height < 120.0) return NO;
+    if (!LGNearestWidgetStackControllerForView(view)) return NO;
+    if (!LGWidgetHasAncestorClassNamedWithinDepth(view, @"SBFTouchPassThroughView", 8)) return NO;
+    if (!LGWidgetHasAncestorClassNamedWithinDepth(view, @"SBIconView", 10)) return NO;
+
+    BOOL hasWidgetScroll = NO;
     for (UIView *subview in view.subviews) {
-        if (LGWidgetViewContainsLargeMaterialHost(subview, depth + 1)) return YES;
+        if (![NSStringFromClass(subview.class) isEqualToString:@"UIView"] &&
+            ![NSStringFromClass(subview.class) isEqualToString:@"BSUIScrollView"]) {
+            continue;
+        }
+        UIView *scrollView = [NSStringFromClass(subview.class) isEqualToString:@"BSUIScrollView"] ? subview : LGWidgetFindDescendantNamed(subview, @"BSUIScrollView");
+        if (!scrollView) continue;
+        if (!LGWidgetScrollViewContainsWidgetContainer(scrollView)) continue;
+        hasWidgetScroll = YES;
+        break;
     }
-    return NO;
+    return hasWidgetScroll;
 }
 
-static BOOL LGWidgetStackHasStockMaterialHost(UIView *view) {
-    UIViewController *controller = LGNearestWidgetStackControllerForView(view);
-    UIView *rootView = controller.view;
-    if (!rootView) return NO;
-    return LGWidgetViewContainsLargeMaterialHost(rootView, 0);
+static UIView *LGWidgetAncestorContainerHostForView(UIView *view) {
+    UIView *ancestor = view;
+    NSInteger depth = 0;
+    while (ancestor && depth < 12) {
+        if (LGWidgetContainerLooksLikeHomescreenWidgetHost(ancestor)) return ancestor;
+        ancestor = ancestor.superview;
+        depth++;
+    }
+    return nil;
 }
 
 static NSArray *LGWidgetCleanedFilterArray(NSArray *filters, BOOL *didRemoveAny) {
@@ -150,41 +219,9 @@ static void LGStripWidgetTintFiltersFromLayerTree(CALayer *layer) {
     }
 }
 
-static BOOL LGWidgetViewContainsDescendantNamed(UIView *view, NSString *className, NSInteger depth) {
-    if (!view || depth > 24) return NO;
-    for (UIView *subview in view.subviews) {
-        if ([NSStringFromClass(subview.class) isEqualToString:className]) return YES;
-        if (LGWidgetViewContainsDescendantNamed(subview, className, depth + 1)) return YES;
-    }
-    return NO;
-}
-
-static UIView *LGWidgetRawAncestorContainerHostForView(UIView *view) {
-    UIView *ancestor = view;
-    NSInteger depth = 0;
-    while (ancestor && depth < 12) {
-        if ([NSStringFromClass(ancestor.class) isEqualToString:@"UIView"] &&
-            LGResponderChainContainsClassNamed(ancestor, @"SBHWidgetStackViewController") &&
-            LGWidgetViewContainsDescendantNamed(ancestor, @"BSUIScrollView", 0) &&
-            ancestor.bounds.size.width >= 120.0 &&
-            ancestor.bounds.size.height >= 120.0) {
-            return ancestor;
-        }
-        ancestor = ancestor.superview;
-        depth++;
-    }
-    return nil;
-}
-
-static UIView *LGWidgetAncestorContainerHostForView(UIView *view) {
-    UIView *candidate = LGWidgetRawAncestorContainerHostForView(view);
-    if (!candidate) return nil;
-    if (LGWidgetViewContainsDescendantNamed(candidate, @"MTMaterialView", 0)) return nil;
-    if (LGWidgetStackHasStockMaterialHost(candidate)) return nil;
-    return candidate;
-}
-
 static void removeWidgetOverlays(UIView *view) {
+    if (!view) return;
+    objc_setAssociatedObject(view, kWidgetLastLiveCaptureTimeKey, nil, OBJC_ASSOCIATION_ASSIGN);
     LGRemoveAssociatedSubview(view, kWidgetTintKey);
     LiquidGlassView *glass = objc_getAssociatedObject(view, kWidgetGlassKey);
     if (glass) [glass removeFromSuperview];
@@ -194,11 +231,13 @@ static void removeWidgetOverlays(UIView *view) {
 
 static void LGDetachWidgetGlassHostView(UIView *view) {
     if (!view) return;
+    [LGWidgetHostRegistry() removeObject:view];
     removeWidgetOverlays(view);
     LGRestoreWidgetOriginalState(view);
     if ([objc_getAssociatedObject(view, kWidgetAttachedKey) boolValue]) {
         objc_setAssociatedObject(view, kWidgetAttachedKey, nil, OBJC_ASSOCIATION_ASSIGN);
         sWidgetDisplayLinkState.activeCount = MAX(0, sWidgetDisplayLinkState.activeCount - 1);
+        LGDisplayLinkStateDidChangeActivity(&sWidgetDisplayLinkState);
         if (sWidgetDisplayLinkState.activeCount == 0) LGStopWidgetDisplayLink();
     }
 }
@@ -206,10 +245,14 @@ static void LGDetachWidgetGlassHostView(UIView *view) {
 static void LGRememberWidgetOriginalState(UIView *view) {
     if (!objc_getAssociatedObject(view, kWidgetOriginalAlphaKey))
         objc_setAssociatedObject(view, kWidgetOriginalAlphaKey, @(view.alpha), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    if (!objc_getAssociatedObject(view, kWidgetOriginalCornerRadiusKey))
+    if (!objc_getAssociatedObject(view, kWidgetOriginalCornerRadiusKey)) {
         objc_setAssociatedObject(view, kWidgetOriginalCornerRadiusKey, @(view.layer.cornerRadius), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        LGCacheDynamicDefaultFloat(@"Widgets.CornerRadius", view.layer.cornerRadius);
+    }
     if (!objc_getAssociatedObject(view, kWidgetOriginalClipsKey))
         objc_setAssociatedObject(view, kWidgetOriginalClipsKey, @(view.clipsToBounds), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (!objc_getAssociatedObject(view, kWidgetOriginalMasksKey))
+        objc_setAssociatedObject(view, kWidgetOriginalMasksKey, @(view.layer.masksToBounds), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     if (!objc_getAssociatedObject(view, kWidgetOriginalCornerCurveKey)) {
         NSString *curve = nil;
         if (@available(iOS 13.0, *))
@@ -226,10 +269,54 @@ static void LGRestoreWidgetOriginalState(UIView *view) {
     if (radius) view.layer.cornerRadius = [radius doubleValue];
     NSNumber *clips = objc_getAssociatedObject(view, kWidgetOriginalClipsKey);
     if (clips) view.clipsToBounds = [clips boolValue];
+    NSNumber *masks = objc_getAssociatedObject(view, kWidgetOriginalMasksKey);
+    if (masks) view.layer.masksToBounds = [masks boolValue];
     NSString *curve = objc_getAssociatedObject(view, kWidgetOriginalCornerCurveKey);
     if (@available(iOS 13.0, *)) {
         if (curve) view.layer.cornerCurve = curve;
     }
+}
+
+static BOOL LGIsWidgetStackBackgroundMaterialView(UIView *view) {
+    if (!view) return NO;
+    if (![NSStringFromClass(view.class) isEqualToString:@"MTMaterialView"]) return NO;
+    UIView *parent = view.superview;
+    if (!parent || ![NSStringFromClass(parent.class) isEqualToString:@"UIView"]) return NO;
+    UIViewController *controller = LGNearestWidgetStackControllerForView(parent);
+    if (!controller) return NO;
+    if (controller.view == parent) return YES;
+    return parent.superview == controller.view;
+}
+
+static void LGRestoreWidgetStackMaterialView(UIView *view) {
+    NSNumber *hidden = objc_getAssociatedObject(view, kWidgetMaterialOriginalHiddenKey);
+    NSNumber *alpha = objc_getAssociatedObject(view, kWidgetMaterialOriginalAlphaKey);
+    NSNumber *layerOpacity = objc_getAssociatedObject(view, kWidgetMaterialOriginalLayerOpacityKey);
+    if (hidden) view.hidden = hidden.boolValue;
+    if (alpha) view.alpha = alpha.doubleValue;
+    if (layerOpacity) view.layer.opacity = layerOpacity.floatValue;
+    objc_setAssociatedObject(view, kWidgetMaterialOriginalHiddenKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(view, kWidgetMaterialOriginalAlphaKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(view, kWidgetMaterialOriginalLayerOpacityKey, nil, OBJC_ASSOCIATION_ASSIGN);
+}
+
+static void LGApplyWidgetStackMaterialVisibility(UIView *view) {
+    if (!LGIsWidgetStackBackgroundMaterialView(view)) {
+        LGRestoreWidgetStackMaterialView(view);
+        return;
+    }
+    if (!LGWidgetEnabled()) {
+        LGRestoreWidgetStackMaterialView(view);
+        return;
+    }
+    if (!objc_getAssociatedObject(view, kWidgetMaterialOriginalHiddenKey)) {
+        objc_setAssociatedObject(view, kWidgetMaterialOriginalHiddenKey, @(view.hidden), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(view, kWidgetMaterialOriginalAlphaKey, @(view.alpha), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(view, kWidgetMaterialOriginalLayerOpacityKey, @(view.layer.opacity), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    view.hidden = YES;
+    view.alpha = 0.0;
+    view.layer.opacity = 0.0f;
 }
 
 static void ensureWidgetTintOverlay(UIView *view) {
@@ -265,26 +352,10 @@ static void ensureWidgetTintOverlay(UIView *view) {
 
 static BOOL LGIsWidgetGlassHostView(UIView *view) {
     if (!view.window) return NO;
-    if (!LGResponderChainContainsClassNamed(view, @"SBHWidgetStackViewController")) return NO;
 
     NSString *className = NSStringFromClass(view.class);
-    if ([className isEqualToString:@"MTMaterialView"]) {
-        // Keep this scoped to the large widget material background, not auxiliary controls.
-        if (LGHasAncestorClassNamed(view, @"WGShortLookStyleButton")) return NO;
-        if ([view isKindOfClass:[UIControl class]]) return NO;
-        if ([view isKindOfClass:[UILabel class]]) return NO;
-        if ([view isKindOfClass:[UIImageView class]]) return NO;
-        if ([view isKindOfClass:[UIScrollView class]]) return NO;
-        if (view.bounds.size.width < 120.0 || view.bounds.size.height < 120.0) return NO;
-        return YES;
-    }
-
     if ([className isEqualToString:@"UIView"] &&
-        LGWidgetViewContainsDescendantNamed(view, @"BSUIScrollView", 0) &&
-        !LGWidgetViewContainsDescendantNamed(view, @"MTMaterialView", 0) &&
-        !LGWidgetStackHasStockMaterialHost(view) &&
-        view.bounds.size.width >= 120.0 &&
-        view.bounds.size.height >= 120.0) {
+        LGWidgetContainerLooksLikeHomescreenWidgetHost(view)) {
         return YES;
     }
 
@@ -297,29 +368,53 @@ static void LGPrepareWidgetGlassHostView(UIView *view) {
     if (@available(iOS 13.0, *))
         view.layer.cornerCurve = kCACornerCurveContinuous;
     view.clipsToBounds = YES;
+    view.layer.masksToBounds = YES;
     if (LGWidgetHostUsesStockMaterialBlur(view)) {
         LGStripWidgetTintFiltersFromLayerTree(view.layer);
     }
 }
 
 static void LGInjectIntoWidgetGlassHostView(UIView *view) {
+    CFTimeInterval profileStart = LGProfileBegin();
     if (!LGWidgetEnabled()) {
         removeWidgetOverlays(view);
         LGRestoreWidgetOriginalState(view);
+        LGProfileEnd(@"widgets.inject", profileStart);
         return;
     }
     LiquidGlassView *glass = objc_getAssociatedObject(view, kWidgetGlassKey);
+    BOOL hadGlass = (glass != nil);
+    if (!LGShouldRefreshLiveCaptureForHost(view,
+                                           @"Widgets.RenderingMode",
+                                           kWidgetLastLiveCaptureTimeKey,
+                                           LGWidgetLiveCaptureFPS(),
+                                           hadGlass)) {
+        LGPrepareWidgetGlassHostView(view);
+        glass.cornerRadius = LGWidgetCornerRadius();
+        glass.bezelWidth = LGWidgetBezelWidth();
+        glass.glassThickness = LGWidgetGlassThickness();
+        glass.refractionScale = LGWidgetRefractionScale();
+        glass.refractiveIndex = LGWidgetRefractiveIndex();
+        glass.specularOpacity = LGWidgetSpecularOpacity();
+        glass.blur = LGWidgetBlur();
+        glass.wallpaperScale = LGWidgetWallpaperScale();
+        [view sendSubviewToBack:glass];
+        ensureWidgetTintOverlay(view);
+        [glass updateOrigin];
+        LGProfileEnd(@"widgets.inject", profileStart);
+        return;
+    }
 
     CGPoint wallpaperOrigin = CGPointZero;
     UIImage *wallpaper = LG_getWallpaperImage(&wallpaperOrigin);
     if (!wallpaper && !LG_prefersLiveCapture(@"Widgets.RenderingMode")) {
         removeWidgetOverlays(view);
         LGRestoreWidgetOriginalState(view);
+        LGProfileEnd(@"widgets.inject", profileStart);
         return;
     }
 
     LGPrepareWidgetGlassHostView(view);
-
     if (!glass) {
         glass = [[LiquidGlassView alloc]
             initWithFrame:view.bounds wallpaper:wallpaper wallpaperOrigin:wallpaperOrigin];
@@ -354,19 +449,27 @@ static void LGInjectIntoWidgetGlassHostView(UIView *view) {
                                          wallpaperOrigin)) {
         removeWidgetOverlays(view);
         LGRestoreWidgetOriginalState(view);
+        LGProfileEnd(@"widgets.inject", profileStart);
         return;
     }
+    if (LG_prefersLiveCapture(@"Widgets.RenderingMode")) {
+        LGMarkLiveCaptureRefreshedForHost(view, kWidgetLastLiveCaptureTimeKey);
+    }
+    [LGWidgetHostRegistry() addObject:view];
     [view sendSubviewToBack:glass];
     ensureWidgetTintOverlay(view);
     dispatch_async(dispatch_get_main_queue(), ^{
         if (view.window) ensureWidgetTintOverlay(view);
     });
+    LGProfileEnd(@"widgets.inject", profileStart);
 }
 
 static void LGWidgetsRefreshAllHosts(void) {
+    CFTimeInterval profileStart = LGProfileBegin();
     UIApplication *app = UIApplication.sharedApplication;
     void (^refreshWindow)(UIWindow *) = ^(UIWindow *window) {
         LGTraverseViews(window, ^(UIView *view) {
+            LGApplyWidgetStackMaterialVisibility(view);
             if (!LGIsWidgetGlassHostView(view)) return;
             LGPrepareWidgetGlassHostView(view);
             LGInjectIntoWidgetGlassHostView(view);
@@ -380,6 +483,19 @@ static void LGWidgetsRefreshAllHosts(void) {
     } else {
         for (UIWindow *window in LGApplicationWindows(app)) refreshWindow(window);
     }
+    LGProfileEnd(@"widgets.refresh_all_hosts", profileStart);
+}
+
+static void LGWidgetsRefreshAttachedHosts(void) {
+    CFTimeInterval profileStart = LGProfileBegin();
+    for (UIView *view in LGWidgetHostRegistry().allObjects) {
+        if (!view.window || !LGIsWidgetGlassHostView(view)) {
+            LGDetachWidgetGlassHostView(view);
+            continue;
+        }
+        LGInjectIntoWidgetGlassHostView(view);
+    }
+    LGProfileEnd(@"widgets.refresh_attached_hosts", profileStart);
 }
 
 static void LGWidgetsPrefsChanged(CFNotificationCenterRef center,
@@ -463,15 +579,18 @@ static void LGWidgetsPrefsChanged(CFNotificationCenterRef center,
     UIView *self_ = (UIView *)self;
 
     if (!self_.window) {
+        LGRestoreWidgetStackMaterialView(self_);
         LGDetachWidgetGlassHostView(self_);
         return;
     }
 
+    LGApplyWidgetStackMaterialVisibility(self_);
     if (!LGIsWidgetGlassHostView(self_)) return;
     LGInjectIntoWidgetGlassHostView(self_);
     if (![objc_getAssociatedObject(self_, kWidgetAttachedKey) boolValue]) {
         objc_setAssociatedObject(self_, kWidgetAttachedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         sWidgetDisplayLinkState.activeCount++;
+        LGDisplayLinkStateDidChangeActivity(&sWidgetDisplayLinkState);
         LGStartWidgetDisplayLink();
     }
 }
@@ -479,10 +598,15 @@ static void LGWidgetsPrefsChanged(CFNotificationCenterRef center,
 - (void)layoutSubviews {
     %orig;
     UIView *self_ = (UIView *)self;
+    LGApplyWidgetStackMaterialVisibility(self_);
     if (!LGIsWidgetGlassHostView(self_)) return;
     if (!LGWidgetEnabled()) {
         removeWidgetOverlays(self_);
         LGRestoreWidgetOriginalState(self_);
+        return;
+    }
+    if (LG_prefersLiveCapture(@"Widgets.RenderingMode")) {
+        LGInjectIntoWidgetGlassHostView(self_);
         return;
     }
     ensureWidgetTintOverlay(self_);
@@ -513,12 +637,11 @@ static void LGWidgetsPrefsChanged(CFNotificationCenterRef center,
 - (void)didMoveToWindow {
     %orig;
     UIView *host = LGWidgetAncestorContainerHostForView((UIView *)self);
-    UIView *rawHost = LGWidgetRawAncestorContainerHostForView((UIView *)self);
-    if (rawHost && LGWidgetStackHasStockMaterialHost(rawHost)) {
-        LGDetachWidgetGlassHostView(rawHost);
+    if (!host) return;
+    if (!((UIView *)self).window) {
+        LGDetachWidgetGlassHostView(host);
         return;
     }
-    if (!host) return;
 
     if (!LGWidgetEnabled()) {
         LGDetachWidgetGlassHostView(host);
@@ -529,6 +652,7 @@ static void LGWidgetsPrefsChanged(CFNotificationCenterRef center,
     if (![objc_getAssociatedObject(host, kWidgetAttachedKey) boolValue]) {
         objc_setAssociatedObject(host, kWidgetAttachedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         sWidgetDisplayLinkState.activeCount++;
+        LGDisplayLinkStateDidChangeActivity(&sWidgetDisplayLinkState);
         LGStartWidgetDisplayLink();
     }
 }
@@ -536,19 +660,23 @@ static void LGWidgetsPrefsChanged(CFNotificationCenterRef center,
 - (void)layoutSubviews {
     %orig;
     UIView *host = LGWidgetAncestorContainerHostForView((UIView *)self);
-    UIView *rawHost = LGWidgetRawAncestorContainerHostForView((UIView *)self);
-    if (rawHost && LGWidgetStackHasStockMaterialHost(rawHost)) {
-        LGDetachWidgetGlassHostView(rawHost);
-        return;
-    }
     if (!host) return;
     if (!LGIsWidgetGlassHostView(host)) return;
     if (!LGWidgetEnabled()) {
         LGDetachWidgetGlassHostView(host);
         return;
     }
-    ensureWidgetTintOverlay(host);
     LiquidGlassView *glass = objc_getAssociatedObject(host, kWidgetGlassKey);
+    if (!glass) {
+        LGInjectIntoWidgetGlassHostView(host);
+        glass = objc_getAssociatedObject(host, kWidgetGlassKey);
+        if (!glass) return;
+    }
+    if (LG_prefersLiveCapture(@"Widgets.RenderingMode")) {
+        LGInjectIntoWidgetGlassHostView(host);
+        return;
+    }
+    ensureWidgetTintOverlay(host);
     [glass updateOrigin];
 }
 

@@ -26,7 +26,7 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = liquidass
 HOOK_FILES := $(wildcard Hooks/*.x) $(wildcard Hooks/Lockscreen/*.x)
-SHARED_FILES := Shared/LGSharedSupport.m Shared/LGHookSupport.m Shared/LGBannerCaptureSupport.m Shared/LGMetalShaderSource.m Shared/LGGlassRenderer.m
+SHARED_FILES := Shared/LGSharedSupport.m Shared/LGHookSupport.m Shared/LGBannerCaptureSupport.m Shared/LGMetalShaderSource.m Shared/LGGlassRenderer.m Shared/LGBackButtonSupport.m Shared/LGRWBSupport.m
 RUNTIME_FILES := Runtime/LGLiquidGlassRuntime.m Runtime/LGSnapshotCaptureSupport.m
 PREF_CONTROL_FILES := LiquidAssPrefs/LGPrefsLiquidSlider.m LiquidAssPrefs/LGPrefsLiquidSwitch.m
 STANDALONE_PREF_FILES := LiquidAssPrefs/LGPRootListController.m LiquidAssPrefs/LGPSurfaceController.m LiquidAssPrefs/LGPrefsDataSupport.m LiquidAssPrefs/LGPrefsUIHelpers.m
@@ -35,11 +35,11 @@ $(TWEAK_NAME)_FILES = Tweak.x $(HOOK_FILES) $(SHARED_FILES) $(RUNTIME_FILES) $(P
 else
 $(TWEAK_NAME)_FILES = Tweak.x $(HOOK_FILES) $(SHARED_FILES) $(RUNTIME_FILES) $(PREF_CONTROL_FILES)
 endif
-$(TWEAK_NAME)_CFLAGS = -fobjc-arc
+$(TWEAK_NAME)_CFLAGS = -fobjc-arc -fvisibility=default
 ifeq ($(LIQUIDASS_STANDALONE_UI),1)
 $(TWEAK_NAME)_CFLAGS += -DLIQUIDASS_STANDALONE_UI=1
 endif
-$(TWEAK_NAME)_FRAMEWORKS = UIKit MetalKit
+$(TWEAK_NAME)_FRAMEWORKS = UIKit Metal MetalKit Accelerate
 $(TWEAK_NAME)_INSTALL_PATH = @rpath
 
 include $(THEOS)/makefiles/tweak.mk
@@ -68,6 +68,7 @@ sim:: all
 	/usr/libexec/PlistBuddy -c "Set :entry:label $$APP_NAME" /opt/simject/PreferenceBundles/LiquidAssPrefs.bundle/entry.plist
 	@resim
 	@pkill -9 -f 'CoreSimulator/.*/ChronoCore.framework/Support/chronod' || true
+	@pkill -9 -f 'CoreSimulator/.*/Preferences' || true
 
 sim-local:: all
 	@printf 'standalone dylib ready: %s\n' "$(PWD)/.theos/obj/iphone_simulator/debug/$(TWEAK_NAME).dylib"

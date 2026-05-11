@@ -13,6 +13,87 @@ NSString * const kLGPrefsLanguageKey = @"LGPrefsLanguage";
 static NSString * const kLGNeedsRespringKey = @"LGPrefsNeedsRespring";
 static NSString * const kLGRespringBarDismissedKey = @"LGPrefsRespringBarDismissed";
 static const char *LGInvalidateSnapshotCachesNotificationCString = "love.litten.liquidass/InvalidateSnapshotCaches";
+static dispatch_queue_t sLGPrefsWriteQueue;
+static dispatch_source_t sLGPrefsSyncTimer;
+static NSArray<NSDictionary *> *LGPerSurfaceTintOverrideItems(void);
+static NSString * const kLGDynamicDefaultPrefix = @"__dynamic_default.";
+
+static void LGEnsurePreferencesWriteQueueInitialized(void) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        sLGPrefsWriteQueue = dispatch_queue_create("dylv.liquidass.prefswrite", DISPATCH_QUEUE_SERIAL);
+    });
+}
+
+static void LGRemovePreferenceWithoutNotify(NSString *key) {
+    CFPreferencesSetAppValue((__bridge CFStringRef)key,
+                             NULL,
+                             (__bridge CFStringRef)LGPrefsDomain);
+}
+
+static NSArray<NSString *> *LGExportablePreferenceKeys(void) {
+    static NSArray<NSString *> *keys;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSMutableOrderedSet<NSString *> *orderedKeys = [NSMutableOrderedSet orderedSet];
+        NSArray<NSArray<NSDictionary *> *> *sources = @[
+            LGAllSurfaceItems(),
+            LGMoreOptionsItems(),
+            LGExperimentalItems(),
+            LGLiveCaptureItems()
+        ];
+        for (NSArray<NSDictionary *> *items in sources) {
+            for (NSDictionary *item in items) {
+                NSString *key = item[@"key"];
+                if (key.length) [orderedKeys addObject:key];
+            }
+        }
+        for (NSDictionary *item in LGPerSurfaceTintOverrideItems()) {
+            NSString *key = item[@"key"];
+            if (key.length) [orderedKeys addObject:key];
+        }
+        keys = [orderedKeys.array copy];
+    });
+    return keys;
+}
+
+static void LGSchedulePreferencesSynchronize(void) {
+    LGEnsurePreferencesWriteQueueInitialized();
+
+    dispatch_async(sLGPrefsWriteQueue, ^{
+        if (!sLGPrefsSyncTimer) {
+            sLGPrefsSyncTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, sLGPrefsWriteQueue);
+            dispatch_source_t timer = sLGPrefsSyncTimer;
+            dispatch_source_set_event_handler(timer, ^{
+                CFPreferencesAppSynchronize((__bridge CFStringRef)LGPrefsDomain);
+                dispatch_source_cancel(timer);
+            });
+            dispatch_source_set_cancel_handler(timer, ^{
+                if (sLGPrefsSyncTimer == timer) {
+                    sLGPrefsSyncTimer = nil;
+                }
+            });
+            dispatch_resume(timer);
+        }
+        dispatch_source_set_timer(sLGPrefsSyncTimer,
+                                  dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)),
+                                  DISPATCH_TIME_FOREVER,
+                                  (uint64_t)(0.02 * NSEC_PER_SEC));
+    });
+}
+
+static void LGFlushPreferencesSynchronize(void) {
+    LGEnsurePreferencesWriteQueueInitialized();
+
+    dispatch_sync(sLGPrefsWriteQueue, ^{
+        if (sLGPrefsSyncTimer) {
+            dispatch_source_t timer = sLGPrefsSyncTimer;
+            sLGPrefsSyncTimer = nil;
+            dispatch_source_cancel(timer);
+        }
+        CFPreferencesAppSynchronize((__bridge CFStringRef)LGPrefsDomain);
+    });
+}
 
 static NSDictionary<NSString *, NSString *> *LGEmbeddedEnglishStrings(void) {
     static NSDictionary<NSString *, NSString *> *strings;
@@ -531,7 +612,29 @@ void LGSetCurrentPrefsLanguageCode(NSString *languageCode) {
 
 BOOL LGPreferenceRequiresRespring(NSString *key) {
     if (!key.length) return NO;
-    return [key isEqualToString:@"Global.Enabled"] || [key hasSuffix:@".Enabled"];
+    static NSSet<NSString *> *respringKeys = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        respringKeys = [NSSet setWithArray:@[
+            @"Global.Enabled",
+            @"Dock.Enabled",
+            @"FolderIcon.Enabled",
+            @"FolderOpen.Enabled",
+            @"AppIcons.Enabled",
+            @"SearchPill.Enabled",
+            @"ContextMenu.Enabled",
+            @"Banner.Enabled",
+            @"Lockscreen.Enabled",
+            @"LockscreenQuickActions.Enabled",
+            @"Lockscreen.Passcode.Enabled",
+            @"Lockscreen.Clock.Enabled",
+            @"AppLibrary.Enabled",
+            @"AppLibrary.Search.Enabled",
+            @"Widgets.Enabled",
+            @"ControlCenter.Enabled",
+        ]];
+    });
+    return [respringKeys containsObject:key];
 }
 
 BOOL LGNeedsRespring(void) {
@@ -558,6 +661,10 @@ void LGSetNeedsRespring(BOOL needsRespring) {
     [[NSNotificationCenter defaultCenter] postNotificationName:kLGPrefsRespringChangedNotification object:nil];
 }
 
+void LGForceSynchronizePreferences(void) {
+    LGFlushPreferencesSynchronize();
+}
+
 void LGPostInvalidateSnapshotCachesNotification(void) {
     notify_post(LGInvalidateSnapshotCachesNotificationCString);
 }
@@ -582,8 +689,8 @@ void LGWritePreferenceObject(NSString *key, id value) {
     CFPreferencesSetAppValue((__bridge CFStringRef)key,
                              (__bridge CFPropertyListRef)value,
                              (__bridge CFStringRef)LGPrefsDomain);
-    CFPreferencesAppSynchronize((__bridge CFStringRef)LGPrefsDomain);
     notify_post(LGPrefsChangedNotificationCString);
+    LGSchedulePreferencesSynchronize();
 }
 
 void LGWritePreferenceAndMaybeRequireRespring(NSString *key, NSNumber *value) {
@@ -598,6 +705,8 @@ void LGRemovePreference(NSString *key) {
     CFPreferencesSetAppValue((__bridge CFStringRef)key,
                              NULL,
                              (__bridge CFStringRef)LGPrefsDomain);
+    notify_post(LGPrefsChangedNotificationCString);
+    LGSchedulePreferencesSynchronize();
 }
 
 NSDictionary *LGSwitchSetting(NSString *key, NSString *title, NSString *subtitle, BOOL fallback) {
@@ -624,6 +733,17 @@ NSDictionary *LGNavSetting(NSString *title, NSString *subtitle, NSString *action
         @"title": title ?: @"",
         @"subtitle": subtitle ?: @"",
         @"action": action ?: @""
+    };
+}
+
+static NSDictionary *LGKeyedNavSetting(NSString *key, NSString *title, NSString *subtitle, NSString *action) {
+    return @{
+        @"type": @"nav",
+        @"key": key ?: @"",
+        @"title": title ?: @"",
+        @"subtitle": subtitle ?: @"",
+        @"action": action ?: @"",
+        @"default": @""
     };
 }
 
@@ -656,6 +776,14 @@ static NSDictionary *LGSettingControlledByKey(NSDictionary *item, NSString *enab
     NSMutableDictionary *copy = [item mutableCopy];
     if (enabledKey.length) copy[@"enabled_key"] = enabledKey;
     if (enabledDefault) copy[@"enabled_default"] = enabledDefault;
+    return [copy copy];
+}
+
+static NSDictionary *LGSettingVisibleForKeyValues(NSDictionary *item, NSString *visibleKey, id visibleDefault, NSArray *visibleValues) {
+    NSMutableDictionary *copy = [item mutableCopy];
+    if (visibleKey.length) copy[@"visible_key"] = visibleKey;
+    if (visibleDefault) copy[@"visible_default"] = visibleDefault;
+    if (visibleValues.count) copy[@"visible_values"] = visibleValues;
     return [copy copy];
 }
 
@@ -709,7 +837,17 @@ NSDictionary *LGGlassBlurSetting(NSString *key, CGFloat fallback, CGFloat min, C
 }
 
 NSDictionary *LGGlassCornerRadiusSetting(NSString *key, CGFloat fallback, CGFloat min, CGFloat max, NSInteger decimals) {
-    return LGSliderSetting(key, LGLocalized(@"prefs.control.corner_radius"), LGLocalized(@"prefs.subtitle.corner_radius"), fallback, min, kLGUniversalCornerRadiusMax, decimals);
+    return LGSliderSetting(key,
+                           LGLocalized(@"prefs.control.corner_radius"),
+                           LGLocalized(@"prefs.subtitle.corner_radius"),
+                           LGCornerRadiusDefaultForKey(key, fallback),
+                           min,
+                           kLGUniversalCornerRadiusMax,
+                           decimals);
+}
+
+CGFloat LGCornerRadiusDefaultForKey(NSString *key, CGFloat fallback) {
+    return LGDynamicDefaultFloat(key, fallback);
 }
 
 NSDictionary *LGGlassThicknessSetting(NSString *key, CGFloat fallback, CGFloat min, CGFloat max, NSInteger decimals) {
@@ -748,6 +886,7 @@ static NSArray<NSDictionary *> *LGPerSurfaceTintOverrideItems(void) {
         LGGlassTintOverrideSetting(@"AppIcons.TintOverrideMode", LGLocalized(@"prefs.section.app_icons.title")),
         LGGlassTintOverrideSetting(@"ContextMenu.TintOverrideMode", LGLocalized(@"prefs.section.context_menu.title")),
         LGGlassTintOverrideSetting(@"Banner.TintOverrideMode", LGLocalized(@"prefs.section.banner.title")),
+        LGGlassTintOverrideSetting(@"ControlCenter.TintOverrideMode", LGLocalized(@"prefs.section.control_center.title")),
         LGGlassTintOverrideSetting(@"SearchPill.TintOverrideMode", LGLocalized(@"prefs.section.search_pill.title")),
         LGGlassTintOverrideSetting(@"Widgets.TintOverrideMode", LGLocalized(@"prefs.section.widgets.title")),
         LGGlassTintOverrideSetting(@"Lockscreen.TintOverrideMode", LGLocalized(@"prefs.section.lockscreen_notifications.title")),
@@ -755,6 +894,27 @@ static NSArray<NSDictionary *> *LGPerSurfaceTintOverrideItems(void) {
         LGGlassTintOverrideSettingWithFallback(@"Lockscreen.Clock.TintOverrideMode", LGLocalized(@"prefs.section.lockscreen_clock.title"), LGTintOverrideLight),
         LGGlassTintOverrideSetting(@"AppLibrary.TintOverrideMode", LGLocalized(@"prefs.section.category_pods.title")),
         LGGlassTintOverrideSetting(@"AppLibrary.Search.TintOverrideMode", LGLocalized(@"prefs.section.search_field.title")),
+    ];
+}
+
+static NSDictionary *LGDisplayLinkSurfaceSwitch(NSString *key, NSString *title) {
+    return LGSwitchSetting(key,
+                           title ?: @"",
+                           LGLocalized(@"prefs.misc.display_link_surface.subtitle"),
+                           YES);
+}
+
+static NSArray<NSDictionary *> *LGPerSurfaceDisplayLinkItems(void) {
+    return @[
+        LGDisplayLinkSurfaceSwitch(@"DisplayLink.Dock.Enabled", LGLocalized(@"prefs.section.dock.title")),
+        LGDisplayLinkSurfaceSwitch(@"DisplayLink.FolderOpen.Enabled", LGLocalized(@"prefs.section.folder_open.title")),
+        LGDisplayLinkSurfaceSwitch(@"DisplayLink.ContextMenu.Enabled", LGLocalized(@"prefs.section.context_menu.title")),
+        LGDisplayLinkSurfaceSwitch(@"DisplayLink.Banner.Enabled", LGLocalized(@"prefs.section.banner.title")),
+        LGDisplayLinkSurfaceSwitch(@"DisplayLink.ControlCenter.Enabled", LGLocalized(@"prefs.section.control_center.title")),
+        LGDisplayLinkSurfaceSwitch(@"DisplayLink.Widgets.Enabled", LGLocalized(@"prefs.section.widgets.title")),
+        LGDisplayLinkSurfaceSwitch(@"DisplayLink.AppLibrary.Enabled", LGLocalized(@"prefs.surface.app_library.title")),
+        LGDisplayLinkSurfaceSwitch(@"DisplayLink.Lockscreen.Enabled", LGLocalized(@"prefs.surface.lockscreen.title")),
+        LGDisplayLinkSurfaceSwitch(@"DisplayLink.LockscreenClock.Enabled", LGLocalized(@"prefs.section.lockscreen_clock.title")),
     ];
 }
 
@@ -786,7 +946,7 @@ NSDictionary *LGScopedFPSSliderSetting(NSString *key) {
     NSString *subtitle = maxFPS >= 120
         ? LGLocalized(@"prefs.subtitle.fps_limit_120")
         : LGLocalized(@"prefs.subtitle.fps_limit_60");
-    return LGSliderSetting(key, LGLocalized(@"prefs.control.fps_limit"), subtitle, defaultFPS, 30.0, (CGFloat)maxFPS, 0);
+    return LGSliderSetting(key, LGLocalized(@"prefs.control.fps_limit"), subtitle, defaultFPS, 1.0, (CGFloat)maxFPS, 0);
 }
 
 NSString *LGFormatSliderValue(CGFloat value, NSInteger decimals) {
@@ -827,14 +987,14 @@ NSArray<NSDictionary *> *LGFolderItems(void) {
         LGGlassQualitySetting(@"FolderIcon.WallpaperScale", 0.5, 0.1, 1.0, 2),
         LGSectionSetting(LGLocalized(@"prefs.section.folder_open.title"), LGLocalized(@"prefs.section.folder_open.subtitle")),
         LGGlassEnabledSetting(@"FolderOpen.Enabled", YES),
-        LGGlassBezelSetting(@"FolderOpen.BezelWidth", 24.0, 0.0, 50.0, 1),
-        LGGlassBlurSetting(@"FolderOpen.Blur", 25.0, 0.0, 40.0, 1),
+        LGGlassBezelSetting(@"FolderOpen.BezelWidth", 38.0, 0.0, 50.0, 1),
+        LGGlassBlurSetting(@"FolderOpen.Blur", 15.0, 0.0, 40.0, 1),
         LGGlassCornerRadiusSetting(@"FolderOpen.CornerRadius", 38.0, 0.0, 60.0, 1),
         LGGlassDarkTintSetting(@"FolderOpen.DarkTintAlpha", 0.0, 0.0, 1.0, 2),
         LGGlassThicknessSetting(@"FolderOpen.GlassThickness", 100.0, 0.0, 200.0, 1),
         LGGlassLightTintSetting(@"FolderOpen.LightTintAlpha", 0.1, 0.0, 1.0, 2),
-        LGGlassRefractiveIndexSetting(@"FolderOpen.RefractiveIndex", 1.2, 1.0, 2.0, 2),
-        LGGlassRefractionSetting(@"FolderOpen.RefractionScale", 1.8, 0.5, 3.0, 2),
+        LGGlassRefractiveIndexSetting(@"FolderOpen.RefractiveIndex", 4.0, 1.0, 5.0, 2),
+        LGGlassRefractionSetting(@"FolderOpen.RefractionScale", 1.5, 0.5, 3.0, 2),
         LGGlassSpecularSetting(@"FolderOpen.SpecularOpacity", 0.6, 0.0, 1.0, 2),
         LGGlassQualitySetting(@"FolderOpen.WallpaperScale", 0.1, 0.1, 1.0, 2),
     ];
@@ -919,6 +1079,135 @@ NSArray<NSDictionary *> *LGLockscreenItems(void) {
         LGGlassRefractionSetting(@"LockscreenQuickActions.RefractionScale", 1.2, 0.5, 2.5, 2),
         LGGlassSpecularSetting(@"LockscreenQuickActions.SpecularOpacity", 0.6, 0.0, 1.0, 2),
         LGGlassQualitySetting(@"LockscreenQuickActions.WallpaperScale", 0.5, 0.1, 1.0, 2),
+        LGSectionSetting(LGLocalized(@"prefs.section.lockscreen_passcode.title"), LGLocalized(@"prefs.section.lockscreen_passcode.subtitle")),
+        LGGlassEnabledSetting(@"Lockscreen.Passcode.Enabled", YES),
+        LGGlassBezelSetting(@"Lockscreen.Passcode.BezelWidth", 30.0, 0.0, 50.0, 1),
+        LGGlassBlurSetting(@"Lockscreen.Passcode.Blur", 3.0, 0.0, 20.0, 1),
+        LGGlassThicknessSetting(@"Lockscreen.Passcode.GlassThickness", 80.0, 0.0, 160.0, 1),
+        LGGlassDarkTintSetting(@"Lockscreen.Passcode.DarkTintAlpha", 0.12, 0.0, 1.0, 2),
+        LGGlassRefractiveIndexSetting(@"Lockscreen.Passcode.RefractiveIndex", 1.5, 1.0, 2.0, 2),
+        LGGlassRefractionSetting(@"Lockscreen.Passcode.RefractionScale", 1.0, 0.5, 3.0, 2),
+        LGGlassSpecularSetting(@"Lockscreen.Passcode.SpecularOpacity", 0.6, 0.0, 1.5, 2),
+        LGGlassQualitySetting(@"Lockscreen.Passcode.WallpaperScale", 0.5, 0.1, 1.0, 2),
+        LGSliderSetting(@"Lockscreen.Passcode.BackgroundDarkTintAlpha",
+                        LGLocalized(@"prefs.control.background_dark_tint_alpha"),
+                        LGLocalized(@"prefs.subtitle.background_dark_tint_alpha"),
+                        0.2,
+                        0.0,
+                        1.0,
+                        2),
+        LGSliderSetting(@"Lockscreen.Passcode.ActiveScale",
+                        LGLocalized(@"prefs.control.active_scale"),
+                        LGLocalized(@"prefs.subtitle.active_scale"),
+                        1.16,
+                        1.0,
+                        1.4,
+                        2),
+        LGSliderSetting(@"Lockscreen.Passcode.ActiveLightTintAlpha",
+                        LGLocalized(@"prefs.control.active_light_tint_alpha"),
+                        LGLocalized(@"prefs.subtitle.active_light_tint_alpha"),
+                        0.44,
+                        0.0,
+                        1.0,
+                        2),
+        LGSliderSetting(@"Lockscreen.Passcode.ActiveSpecularOpacity",
+                        LGLocalized(@"prefs.control.active_specular"),
+                        LGLocalized(@"prefs.subtitle.active_specular"),
+                        1.2,
+                        0.0,
+                        1.5,
+                        2),
+        LGSliderSetting(@"Lockscreen.Passcode.ActiveBezelWidth",
+                        LGLocalized(@"prefs.control.active_bezel_width"),
+                        LGLocalized(@"prefs.subtitle.active_bezel_width"),
+                        36.0,
+                        0.0,
+                        60.0,
+                        1),
+        LGSliderSetting(@"Lockscreen.Passcode.ActiveRefractionScale",
+                        LGLocalized(@"prefs.control.active_refraction"),
+                        LGLocalized(@"prefs.subtitle.active_refraction"),
+                        1.12,
+                        0.5,
+                        3.0,
+                        2),
+        LGSliderSetting(@"Lockscreen.Passcode.ActiveBlur",
+                        LGLocalized(@"prefs.control.active_blur"),
+                        LGLocalized(@"prefs.subtitle.active_blur"),
+                        2.1,
+                        0.0,
+                        20.0,
+                        1),
+        LGSliderSetting(@"Lockscreen.Passcode.PressInMass",
+                        LGLocalized(@"prefs.control.press_in_mass"),
+                        LGLocalized(@"prefs.subtitle.press_in_mass"),
+                        0.8,
+                        0.1,
+                        5.0,
+                        2),
+        LGSliderSetting(@"Lockscreen.Passcode.PressInStiffness",
+                        LGLocalized(@"prefs.control.press_in_stiffness"),
+                        LGLocalized(@"prefs.subtitle.press_in_stiffness"),
+                        300.0,
+                        1.0,
+                        1000.0,
+                        1),
+        LGSliderSetting(@"Lockscreen.Passcode.PressInDamping",
+                        LGLocalized(@"prefs.control.press_in_damping"),
+                        LGLocalized(@"prefs.subtitle.press_in_damping"),
+                        18.0,
+                        0.0,
+                        100.0,
+                        2),
+        LGSliderSetting(@"Lockscreen.Passcode.PressInVelocity",
+                        LGLocalized(@"prefs.control.press_in_velocity"),
+                        LGLocalized(@"prefs.subtitle.press_in_velocity"),
+                        0.5,
+                        0.0,
+                        5.0,
+                        2),
+        LGSliderSetting(@"Lockscreen.Passcode.PressInDuration",
+                        LGLocalized(@"prefs.control.press_in_duration"),
+                        LGLocalized(@"prefs.subtitle.press_in_duration"),
+                        0.3,
+                        0.0,
+                        2.0,
+                        2),
+        LGSliderSetting(@"Lockscreen.Passcode.ReleaseMass",
+                        LGLocalized(@"prefs.control.release_mass"),
+                        LGLocalized(@"prefs.subtitle.release_mass"),
+                        0.8,
+                        0.1,
+                        5.0,
+                        2),
+        LGSliderSetting(@"Lockscreen.Passcode.ReleaseStiffness",
+                        LGLocalized(@"prefs.control.release_stiffness"),
+                        LGLocalized(@"prefs.subtitle.release_stiffness"),
+                        300.0,
+                        1.0,
+                        1000.0,
+                        1),
+        LGSliderSetting(@"Lockscreen.Passcode.ReleaseDamping",
+                        LGLocalized(@"prefs.control.release_damping"),
+                        LGLocalized(@"prefs.subtitle.release_damping"),
+                        12.0,
+                        0.0,
+                        100.0,
+                        2),
+        LGSliderSetting(@"Lockscreen.Passcode.ReleaseVelocity",
+                        LGLocalized(@"prefs.control.release_velocity"),
+                        LGLocalized(@"prefs.subtitle.release_velocity"),
+                        1.0,
+                        0.0,
+                        5.0,
+                        2),
+        LGSliderSetting(@"Lockscreen.Passcode.ReleaseDuration",
+                        LGLocalized(@"prefs.control.release_duration"),
+                        LGLocalized(@"prefs.subtitle.release_duration"),
+                        0.5,
+                        0.0,
+                        2.0,
+                        2),
         LGSectionSetting(LGLocalized(@"prefs.section.lockscreen_clock.title"), LGLocalized(@"prefs.section.lockscreen_clock.subtitle")),
         LGGlassEnabledSetting(@"Lockscreen.Clock.Enabled", YES),
     ]];
@@ -932,6 +1221,20 @@ NSArray<NSDictionary *> *LGLockscreenItems(void) {
     [items addObject:LGGlassRefractionSetting(@"Lockscreen.Clock.RefractionScale", 1.5, 0.0, 5.0, 2)];
     [items addObject:LGGlassSpecularSetting(@"Lockscreen.Clock.SpecularOpacity", 0.6, 0.0, 1.0, 2)];
     [items addObject:LGGlassQualitySetting(@"Lockscreen.Clock.WallpaperScale", 1.0, 0.1, 1.0, 2)];
+    [items addObject:LGSliderSetting(@"Lockscreen.Clock.VerticalOffset",
+                                     LGLocalized(@"prefs.control.clock_vertical_offset"),
+                                     LGLocalized(@"prefs.subtitle.clock_vertical_offset"),
+                                     0.0,
+                                     0.0,
+                                     120.0,
+                                     1)];
+    [items addObject:LGSliderSetting(@"Lockscreen.Clock.DateVerticalOffset",
+                                     LGLocalized(@"prefs.control.date_vertical_offset"),
+                                     LGLocalized(@"prefs.subtitle.date_vertical_offset"),
+                                     0.0,
+                                     0.0,
+                                     120.0,
+                                     1)];
     if (LGIsAtLeastiOS16()) {
         [items addObject:LGSectionSetting(@"", @"")];
         [items addObject:LGSettingControlledByKey(LGSwitchSetting(@"Lockscreen.Clock.VariableFont.Enabled",
@@ -943,16 +1246,25 @@ NSArray<NSDictionary *> *LGLockscreenItems(void) {
         [items addObject:LGSettingControlledByKey(LGSliderSetting(@"Lockscreen.Clock.VariableFont.Weight",
                                                                   LGLocalized(@"prefs.control.variable_font_weight"),
                                                                   LGLocalized(@"prefs.subtitle.variable_font_weight"),
-                                                                  640.0,
+                                                                  750.0,
                                                                   1.0,
                                                                   1000.0,
                                                                   0),
                                                  @"Lockscreen.Clock.Enabled",
                                                  @YES)];
+        [items addObject:LGSettingControlledByKey(LGSliderSetting(@"Lockscreen.Clock.VariableFont.SizeScale",
+                                                                  LGLocalized(@"prefs.control.variable_font_size"),
+                                                                  LGLocalized(@"prefs.subtitle.variable_font_size"),
+                                                                  1.4,
+                                                                  0.8,
+                                                                  2.0,
+                                                                  2),
+                                                 @"Lockscreen.Clock.Enabled",
+                                                 @YES)];
         [items addObject:LGSettingControlledByKey(LGSliderSetting(@"Lockscreen.Clock.VariableFont.Width",
                                                                   LGLocalized(@"prefs.control.variable_font_width"),
                                                                   LGLocalized(@"prefs.subtitle.variable_font_width"),
-                                                                  92.0,
+                                                                  100.0,
                                                                   60.0,
                                                                   100.0,
                                                                   0),
@@ -961,7 +1273,7 @@ NSArray<NSDictionary *> *LGLockscreenItems(void) {
         [items addObject:LGSettingControlledByKey(LGSliderSetting(@"Lockscreen.Clock.VariableFont.Height",
                                                                   LGLocalized(@"prefs.control.variable_font_height"),
                                                                   LGLocalized(@"prefs.subtitle.variable_font_height"),
-                                                                  112.0,
+                                                                  350.0,
                                                                   100.0,
                                                                   500.0,
                                                                   0),
@@ -980,43 +1292,115 @@ NSArray<NSDictionary *> *LGLockscreenItems(void) {
 
     if (!LGIsAtLeastiOS16()) {
         [items addObject:LGSectionSetting(@"", @"")];
-        [items addObject:LGSettingControlledByKey(LGMenuSetting(@"Lockscreen.Clock.LegacyFontStyle",
-                                                                LGLocalized(@"prefs.control.font_style"),
-                                                                LGLocalized(@"prefs.subtitle.font_style"),
-                                                                @"current",
-                                                                @[
-                                                                    @{@"value": @"current", @"title": LGLocalized(@"prefs.font_style.current.title")},
-                                                                    @{@"value": @"rounded", @"title": LGLocalized(@"prefs.font_style.rounded.title")}
-                                                                ]),
-                                                 @"Lockscreen.Clock.Enabled",
-                                                 @YES)];
-        [items addObject:LGSettingControlledByKey(LGSliderSetting(@"Lockscreen.Clock.LegacyFontWeight",
-                                                                  LGLocalized(@"prefs.control.font_weight"),
-                                                                  LGLocalized(@"prefs.subtitle.font_weight"),
-                                                                  UIFontWeightHeavy,
-                                                                  0.0,
-                                                                  1.0,
-                                                                  2),
-                                                 @"Lockscreen.Clock.Enabled",
-                                                 @YES)];
-        [items addObject:LGSettingControlledByKey(LGSliderSetting(@"Lockscreen.Clock.LegacySizeBoost",
-                                                                  LGLocalized(@"prefs.control.size_boost"),
-                                                                  LGLocalized(@"prefs.subtitle.size_boost"),
-                                                                  1.05,
-                                                                  0.8,
-                                                                  1.3,
-                                                                  2),
-                                                 @"Lockscreen.Clock.Enabled",
-                                                 @YES)];
-        [items addObject:LGSettingControlledByKey(LGSliderSetting(@"Lockscreen.Clock.LegacyEmbolden",
-                                                                  LGLocalized(@"prefs.control.embolden"),
-                                                                  LGLocalized(@"prefs.subtitle.embolden"),
-                                                                  0.35,
-                                                                  0.0,
-                                                                  1.0,
-                                                                  2),
-                                                 @"Lockscreen.Clock.Enabled",
-                                                 @YES)];
+        NSMutableDictionary *legacyFontStyleItem = [LGSettingControlledByKey(LGMenuSetting(@"Lockscreen.Clock.LegacyFontStyle",
+                                                                                            LGLocalized(@"prefs.control.font_style"),
+                                                                                            LGLocalized(@"prefs.subtitle.font_style"),
+                                                                                            @"current",
+                                                                                            @[
+                                                                                                @{@"value": @"current", @"title": LGLocalized(@"prefs.font_style.current.title")},
+                                                                                                @{@"value": @"rounded", @"title": LGLocalized(@"prefs.font_style.rounded.title")},
+                                                                                                @{@"value": @"ios26", @"title": LGLocalized(@"prefs.control.variable_font")}
+                                                                                            ]),
+                                                             @"Lockscreen.Clock.Enabled",
+                                                             @YES) mutableCopy];
+        legacyFontStyleItem[@"reload_on_change"] = @YES;
+        [items addObject:[legacyFontStyleItem copy]];
+        [items addObject:LGSettingVisibleForKeyValues(LGSettingControlledByKey(LGSliderSetting(@"Lockscreen.Clock.LegacyFontWeight",
+                                                                                                LGLocalized(@"prefs.control.font_weight"),
+                                                                                                LGLocalized(@"prefs.subtitle.font_weight"),
+                                                                                                UIFontWeightHeavy,
+                                                                                                0.0,
+                                                                                                1.0,
+                                                                                                2),
+                                                                               @"Lockscreen.Clock.Enabled",
+                                                                               @YES),
+                                                      @"Lockscreen.Clock.LegacyFontStyle",
+                                                      @"current",
+                                                      @[@"current", @"rounded"])];
+        [items addObject:LGSettingVisibleForKeyValues(LGSettingControlledByKey(LGSliderSetting(@"Lockscreen.Clock.LegacySizeBoost",
+                                                                                                LGLocalized(@"prefs.control.size_boost"),
+                                                                                                LGLocalized(@"prefs.subtitle.size_boost"),
+                                                                                                1.05,
+                                                                                                0.8,
+                                                                                                1.3,
+                                                                                                2),
+                                                                               @"Lockscreen.Clock.Enabled",
+                                                                               @YES),
+                                                      @"Lockscreen.Clock.LegacyFontStyle",
+                                                      @"current",
+                                                      @[@"current", @"rounded"])];
+        [items addObject:LGSettingVisibleForKeyValues(LGSettingControlledByKey(LGSliderSetting(@"Lockscreen.Clock.LegacyEmbolden",
+                                                                                                LGLocalized(@"prefs.control.embolden"),
+                                                                                                LGLocalized(@"prefs.subtitle.embolden"),
+                                                                                                0.35,
+                                                                                                0.0,
+                                                                                                1.0,
+                                                                                                2),
+                                                                               @"Lockscreen.Clock.Enabled",
+                                                                               @YES),
+                                                      @"Lockscreen.Clock.LegacyFontStyle",
+                                                      @"current",
+                                                      @[@"current", @"rounded"])];
+        [items addObject:LGSettingVisibleForKeyValues(LGSettingControlledByKey(LGSliderSetting(@"Lockscreen.Clock.VariableFont.Weight",
+                                                                                                LGLocalized(@"prefs.control.variable_font_weight"),
+                                                                                                LGLocalized(@"prefs.subtitle.variable_font_weight"),
+                                                                                                750.0,
+                                                                                                1.0,
+                                                                                                1000.0,
+                                                                                                0),
+                                                                               @"Lockscreen.Clock.Enabled",
+                                                                               @YES),
+                                                      @"Lockscreen.Clock.LegacyFontStyle",
+                                                      @"current",
+                                                      @[@"ios26"])];
+        [items addObject:LGSettingVisibleForKeyValues(LGSettingControlledByKey(LGSliderSetting(@"Lockscreen.Clock.VariableFont.SizeScale",
+                                                                                                LGLocalized(@"prefs.control.variable_font_size"),
+                                                                                                LGLocalized(@"prefs.subtitle.variable_font_size"),
+                                                                                                1.4,
+                                                                                                0.8,
+                                                                                                2.0,
+                                                                                                2),
+                                                                               @"Lockscreen.Clock.Enabled",
+                                                                               @YES),
+                                                      @"Lockscreen.Clock.LegacyFontStyle",
+                                                      @"current",
+                                                      @[@"ios26"])];
+        [items addObject:LGSettingVisibleForKeyValues(LGSettingControlledByKey(LGSliderSetting(@"Lockscreen.Clock.VariableFont.Width",
+                                                                                                LGLocalized(@"prefs.control.variable_font_width"),
+                                                                                                LGLocalized(@"prefs.subtitle.variable_font_width"),
+                                                                                                100.0,
+                                                                                                60.0,
+                                                                                                100.0,
+                                                                                                0),
+                                                                               @"Lockscreen.Clock.Enabled",
+                                                                               @YES),
+                                                      @"Lockscreen.Clock.LegacyFontStyle",
+                                                      @"current",
+                                                      @[@"ios26"])];
+        [items addObject:LGSettingVisibleForKeyValues(LGSettingControlledByKey(LGSliderSetting(@"Lockscreen.Clock.VariableFont.Height",
+                                                                                                LGLocalized(@"prefs.control.variable_font_height"),
+                                                                                                LGLocalized(@"prefs.subtitle.variable_font_height"),
+                                                                                                350.0,
+                                                                                                100.0,
+                                                                                                500.0,
+                                                                                                0),
+                                                                               @"Lockscreen.Clock.Enabled",
+                                                                               @YES),
+                                                      @"Lockscreen.Clock.LegacyFontStyle",
+                                                      @"current",
+                                                      @[@"ios26"])];
+        [items addObject:LGSettingVisibleForKeyValues(LGSettingControlledByKey(LGSliderSetting(@"Lockscreen.Clock.VariableFont.Softness",
+                                                                                                LGLocalized(@"prefs.control.variable_font_softness"),
+                                                                                                LGLocalized(@"prefs.subtitle.variable_font_softness"),
+                                                                                                56.0,
+                                                                                                0.0,
+                                                                                                100.0,
+                                                                                                0),
+                                                                               @"Lockscreen.Clock.Enabled",
+                                                                               @YES),
+                                                      @"Lockscreen.Clock.LegacyFontStyle",
+                                                      @"current",
+                                                      @[@"ios26"])];
     }
 
     return [items copy];
@@ -1095,21 +1479,19 @@ NSArray<NSDictionary *> *LGHomescreenItems(void) {
 }
 
 NSArray<NSDictionary *> *LGAllSurfaceItems(void) {
-    static NSArray<NSDictionary *> *items = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        NSMutableArray<NSDictionary *> *all = [NSMutableArray array];
-        [all addObject:LGSwitchSetting(@"Global.Enabled", LGLocalized(@"prefs.control.enabled"), LGLocalized(@"prefs.subtitle.global_enabled"), NO)];
-        [all addObjectsFromArray:LGHomescreenItems()];
-        [all addObjectsFromArray:LGLockscreenItems()];
-        [all addObjectsFromArray:LGAppLibraryItems()];
-        items = [all copy];
-    });
-    return items;
+    NSMutableArray<NSDictionary *> *all = [NSMutableArray array];
+    [all addObject:LGSwitchSetting(@"Global.Enabled", LGLocalized(@"prefs.control.enabled"), LGLocalized(@"prefs.subtitle.global_enabled"), NO)];
+    [all addObjectsFromArray:LGHomescreenItems()];
+    [all addObjectsFromArray:LGLockscreenItems()];
+    [all addObjectsFromArray:LGAppLibraryItems()];
+    return [all copy];
 }
 
 NSArray<NSDictionary *> *LGExperimentalItems(void) {
     return @[
+        LGSectionSetting(LGLocalized(@"prefs.section.control_center.title"),
+                         LGLocalized(@"prefs.section.control_center.subtitle")),
+        LGGlassEnabledSetting(@"ControlCenter.Enabled", YES),
         LGSectionSetting(LGLocalized(@"prefs.section.experimental_rendering.title"),
                          LGLocalized(@"prefs.section.experimental_rendering.subtitle")),
         LGMenuSetting(@"Dock.RenderingMode",
@@ -1160,6 +1542,14 @@ NSArray<NSDictionary *> *LGExperimentalItems(void) {
                           @{@"value": LGRenderingModeSnapshot, @"title": LGLocalized(@"prefs.rendering.snapshot.title")},
                           @{@"value": LGRenderingModeLiveCapture, @"title": LGLocalized(@"prefs.rendering.live_capture.title")}
                       ]),
+        LGMenuSetting(@"ControlCenter.RenderingMode",
+                      LGLocalized(@"prefs.section.control_center.title"),
+                      @"",
+                      LGRenderingModeLiveCapture,
+                      @[
+                          @{@"value": LGRenderingModeSnapshot, @"title": LGLocalized(@"prefs.rendering.snapshot.title")},
+                          @{@"value": LGRenderingModeLiveCapture, @"title": LGLocalized(@"prefs.rendering.live_capture.title")}
+                      ]),
         LGMenuSetting(@"SearchPill.RenderingMode",
                       LGLocalized(@"prefs.section.search_pill.title"),
                       @"",
@@ -1178,6 +1568,22 @@ NSArray<NSDictionary *> *LGExperimentalItems(void) {
                       ]),
         LGMenuSetting(@"Lockscreen.RenderingMode",
                       LGLocalized(@"prefs.section.lockscreen_notifications.title"),
+                      @"",
+                      LGRenderingModeSnapshot,
+                      @[
+                          @{@"value": LGRenderingModeSnapshot, @"title": LGLocalized(@"prefs.rendering.snapshot.title")},
+                          @{@"value": LGRenderingModeLiveCapture, @"title": LGLocalized(@"prefs.rendering.live_capture.title")}
+                      ]),
+        LGMenuSetting(@"Lockscreen.Passcode.RenderingMode",
+                      LGLocalized(@"prefs.section.lockscreen_passcode.title"),
+                      @"",
+                      LGRenderingModeSnapshot,
+                      @[
+                          @{@"value": LGRenderingModeSnapshot, @"title": LGLocalized(@"prefs.rendering.snapshot.title")},
+                          @{@"value": LGRenderingModeLiveCapture, @"title": LGLocalized(@"prefs.rendering.live_capture.title")}
+                      ]),
+        LGMenuSetting(@"Lockscreen.Clock.RenderingMode",
+                      LGLocalized(@"prefs.section.lockscreen_clock.title"),
                       @"",
                       LGRenderingModeSnapshot,
                       @[
@@ -1208,12 +1614,64 @@ NSArray<NSDictionary *> *LGExperimentalItems(void) {
                           @{@"value": LGRenderingModeSnapshot, @"title": LGLocalized(@"prefs.rendering.snapshot.title")},
                           @{@"value": LGRenderingModeLiveCapture, @"title": LGLocalized(@"prefs.rendering.live_capture.title")}
                       ]),
-        LGSectionSetting(LGLocalized(@"prefs.section.experimental_features.title"),
-                         LGLocalized(@"prefs.section.experimental_features.subtitle")),
-        LGSwitchSetting(@"SettingsControls.Enabled",
-                        LGLocalized(@"prefs.misc.settings_controls.title"),
-                        LGLocalized(@"prefs.misc.settings_controls.subtitle"),
-                        NO),
+    ];
+}
+
+static NSDictionary *LGLiveCaptureFPSSlider(NSString *key, NSString *title, CGFloat fallback) {
+    return LGSliderSetting(key,
+                           title ?: @"",
+                           LGLocalized(@"prefs.live_capture.fps.subtitle"),
+                           fallback,
+                           1.0,
+                           30.0,
+                           0);
+}
+
+NSArray<NSDictionary *> *LGLiveCaptureItems(void) {
+    return @[
+        LGSectionSetting(LGLocalized(@"prefs.section.live_capture_general.title"),
+                         LGLocalized(@"prefs.section.live_capture_general.subtitle")),
+        LGSliderSetting(@"LiveCapture.ScaleFactor",
+                        LGLocalized(@"prefs.live_capture.scale_factor.title"),
+                        LGLocalized(@"prefs.live_capture.scale_factor.subtitle"),
+                        0.35,
+                        0.10,
+                        1.00,
+                        2),
+        LGSliderSetting(@"LiveCapture.MinimumScale",
+                        LGLocalized(@"prefs.live_capture.minimum_scale.title"),
+                        LGLocalized(@"prefs.live_capture.minimum_scale.subtitle"),
+                        0.55,
+                        0.10,
+                        2.00,
+                        2),
+        LGSliderSetting(@"LiveCapture.MaximumScale",
+                        LGLocalized(@"prefs.live_capture.maximum_scale.title"),
+                        LGLocalized(@"prefs.live_capture.maximum_scale.subtitle"),
+                        1.00,
+                        0.10,
+                        3.00,
+                        2),
+        LGSliderSetting(@"LiveCapture.MaximumPixels",
+                        LGLocalized(@"prefs.live_capture.maximum_pixels.title"),
+                        LGLocalized(@"prefs.live_capture.maximum_pixels.subtitle"),
+                        180000.0,
+                        20000.0,
+                        600000.0,
+                        0),
+        LGSectionSetting(LGLocalized(@"prefs.section.live_capture_fps.title"),
+                         LGLocalized(@"prefs.section.live_capture_fps.subtitle")),
+        LGLiveCaptureFPSSlider(@"Dock.LiveCaptureFPS", LGLocalized(@"prefs.section.dock.title"), 12.0),
+        LGLiveCaptureFPSSlider(@"FolderOpen.LiveCaptureFPS", LGLocalized(@"prefs.section.folder_open.title"), 12.0),
+        LGLiveCaptureFPSSlider(@"ContextMenu.LiveCaptureFPS", LGLocalized(@"prefs.section.context_menu.title"), 15.0),
+        LGLiveCaptureFPSSlider(@"Banner.LiveCaptureFPS", LGLocalized(@"prefs.section.banner.title"), 15.0),
+        LGLiveCaptureFPSSlider(@"Widgets.LiveCaptureFPS", LGLocalized(@"prefs.section.widgets.title"), 8.0),
+        LGLiveCaptureFPSSlider(@"AppLibrary.LiveCaptureFPS", LGLocalized(@"prefs.surface.app_library.title"), 12.0),
+        LGLiveCaptureFPSSlider(@"Lockscreen.LiveCaptureFPS", LGLocalized(@"prefs.surface.lockscreen.title"), 10.0),
+        LGLiveCaptureFPSSlider(@"ControlCenter.LiveCaptureFPS", LGLocalized(@"prefs.section.control_center.title"), 12.0),
+        LGLiveCaptureFPSSlider(@"ControlCenter.FullscreenBlurCapFPS",
+                               LGLocalized(@"prefs.live_capture.control_center_blur_cap.title"),
+                               15.0),
     ];
 }
 
@@ -1242,54 +1700,225 @@ NSArray<NSDictionary *> *LGMoreOptionsItems(void) {
     }
 
     [items addObject:LGSectionSetting(@"", @"")];
+    [items addObject:LGSectionSetting(LGLocalized(@"prefs.section.display_link_toggle.title"),
+                                      LGLocalized(@"prefs.section.display_link_toggle.subtitle"))];
+    [items addObject:({
+        NSMutableDictionary *item = [LGSwitchSetting(@"DisplayLink.PerSurfaceEnabled",
+                                                     LGLocalized(@"prefs.control.enabled"),
+                                                     LGLocalized(@"prefs.misc.display_link_toggle.subtitle"),
+                                                     NO) mutableCopy];
+        item[@"controls_following_panel"] = @YES;
+        [item copy];
+    })];
+
+    if ([LGReadPreference(@"DisplayLink.PerSurfaceEnabled", @NO) boolValue]) {
+        [items addObjectsFromArray:LGPerSurfaceDisplayLinkItems()];
+    }
+
+    [items addObject:LGSectionSetting(@"", @"")];
     [items addObject:LGSectionSetting(LGLocalized(@"prefs.misc.options_section.title"),
                                       LGLocalized(@"prefs.misc.options_section.subtitle"))];
     [items addObject:LGSwitchSetting(@"AppLibrary.CompositeSnapshot",
                                      LGLocalized(@"prefs.misc.app_library_composite.title"),
                                      LGLocalized(@"prefs.misc.app_library_composite.subtitle"),
                                      NO)];
+    [items addObject:LGNavSetting(LGLocalized(@"prefs.misc.live_capture.title"),
+                                  LGLocalized(@"prefs.misc.live_capture.subtitle"),
+                                  @"openLiveCaptureConfiguration")];
+    [items addObject:LGSettingControlledByKey(
+                         LGSwitchSetting(@"SettingsControls.Enabled",
+                                         LGLocalized(@"prefs.misc.settings_controls.title"),
+                                         LGLocalized(@"prefs.misc.settings_controls.subtitle"),
+                                         YES),
+                         @"Global.Enabled",
+                         @NO)];
     [items addObject:LGSwitchSetting(@"DebugLogging.Enabled",
                                      LGLocalized(@"prefs.misc.debug_logging.title"),
                                      LGLocalized(@"prefs.misc.debug_logging.subtitle"),
                                      NO)];
+    [items addObject:LGSwitchSetting(@"DebugProfiling.Enabled",
+                                     LGLocalized(@"prefs.misc.debug_profiling.title"),
+                                     LGLocalized(@"prefs.misc.debug_profiling.subtitle"),
+                                     NO)];
+    [items addObject:LGKeyedNavSetting(@"RWB.ThirdPartyBundleIDs",
+                                       LGLocalized(@"prefs.misc.rwb_third_party.title"),
+                                       LGLocalized(@"prefs.misc.rwb_third_party.subtitle"),
+                                       @"editThirdPartyAppRWB")];
     [items addObject:LGNavSetting(LGLocalized(@"prefs.misc.invalidate_caches.title"),
                                   LGLocalized(@"prefs.misc.invalidate_caches.subtitle"),
                                   @"invalidateSnapshotCaches")];
     [items addObject:LGNavSetting(LGLocalized(@"prefs.misc.experimental.title"),
                                   LGLocalized(@"prefs.misc.experimental.subtitle"),
                                   @"openExperimental")];
+    [items addObject:LGSectionSetting(@"", @"")];
+    [items addObject:LGSectionSetting(LGLocalized(@"prefs.misc.import_export_section.title"),
+                                      LGLocalized(@"prefs.misc.import_export_section.subtitle"))];
+    [items addObject:LGNavSetting(LGLocalized(@"prefs.misc.export_prefs.title"),
+                                  LGLocalized(@"prefs.misc.export_prefs.subtitle"),
+                                  @"exportPreferences")];
+    [items addObject:LGNavSetting(LGLocalized(@"prefs.misc.import_prefs.title"),
+                                  LGLocalized(@"prefs.misc.import_prefs.subtitle"),
+                                  @"importPreferences")];
 
     return [items copy];
 }
 
+NSString *LGExportPreferencesJSONString(void) {
+    NSMutableDictionary *preferences = [NSMutableDictionary dictionary];
+    for (NSString *key in LGExportablePreferenceKeys()) {
+        id value = LGReadPreferenceObject(key, nil);
+        if (!value) continue;
+        preferences[key] = value;
+    }
+
+    NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+    payload[@"format"] = @"liquidass-prefs";
+    payload[@"version"] = @"1";
+    payload[@"preferences"] = preferences;
+    NSString *languageCode = LGCurrentPrefsLanguageCode();
+    if (languageCode.length) {
+        payload[@"ui_language"] = languageCode;
+    }
+
+    NSData *data = [NSJSONSerialization dataWithJSONObject:payload
+                                                   options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys
+                                                     error:nil];
+    if (!data) return nil;
+    return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+}
+
+BOOL LGImportPreferencesJSONString(NSString *jsonString, NSError **error) {
+    if (!jsonString.length) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"love.litten.liquidass.prefs"
+                                         code:1
+                                     userInfo:@{NSLocalizedDescriptionKey: LGLocalized(@"prefs.import_prefs.error_empty")}];
+        }
+        return NO;
+    }
+
+    NSData *data = [jsonString dataUsingEncoding:NSUTF8StringEncoding];
+    if (!data) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"love.litten.liquidass.prefs"
+                                         code:2
+                                     userInfo:@{NSLocalizedDescriptionKey: LGLocalized(@"prefs.import_prefs.error_invalid")}];
+        }
+        return NO;
+    }
+
+    NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (![payload isKindOfClass:[NSDictionary class]]) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"love.litten.liquidass.prefs"
+                                         code:3
+                                     userInfo:@{NSLocalizedDescriptionKey: LGLocalized(@"prefs.import_prefs.error_invalid")}];
+        }
+        return NO;
+    }
+
+    NSString *format = payload[@"format"];
+    NSString *version = payload[@"version"];
+    if (![format isKindOfClass:[NSString class]] ||
+        ![format isEqualToString:@"liquidass-prefs"] ||
+        ![version isKindOfClass:[NSString class]] ||
+        ![version isEqualToString:@"1"]) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"love.litten.liquidass.prefs"
+                                         code:6
+                                     userInfo:@{NSLocalizedDescriptionKey: LGLocalized(@"prefs.import_prefs.error_invalid")}];
+        }
+        return NO;
+    }
+
+    NSDictionary *preferences = payload[@"preferences"];
+    if (![preferences isKindOfClass:[NSDictionary class]]) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"love.litten.liquidass.prefs"
+                                         code:4
+                                     userInfo:@{NSLocalizedDescriptionKey: LGLocalized(@"prefs.import_prefs.error_invalid")}];
+        }
+        return NO;
+    }
+
+    NSSet<NSString *> *allowedKeys = [NSSet setWithArray:LGExportablePreferenceKeys()];
+    __block NSUInteger importedCount = 0;
+    [preferences enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+        (void)stop;
+        if (![key isKindOfClass:[NSString class]]) return;
+        if (![allowedKeys containsObject:key]) return;
+        if (!obj || obj == [NSNull null]) {
+            LGRemovePreference(key);
+        } else {
+            LGWritePreferenceObject(key, obj);
+        }
+        importedCount += 1;
+    }];
+
+    NSString *languageCode = payload[@"ui_language"];
+    if ([languageCode isKindOfClass:[NSString class]] && languageCode.length) {
+        LGSetCurrentPrefsLanguageCode(languageCode);
+    }
+
+    LGFlushPreferencesSynchronize();
+    LGSetRespringBarDismissed(NO);
+    LGSetNeedsRespring(YES);
+    [[NSNotificationCenter defaultCenter] postNotificationName:kLGPrefsUIRefreshNotification object:nil];
+    [[NSNotificationCenter defaultCenter] postNotificationName:kLGPrefsLanguageChangedNotification object:nil];
+    notify_post(LGPrefsChangedNotificationCString);
+
+    if (importedCount == 0) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"love.litten.liquidass.prefs"
+                                         code:5
+                                     userInfo:@{NSLocalizedDescriptionKey: LGLocalized(@"prefs.import_prefs.error_empty")}];
+        }
+        return NO;
+    }
+    return YES;
+}
+
 void LGResetAllPreferences(void) {
-    for (NSDictionary *item in LGAllSurfaceItems()) {
-        NSString *key = item[@"key"];
-        if (!key.length) continue;
-        if ([key isEqualToString:@"Global.Enabled"]) continue;
-        LGRemovePreference(key);
+    CFArrayRef allKeys = CFPreferencesCopyKeyList((__bridge CFStringRef)LGPrefsDomain,
+                                                  kCFPreferencesCurrentUser,
+                                                  kCFPreferencesAnyHost);
+    NSArray *keys = CFBridgingRelease(allKeys);
+    for (id key in keys) {
+        if (![key isKindOfClass:[NSString class]]) continue;
+        if ([(NSString *)key isEqualToString:@"Global.Enabled"]) continue;
+        if ([(NSString *)key hasPrefix:kLGDynamicDefaultPrefix]) continue;
+        LGRemovePreferenceWithoutNotify((NSString *)key);
     }
-    for (NSDictionary *item in LGMoreOptionsItems()) {
-        NSString *key = item[@"key"];
-        if (!key.length) continue;
-        LGRemovePreference(key);
-    }
-    for (NSDictionary *item in LGExperimentalItems()) {
-        NSString *key = item[@"key"];
-        if (!key.length) continue;
-        LGRemovePreference(key);
-    }
-    for (NSDictionary *item in LGPerSurfaceTintOverrideItems()) {
-        NSString *key = item[@"key"];
-        if (!key.length) continue;
-        LGRemovePreference(key);
-    }
-    CFPreferencesAppSynchronize((__bridge CFStringRef)LGPrefsDomain);
+    LGFlushPreferencesSynchronize();
     [LGPrefsUIStateDefaults() removeObjectForKey:kLGPrefsLanguageKey];
     LGSynchronizeSurfaceStateDefaults();
     LGSetRespringBarDismissed(NO);
     LGSetNeedsRespring(YES);
     [[NSNotificationCenter defaultCenter] postNotificationName:kLGPrefsUIRefreshNotification object:nil];
     [[NSNotificationCenter defaultCenter] postNotificationName:kLGPrefsLanguageChangedNotification object:nil];
+    notify_post(LGPrefsChangedNotificationCString);
+}
+
+void LGResetPreferencesForKeys(NSArray<NSString *> *keys) {
+    if (![keys isKindOfClass:[NSArray class]] || keys.count == 0) return;
+
+    NSMutableOrderedSet<NSString *> *uniqueKeys = [NSMutableOrderedSet orderedSet];
+    for (id key in keys) {
+        if (![key isKindOfClass:[NSString class]]) continue;
+        if (![(NSString *)key length]) continue;
+        if ([(NSString *)key isEqualToString:@"Global.Enabled"]) continue;
+        if ([(NSString *)key hasPrefix:kLGDynamicDefaultPrefix]) continue;
+        [uniqueKeys addObject:(NSString *)key];
+    }
+    if (uniqueKeys.count == 0) return;
+
+    for (NSString *key in uniqueKeys) {
+        LGRemovePreferenceWithoutNotify(key);
+    }
+
+    LGFlushPreferencesSynchronize();
+    LGSetRespringBarDismissed(NO);
+    LGSetNeedsRespring(YES);
+    [[NSNotificationCenter defaultCenter] postNotificationName:kLGPrefsUIRefreshNotification object:nil];
     notify_post(LGPrefsChangedNotificationCString);
 }
