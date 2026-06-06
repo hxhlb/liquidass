@@ -8,3 +8,6 @@ void LG_unregisterGlassView(__unused UIView *view, __unused LGUpdateGroup group)
 
 void LG_updateRegisteredGlassViews(__unused LGUpdateGroup group) {
 }
+
+void LG_redrawRegisteredGlassViews(__unused LGUpdateGroup group) {
+}

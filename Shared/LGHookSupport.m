@@ -4,6 +4,11 @@
 
 static const NSInteger kLGMaxTraverseDepth = 128;
 
+typedef struct {
+    __unsafe_unretained UIView *view;
+    NSInteger depth;
+} LGViewTraversalEntry;
+
 BOOL LGHasAncestorClass(UIView *view, Class cls) {
     if (!view || !cls) return NO;
     UIView *ancestor = view.superview;
@@ -36,24 +41,89 @@ BOOL LGResponderChainContainsClassNamed(UIResponder *responder, NSString *classN
 
 void LGTraverseViews(UIView *root, void (^block)(UIView *view)) {
     if (!root || !block) return;
-    NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:root];
-    NSMutableArray<NSNumber *> *depths = [NSMutableArray arrayWithObject:@0];
-    while (stack.count > 0) {
-        UIView *view = stack.lastObject;
-        NSInteger depth = depths.lastObject.integerValue;
-        [stack removeLastObject];
-        [depths removeLastObject];
+    NSUInteger capacity = 128;
+    NSUInteger count = 1;
+    NSMutableData *stackStorage = [NSMutableData dataWithLength:(capacity * sizeof(LGViewTraversalEntry))];
+    LGViewTraversalEntry *stack = (LGViewTraversalEntry *)stackStorage.mutableBytes;
+    stack[0] = (LGViewTraversalEntry){ .view = root, .depth = 0 };
+
+    while (count > 0) {
+        LGViewTraversalEntry entry = stack[--count];
+        UIView *view = entry.view;
+        NSInteger depth = entry.depth;
+        if (!view) continue;
         block(view);
         if (depth >= kLGMaxTraverseDepth) continue;
         NSArray<UIView *> *subviews = view.subviews;
         for (UIView *subview in subviews.reverseObjectEnumerator) {
-            [stack addObject:subview];
-            [depths addObject:@(depth + 1)];
+            if (count >= capacity) {
+                capacity *= 2;
+                [stackStorage setLength:(capacity * sizeof(LGViewTraversalEntry))];
+                stack = (LGViewTraversalEntry *)stackStorage.mutableBytes;
+            }
+            stack[count++] = (LGViewTraversalEntry){ .view = subview, .depth = depth + 1 };
         }
     }
 }
 
+static NSString *LGCustomTintKeyForOverrideKey(NSString *overrideKey) {
+    if (!overrideKey.length) return nil;
+    NSString *suffix = @".TintOverrideMode";
+    if (![overrideKey hasSuffix:suffix]) return nil;
+    return [[overrideKey substringToIndex:(overrideKey.length - suffix.length)] stringByAppendingString:@".CustomTintColor"];
+}
+
+static UIColor *LGColorFromTintString(NSString *string) {
+    NSString *trimmed = [string stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (!trimmed.length) return nil;
+    if ([trimmed hasPrefix:@"#"]) {
+        trimmed = [trimmed substringFromIndex:1];
+    }
+    if ([trimmed hasPrefix:@"0x"] || [trimmed hasPrefix:@"0X"]) {
+        trimmed = [trimmed substringFromIndex:2];
+    }
+
+    if (trimmed.length == 3 || trimmed.length == 4) {
+        NSMutableString *expanded = [NSMutableString stringWithCapacity:(trimmed.length * 2)];
+        for (NSUInteger index = 0; index < trimmed.length; index++) {
+            unichar character = [trimmed characterAtIndex:index];
+            [expanded appendFormat:@"%C%C", character, character];
+        }
+        trimmed = expanded;
+    }
+
+    if (trimmed.length != 6 && trimmed.length != 8) return nil;
+
+    unsigned long long value = 0;
+    NSScanner *scanner = [NSScanner scannerWithString:trimmed];
+    if (![scanner scanHexLongLong:&value] || !scanner.isAtEnd) return nil;
+
+    CGFloat red = 0.0;
+    CGFloat green = 0.0;
+    CGFloat blue = 0.0;
+    CGFloat alpha = 1.0;
+    if (trimmed.length == 8) {
+        red = (CGFloat)((value >> 24) & 0xFF) / 255.0;
+        green = (CGFloat)((value >> 16) & 0xFF) / 255.0;
+        blue = (CGFloat)((value >> 8) & 0xFF) / 255.0;
+        alpha = (CGFloat)(value & 0xFF) / 255.0;
+    } else {
+        red = (CGFloat)((value >> 16) & 0xFF) / 255.0;
+        green = (CGFloat)((value >> 8) & 0xFF) / 255.0;
+        blue = (CGFloat)(value & 0xFF) / 255.0;
+    }
+    return [UIColor colorWithRed:red green:green blue:blue alpha:alpha];
+}
+
+UIColor *LGCustomTintColorForKey(NSString *key) {
+    if (!key.length) return nil;
+    return LGColorFromTintString(LG_prefString(key, @""));
+}
+
 UIColor *LGDefaultTintColorForViewWithOverrideKey(UIView *view, CGFloat lightAlpha, CGFloat darkAlpha, NSString *overrideKey) {
+    UIColor *customTint = LGCustomTintColorForKey(LGCustomTintKeyForOverrideKey(overrideKey));
+    if (customTint) return customTint;
+
     NSString *override = nil;
     if (overrideKey.length) {
         override = LG_prefString(overrideKey, LGTintOverrideSystem);
@@ -164,27 +234,66 @@ void LGRemoveAssociatedSubview(UIView *host, const void *associationKey) {
 - (void)tick:(CADisplayLink *)displayLink;
 @end
 
+@interface LGDisplayLinkStateBox : NSObject
+@property (nonatomic, assign) NSInteger activeCount;
+@property (nonatomic, assign) NSInteger preferredFPS;
+@property (nonatomic, assign) CFTimeInterval lastTickTimestamp;
+@property (nonatomic, assign) NSInteger lastLoggedActiveCount;
+@property (nonatomic, assign) BOOL lastLoggedAllowed;
+@property (nonatomic, copy) NSString *enabledPreferenceKey;
+@property (nonatomic, strong) CADisplayLink *link;
+@property (nonatomic, strong) id driver;
+@end
+
+@implementation LGDisplayLinkStateBox
+@end
+
 static CADisplayLink *sSharedDisplayLink = nil;
 static LGSharedDisplayLinkHub *sSharedDisplayLinkHub = nil;
-static NSMutableArray<NSValue *> *sSharedDisplayLinkStates = nil;
+static NSMutableArray<LGDisplayLinkStateBox *> *sSharedDisplayLinkStates = nil;
+static BOOL sSharedDisplayLinkLastPaused = YES;
+static NSInteger sSharedDisplayLinkLastFPS = 0;
+
+static NSString *LGDisplayLinkBoxName(LGDisplayLinkStateBox *box) {
+    if (!box) return @"(null)";
+    return box.enabledPreferenceKey.length ? box.enabledPreferenceKey : [NSString stringWithFormat:@"%p", box];
+}
 
 static NSInteger LGSharedDisplayLinkMaximumFPS(void) {
     NSInteger maxFPS = UIScreen.mainScreen.maximumFramesPerSecond;
     return maxFPS > 0 ? maxFPS : 60;
 }
 
-static BOOL LGDisplayLinkStatePreferenceAllowsUpdates(LGDisplayLinkState *state) {
-    if (!state) return NO;
+static BOOL LGDisplayLinkBoxPreferenceAllowsUpdates(LGDisplayLinkStateBox *box) {
+    if (!box) return NO;
     if (!LG_prefBool(@"DisplayLink.PerSurfaceEnabled", NO)) return YES;
-    NSString *key = state->enabledPreferenceKey;
+    NSString *key = box.enabledPreferenceKey;
     if (!key.length) return YES;
     return LG_prefBool(key, YES);
 }
 
-static BOOL LGDisplayLinkStateIsActive(LGDisplayLinkState *state) {
-    if (!state || state->link != sSharedDisplayLink) return NO;
-    if (!LGDisplayLinkStatePreferenceAllowsUpdates(state)) return NO;
-    return state->activeCount > 0;
+static BOOL LGDisplayLinkBoxIsActive(LGDisplayLinkStateBox *box) {
+    if (!box || box.link != sSharedDisplayLink) return NO;
+    if (!LGDisplayLinkBoxPreferenceAllowsUpdates(box)) return NO;
+    return box.activeCount > 0;
+}
+
+static LGDisplayLinkStateBox *LGDisplayLinkBoxForSourceState(LGDisplayLinkState *state) {
+    if (!state) return nil;
+    LGDisplayLinkStateBox *box = [state->owner isKindOfClass:LGDisplayLinkStateBox.class] ? state->owner : nil;
+    return [sSharedDisplayLinkStates containsObject:box] ? box : nil;
+}
+
+static void LGClearDisplayLinkSourceState(LGDisplayLinkState *state) {
+    if (!state) return;
+    state->link = nil;
+    state->driver = nil;
+    state->enabledPreferenceKey = nil;
+    state->preferredFPS = 0;
+    state->lastTickTimestamp = 0.0;
+    state->lastLoggedActiveCount = 0;
+    state->lastLoggedAllowed = NO;
+    state->owner = nil;
 }
 
 static void LGStopSharedDisplayLinkIfIdle(void) {
@@ -198,14 +307,18 @@ static void LGReconfigureSharedDisplayLinkFPS(void) {
     if (!sSharedDisplayLink) return;
     NSInteger highestFPS = 0;
     BOOL hasActiveStates = NO;
-    for (NSValue *value in sSharedDisplayLinkStates) {
-        LGDisplayLinkState *state = value.pointerValue;
-        if (!LGDisplayLinkStateIsActive(state)) continue;
+    for (LGDisplayLinkStateBox *box in sSharedDisplayLinkStates) {
+        if (!LGDisplayLinkBoxIsActive(box)) continue;
         hasActiveStates = YES;
-        highestFPS = MAX(highestFPS, state->preferredFPS);
+        highestFPS = MAX(highestFPS, box.preferredFPS);
     }
     if (!hasActiveStates || highestFPS <= 0) {
         sSharedDisplayLink.paused = YES;
+        if (!sSharedDisplayLinkLastPaused) {
+            LGDebugLog(@"displaylink shared paused states=%lu", (unsigned long)sSharedDisplayLinkStates.count);
+        }
+        sSharedDisplayLinkLastPaused = YES;
+        sSharedDisplayLinkLastFPS = 0;
         return;
     }
     sSharedDisplayLink.paused = NO;
@@ -213,25 +326,31 @@ static void LGReconfigureSharedDisplayLinkFPS(void) {
     if ([sSharedDisplayLink respondsToSelector:@selector(setPreferredFramesPerSecond:)]) {
         sSharedDisplayLink.preferredFramesPerSecond = cappedFPS;
     }
+    if (sSharedDisplayLinkLastPaused || sSharedDisplayLinkLastFPS != cappedFPS) {
+        LGDebugLog(@"displaylink shared active fps=%ld states=%lu",
+                   (long)cappedFPS,
+                   (unsigned long)sSharedDisplayLinkStates.count);
+    }
+    sSharedDisplayLinkLastPaused = NO;
+    sSharedDisplayLinkLastFPS = cappedFPS;
 }
 
 @implementation LGSharedDisplayLinkHub
 
 - (void)tick:(CADisplayLink *)displayLink {
-    NSArray<NSValue *> *states = [sSharedDisplayLinkStates copy];
-    for (NSValue *value in states) {
-        LGDisplayLinkState *state = value.pointerValue;
-        if (!LGDisplayLinkStateIsActive(state)) continue;
+    NSArray<LGDisplayLinkStateBox *> *states = [sSharedDisplayLinkStates copy];
+    for (LGDisplayLinkStateBox *box in states) {
+        if (!LGDisplayLinkBoxIsActive(box)) continue;
 
-        NSInteger preferredFPS = MAX(state->preferredFPS, 1);
+        NSInteger preferredFPS = MAX(box.preferredFPS, 1);
         CFTimeInterval minimumInterval = 1.0 / (CFTimeInterval)preferredFPS;
-        if (state->lastTickTimestamp > 0.0) {
-            CFTimeInterval delta = displayLink.timestamp - state->lastTickTimestamp;
+        if (box.lastTickTimestamp > 0.0) {
+            CFTimeInterval delta = displayLink.timestamp - box.lastTickTimestamp;
             if (delta + 0.0005 < minimumInterval) continue;
         }
-        state->lastTickTimestamp = displayLink.timestamp;
+        box.lastTickTimestamp = displayLink.timestamp;
 
-        LGDisplayLinkDriver *driver = state->driver;
+        LGDisplayLinkDriver *driver = box.driver;
         if (driver) [driver tick:displayLink];
     }
 }
@@ -269,12 +388,14 @@ void LGStartDisplayLink(CADisplayLink *__strong *linkStorage,
     [link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
     *driverStorage = driver;
     *linkStorage = link;
+    LGDebugLog(@"displaylink direct start link=%p fps=%ld", link, (long)preferredFPS);
 }
 
 void LGStopDisplayLink(CADisplayLink *__strong *linkStorage,
                        id __strong *driverStorage) {
     LGAssertMainThread();
     if (!linkStorage || !*linkStorage) return;
+    LGDebugLog(@"displaylink direct stop link=%p", *linkStorage);
     [*linkStorage invalidate];
     *linkStorage = nil;
     if (driverStorage) *driverStorage = nil;
@@ -295,12 +416,29 @@ void LGStartDisplayLinkStateWithPreferenceKey(LGDisplayLinkState *state,
     if (state->link) return;
     LGEnsureSharedDisplayLink();
     LGDisplayLinkDriver *driver = [[LGDisplayLinkDriver alloc] initWithTickBlock:tickBlock];
-    state->driver = driver;
-    state->enabledPreferenceKey = [enabledPreferenceKey copy];
-    state->preferredFPS = MIN(MAX(preferredFPS, 1), LGSharedDisplayLinkMaximumFPS());
-    state->lastTickTimestamp = 0.0;
-    state->link = sSharedDisplayLink;
-    [sSharedDisplayLinkStates addObject:[NSValue valueWithPointer:state]];
+    LGDisplayLinkStateBox *box = [LGDisplayLinkStateBox new];
+    box.activeCount = state->activeCount;
+    box.driver = driver;
+    box.enabledPreferenceKey = [enabledPreferenceKey copy];
+    box.preferredFPS = MIN(MAX(preferredFPS, 1), LGSharedDisplayLinkMaximumFPS());
+    box.lastTickTimestamp = 0.0;
+    box.lastLoggedActiveCount = NSIntegerMin;
+    box.lastLoggedAllowed = NO;
+    box.link = sSharedDisplayLink;
+    [sSharedDisplayLinkStates addObject:box];
+    state->driver = box.driver;
+    state->enabledPreferenceKey = box.enabledPreferenceKey;
+    state->preferredFPS = box.preferredFPS;
+    state->lastTickTimestamp = box.lastTickTimestamp;
+    state->lastLoggedActiveCount = box.lastLoggedActiveCount;
+    state->lastLoggedAllowed = box.lastLoggedAllowed;
+    state->link = box.link;
+    state->owner = box;
+    LGDebugLog(@"displaylink state start name=%@ fps=%ld active=%ld allowed=%d",
+               LGDisplayLinkBoxName(box),
+               (long)box.preferredFPS,
+               (long)box.activeCount,
+               LGDisplayLinkBoxPreferenceAllowsUpdates(box));
     LGReconfigureSharedDisplayLinkFPS();
 }
 
@@ -308,17 +446,18 @@ void LGStopDisplayLinkState(LGDisplayLinkState *state) {
     LGAssertMainThread();
     if (!state) return;
     if (!state->link) return;
+    LGDisplayLinkStateBox *box = LGDisplayLinkBoxForSourceState(state);
+    LGDebugLog(@"displaylink state stop name=%@ active=%ld fps=%ld",
+               box ? LGDisplayLinkBoxName(box) : [NSString stringWithFormat:@"%p", state],
+               (long)(box ? box.activeCount : state->activeCount),
+               (long)(box ? box.preferredFPS : state->preferredFPS));
     for (NSInteger index = sSharedDisplayLinkStates.count - 1; index >= 0; index--) {
-        LGDisplayLinkState *candidate = sSharedDisplayLinkStates[index].pointerValue;
-        if (candidate == state) {
+        LGDisplayLinkStateBox *candidate = sSharedDisplayLinkStates[index];
+        if (candidate == box) {
             [sSharedDisplayLinkStates removeObjectAtIndex:index];
         }
     }
-    state->link = nil;
-    state->driver = nil;
-    state->enabledPreferenceKey = nil;
-    state->preferredFPS = 0;
-    state->lastTickTimestamp = 0.0;
+    LGClearDisplayLinkSourceState(state);
     LGReconfigureSharedDisplayLinkFPS();
     LGStopSharedDisplayLinkIfIdle();
 }
@@ -327,8 +466,24 @@ void LGDisplayLinkStateDidChangeActivity(LGDisplayLinkState *state) {
     LGAssertMainThread();
     if (!state || state->link != sSharedDisplayLink) return;
     if (!sSharedDisplayLink) return;
-    if (state->activeCount <= 0) {
-        state->lastTickTimestamp = 0.0;
+    LGDisplayLinkStateBox *box = LGDisplayLinkBoxForSourceState(state);
+    if (!box) return;
+    box.activeCount = state->activeCount;
+    if (box.activeCount <= 0) {
+        box.lastTickTimestamp = 0.0;
+    }
+    state->lastTickTimestamp = box.lastTickTimestamp;
+    BOOL allowed = LGDisplayLinkBoxPreferenceAllowsUpdates(box);
+    if (box.lastLoggedActiveCount != box.activeCount || box.lastLoggedAllowed != allowed) {
+        LGDebugLog(@"displaylink state activity name=%@ active=%ld fps=%ld allowed=%d",
+                   LGDisplayLinkBoxName(box),
+                   (long)box.activeCount,
+                   (long)box.preferredFPS,
+                   allowed);
+        box.lastLoggedActiveCount = box.activeCount;
+        box.lastLoggedAllowed = allowed;
+        state->lastLoggedActiveCount = box.lastLoggedActiveCount;
+        state->lastLoggedAllowed = box.lastLoggedAllowed;
     }
     LGReconfigureSharedDisplayLinkFPS();
 }
@@ -336,9 +491,23 @@ void LGDisplayLinkStateDidChangeActivity(LGDisplayLinkState *state) {
 void LGSetDisplayLinkStatePreferredFPS(LGDisplayLinkState *state, NSInteger preferredFPS) {
     LGAssertMainThread();
     if (!state) return;
+    LGDisplayLinkStateBox *box = LGDisplayLinkBoxForSourceState(state);
     NSInteger cappedFPS = MIN(MAX(preferredFPS, 1), LGSharedDisplayLinkMaximumFPS());
-    if (state->preferredFPS == cappedFPS) return;
-    state->preferredFPS = cappedFPS;
-    state->lastTickTimestamp = 0.0;
+    if (box) {
+        if (box.preferredFPS == cappedFPS) return;
+        box.preferredFPS = cappedFPS;
+        box.lastTickTimestamp = 0.0;
+        state->preferredFPS = box.preferredFPS;
+        state->lastTickTimestamp = box.lastTickTimestamp;
+    } else {
+        if (state->preferredFPS == cappedFPS) return;
+        state->preferredFPS = cappedFPS;
+        state->lastTickTimestamp = 0.0;
+    }
+    LGDebugLog(@"displaylink state fps name=%@ fps=%ld active=%ld allowed=%d",
+               box ? LGDisplayLinkBoxName(box) : [NSString stringWithFormat:@"%p", state],
+               (long)cappedFPS,
+               (long)(box ? box.activeCount : state->activeCount),
+               box ? LGDisplayLinkBoxPreferenceAllowsUpdates(box) : YES);
     LGReconfigureSharedDisplayLinkFPS();
 }

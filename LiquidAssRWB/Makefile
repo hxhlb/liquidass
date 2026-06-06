@@ -1,4 +1,3 @@
-INSTALL_TARGET_PROCESSES = SpringBoard chronod WidgetRenderer_Default WidgetRenderer_CarPlay
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = LiquidAssRWB

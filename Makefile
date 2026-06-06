@@ -13,7 +13,7 @@ else ifeq ($(LG_SIM_GOAL),sim)
 export TARGET ?= simulator:clang:latest:14.0
 export ARCHS ?= x86_64
 else
-export TARGET ?= iphone:clang:latest:14.0
+export TARGET ?= iphone:clang:16.5:14.0
 export ARCHS ?= arm64 arm64e
 endif
 
@@ -25,6 +25,8 @@ INSTALL_TARGET_PROCESSES = SpringBoard chronod WidgetRenderer_Default WidgetRend
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = liquidass
+LG_PACKAGE_VERSION := $(shell sed -n 's/^Version: //p' control | head -n 1)
+LG_BUILD_TIMESTAMP := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 HOOK_FILES := $(wildcard Hooks/*.x) $(wildcard Hooks/Lockscreen/*.x)
 SHARED_FILES := Shared/LGSharedSupport.m Shared/LGHookSupport.m Shared/LGBannerCaptureSupport.m Shared/LGMetalShaderSource.m Shared/LGGlassRenderer.m Shared/LGBackButtonSupport.m Shared/LGRWBSupport.m
 RUNTIME_FILES := Runtime/LGLiquidGlassRuntime.m Runtime/LGSnapshotCaptureSupport.m
@@ -35,17 +37,18 @@ $(TWEAK_NAME)_FILES = Tweak.x $(HOOK_FILES) $(SHARED_FILES) $(RUNTIME_FILES) $(P
 else
 $(TWEAK_NAME)_FILES = Tweak.x $(HOOK_FILES) $(SHARED_FILES) $(RUNTIME_FILES) $(PREF_CONTROL_FILES)
 endif
-$(TWEAK_NAME)_CFLAGS = -fobjc-arc -fvisibility=default
+$(TWEAK_NAME)_CFLAGS = -fobjc-arc -fvisibility=default -DLG_PACKAGE_VERSION=@\"$(LG_PACKAGE_VERSION)\" -DLG_BUILD_TIMESTAMP=@\"$(LG_BUILD_TIMESTAMP)\"
 ifeq ($(LIQUIDASS_STANDALONE_UI),1)
 $(TWEAK_NAME)_CFLAGS += -DLIQUIDASS_STANDALONE_UI=1
 endif
-$(TWEAK_NAME)_FRAMEWORKS = UIKit Metal MetalKit Accelerate
+$(TWEAK_NAME)_FRAMEWORKS = UIKit Metal MetalKit Accelerate CoreMotion CoreLocation
 $(TWEAK_NAME)_INSTALL_PATH = @rpath
 
 include $(THEOS)/makefiles/tweak.mk
 ifneq ($(LIQUIDASS_STANDALONE_UI),1)
 SUBPROJECTS += LiquidAssPrefs
 SUBPROJECTS += LiquidAssRWB
+SUBPROJECTS += LiquidAssJetsam
 endif
 include $(THEOS_MAKE_PATH)/aggregate.mk
 
@@ -62,6 +65,11 @@ sim:: all
 	@mkdir -p /opt/simject/PreferenceBundles
 	@rm -rf /opt/simject/PreferenceBundles/LiquidAssPrefs.bundle
 	@cp -vR .theos/obj/iphone_simulator/debug/LiquidAssPrefs.bundle /opt/simject/PreferenceBundles/
+	@mkdir -p /opt/simject/PreferenceBundles/LiquidAssPrefs.bundle/changelogs
+	@cp -v $(PWD)/changelogs/*.md /opt/simject/PreferenceBundles/LiquidAssPrefs.bundle/changelogs/
+	@PKG_VERSION=$$(sed -n 's/^Version: //p' $(PWD)/control | head -n 1); \
+	/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $$PKG_VERSION" /opt/simject/PreferenceBundles/LiquidAssPrefs.bundle/Info.plist; \
+	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $$PKG_VERSION" /opt/simject/PreferenceBundles/LiquidAssPrefs.bundle/Info.plist
 	@APP_NAME=$$(sed -n 's/^"prefs.app_name" = "\(.*\)";/\1/p' $(PWD)/LiquidAssPrefs/Resources/Localizable.strings | head -n 1); \
 	cp -v $(PWD)/LiquidAssPrefs/Resources/entry.plist /opt/simject/PreferenceLoader/Preferences/LiquidAssPrefs.plist; \
 	/usr/libexec/PlistBuddy -c "Set :entry:label $$APP_NAME" /opt/simject/PreferenceLoader/Preferences/LiquidAssPrefs.plist; \

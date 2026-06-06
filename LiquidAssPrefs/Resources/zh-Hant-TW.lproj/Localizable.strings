@@ -1,4 +1,5 @@
 "prefs.app_name" = "Liquid (Gl)ass";
+
 "prefs.control.enabled" = "啟用";
 "prefs.control.bezel_width" = "邊框寬度";
 "prefs.control.blur" = "模糊";
@@ -6,6 +7,8 @@
 "prefs.control.glass_thickness" = "玻璃厚度";
 "prefs.control.light_tint_alpha" = "淺色色調透明度";
 "prefs.control.dark_tint_alpha" = "深色色調透明度";
+"prefs.control.custom_tint_color" = "自訂色調";
+"prefs.control.tint_override" = "Tint Override";
 "prefs.control.refractive_index" = "折射率";
 "prefs.control.refraction" = "折射";
 "prefs.control.specular" = "高光";
@@ -33,10 +36,9 @@
 "prefs.control.background_dark_tint_alpha" = "背景深色色調透明度";
 "prefs.control.active_scale" = "按下時縮放";
 "prefs.control.active_light_tint_alpha" = "按下時淺色色調透明度";
-"prefs.control.active_specular" = "按下時高光";
-"prefs.control.active_bezel_width" = "按下時邊框寬度";
-"prefs.control.active_refraction" = "按下時折射";
-"prefs.control.active_blur" = "按下時模糊";
+"prefs.control.motion_highlights" = "Motion Highlights";
+"prefs.control.motion_highlights_fps" = "Motion FPS";
+"prefs.control.motion_highlights_sensitivity" = "Motion Sensitivity";
 "prefs.control.press_in_damping" = "按下時阻尼";
 "prefs.control.press_in_duration" = "按下時長";
 "prefs.control.press_in_mass" = "按下時質量";
@@ -55,6 +57,7 @@
 "prefs.subtitle.glass_thickness" = "玻璃體積的深度，視覺上變化不大";
 "prefs.subtitle.light_tint_alpha" = "淺色模式下白色疊加的強度";
 "prefs.subtitle.dark_tint_alpha" = "深色模式下黑色疊加的強度";
+"prefs.subtitle.custom_tint_color" = "十六進位 RGB/RGBA。留空則使用淺色/深色色調。";
 "prefs.subtitle.refractive_index" = "玻璃效果的光學密度";
 "prefs.subtitle.refraction" = "背景在玻璃視圖中彎曲的效果";
 "prefs.subtitle.specular" = "玻璃視圖上的高光強度";
@@ -69,10 +72,9 @@
 "prefs.subtitle.background_dark_tint_alpha" = "密碼按鈕後方深色色調的強度。";
 "prefs.subtitle.active_scale" = "密碼按鈕按下時的縮放大小。";
 "prefs.subtitle.active_light_tint_alpha" = "密碼按鈕按下時淺色色調的強度。";
-"prefs.subtitle.active_specular" = "密碼按鈕按下時的高光強度。";
-"prefs.subtitle.active_bezel_width" = "密碼按鈕按下時的邊框寬度。";
-"prefs.subtitle.active_refraction" = "密碼按鈕按下時的折射強度。";
-"prefs.subtitle.active_blur" = "密碼按鈕按下時的模糊強度。";
+"prefs.subtitle.motion_highlights" = "Make specular highlights react to device motion.";
+"prefs.subtitle.motion_highlights_fps" = "Caps motion-driven highlight redraws.";
+"prefs.subtitle.motion_highlights_sensitivity" = "How strongly tilt changes the highlight angle.";
 "prefs.subtitle.press_in_damping" = "密碼按鈕按下動畫的彈簧阻尼。";
 "prefs.subtitle.press_in_duration" = "密碼按鈕按下過渡動畫的時長。";
 "prefs.subtitle.press_in_mass" = "密碼按鈕按下動畫的彈簧質量。";
@@ -97,12 +99,17 @@
 "prefs.subtitle.variable_font_width" = "iOS 26 時鐘字體的寬度軸數值。";
 "prefs.subtitle.variable_font_height" = "iOS 26 時鐘字體的高度軸數值。";
 "prefs.subtitle.variable_font_softness" = "iOS 26 時鐘字體的柔和度軸數值。";
+
 "prefs.font_style.current.title" = "一般";
 "prefs.font_style.rounded.title" = "圓角";
+
 "prefs.subtitle.global_enabled" = "插件總開關";
+
 "prefs.root.runtime_cache_footer" = "%@ cached to RAM";
+
 "prefs.rendering.snapshot.title" = "快照";
 "prefs.rendering.live_capture.title" = "即時擷取";
+
 "prefs.section.dock.title" = "Dock";
 "prefs.section.dock.subtitle" = "Dock 材質、形狀變體、算繪品質等";
 "prefs.section.folder_icons.title" = "檔案夾圖示";
@@ -124,15 +131,16 @@
 "prefs.section.search_field.title" = "搜尋欄";
 "prefs.section.search_field.subtitle" = "搜尋欄的材質、算繪、品質等";
 "prefs.section.main.title" = "主選單";
-"prefs.section.main.subtitle" = "為各個主要介面自訂玻璃特效";
 "prefs.section.misc.title" = "其他";
-"prefs.section.misc.subtitle" = "重新啟動主畫面及其他選項 (¯\\_(ツ)_/¯)";
 "prefs.section.experimental_rendering.title" = "算繪方式";
 "prefs.section.experimental_rendering.subtitle" = "為各個介面選擇快照或即時擷取。此為實驗性功能，可能會較耗效能。我不建議你更動下方任何內容。";
 "prefs.section.surface_tint_override.title" = "按介面單獨覆蓋色調";
 "prefs.section.surface_tint_override.subtitle" = "為單一介面覆蓋色調模式。跟隨系統將使用目前系統外觀";
 "prefs.section.display_link_toggle.title" = "手動 Display-Link 開關";
 "prefs.section.display_link_toggle.subtitle" = "選擇允許哪些介面執行由 Display-Link 驅動的玻璃更新。";
+"prefs.section.motion_highlights.title" = "Motion Highlights";
+"prefs.section.motion_highlights.subtitle" = "Use device motion to steer glass specular highlights.";
+
 "prefs.button.reset" = "重置";
 "prefs.button.reset_all" = "全部重置";
 "prefs.button.cancel" = "取消";
@@ -147,31 +155,42 @@
 "prefs.reset_confirm.title" = "確認重置？";
 "prefs.reset_confirm.body" = "此操作將把所有設定回復為預設值。是否繼續？";
 "prefs.reset_confirm.surface_body_format" = "這將會把所有 %@ 重置為預設值。是否繼續？";
+
 "prefs.respring_confirm.title" = "確認重新啟動主畫面";
 "prefs.respring_confirm.body" = "是否現在重新啟動主畫面？執行後，正在運作的背景 App 或程序可能會關閉。";
+
 "prefs.invalidate_caches_confirm.title" = "使快照快取失效？";
 "prefs.invalidate_caches_confirm.body" = "當取樣對齊出現問題並需要重新整理來修正時，這個選項會很有用。是否繼續？";
+
 "prefs.import_prefs.empty_clipboard" = "剪貼簿中找不到可匯入的設定資料。";
 "prefs.import_prefs.error_invalid" = "所選的檔案不是有效的 LiquidAss 設定資料。";
 "prefs.import_prefs.error_empty" = "匯入的設定資料是空的。";
 "prefs.import_prefs.error_read" = "無法讀取所選的設定檔案。";
 "prefs.import_prefs.success" = "設定已匯入。部分變更可能仍需重新啟動主畫面才能生效。";
+
 "prefs.export_prefs.error" = "無法建立可分享的設定匯出檔案。";
+
 "prefs.reopen_settings.title" = "重新開啟設定";
 "prefs.reopen_settings.body" = "此變更將在下次開啟設定時生效。現在要重新開啟設定嗎？";
+
 "prefs.respring_bar.title" = "建議重新啟動主畫面";
 "prefs.respring_bar.subtitle" = "建議在變更後重新啟動主畫面以套用設定";
+
 "prefs.info.title" = "資訊";
+
 "prefs.jump_to.title" = "跳轉到";
+
 "prefs.value_prompt.title" = "設定數值";
 "prefs.value_prompt.message" = "請輸入一個數值";
-"prefs.range_format" = "範圍：%@ 到 %@";
+
 "prefs.hero.eyebrow" = "沒有比這更讚的了";
 "prefs.hero.subtitle" = "史上最屌的插件，無人能比！";
+
 "prefs.surface.homescreen.title" = "主畫面";
 "prefs.surface.homescreen.subtitle" = "主畫面相關介面的液態玻璃控制選項。";
 "prefs.surface.lockscreen.title" = "鎖定畫面";
 "prefs.surface.lockscreen.subtitle" = "鎖定畫面相關介面的玻璃控制項。";
+
 "prefs.section.lockscreen_notifications.title" = "通知";
 "prefs.section.lockscreen_notifications.subtitle" = "通知卡片和滑動操作的材質";
 "prefs.section.banner.title" = "橫幅";
@@ -182,14 +201,40 @@
 "prefs.section.lockscreen_passcode.subtitle" = "密碼背景以及數字鍵按鈕的材質和動畫。";
 "prefs.section.lockscreen_clock.title" = "時鐘";
 "prefs.section.lockscreen_clock.subtitle" = "自訂鎖定畫面玻璃時鐘控制項。";
+"prefs.section.lockscreen_date_label.title" = "日期標籤";
+"prefs.section.lockscreen_date_label.subtitle" = "自訂鎖定畫面日期文字。";
+
+"prefs.control.date_format_enabled" = "自訂日期格式";
+
+"prefs.subtitle.date_format_enabled" = "使用自訂日期格式取代鎖定畫面日期。";
+
+"prefs.control.date_format" = "格式";
+
+"prefs.subtitle.date_format" = "使用 Unicode 日期模式語法，例如 「EEE MMM d」。";
+
 "prefs.surface.app_library.title" = "App 資料庫";
 "prefs.surface.app_library.subtitle" = "App 資料庫相關介面的玻璃控制項。";
+
 "prefs.misc.respring.title" = "重新啟動主畫面";
 "prefs.misc.respring.subtitle" = "在 iOS 16 及以上系統中，建議每次更改後執行一次重新啟動主畫面，因為即時更新可能會出問題";
 "prefs.misc.about.title" = "更多選項";
 "prefs.misc.about.subtitle" = "語言、關於、版本資訊、贊助等";
+"prefs.misc.prefs_settings.title" = "關於";
+"prefs.misc.prefs_settings.subtitle" = "語言、版本資訊、贊助等。";
 "prefs.misc.options_section.title" = "額外內容";
 "prefs.misc.options_section.subtitle" = "實驗性功能及其他內容";
+
+"prefs.section.preferences.title" = "偏好設定";
+"prefs.section.preferences.subtitle" = "此偏好設定介面使用的控制項。";
+
+"prefs.misc.preferences_back_button.title" = "導覽按鈕";
+"prefs.misc.preferences_back_button.subtitle" = "為返回和重置導覽按鈕使用玻璃效果。";
+"prefs.misc.preferences_go_to_top.title" = "回到頂端按鈕";
+"prefs.misc.preferences_go_to_top.subtitle" = "為懸浮滾動捷徑使用玻璃效果。";
+"prefs.misc.preferences_respring_bar.title" = "重新啟動主畫面橫幅";
+"prefs.misc.preferences_respring_bar.subtitle" = "為懸浮的重新啟動主畫面提醒使用玻璃效果。";
+"prefs.misc.debugging_section.title" = "除錯";
+"prefs.misc.debugging_section.subtitle" = "診斷與效能記錄。";
 "prefs.misc.rwb_third_party.title" = "RWB 列表";
 "prefs.misc.rwb_third_party.subtitle" = "輸入用於 RWB 允許列表的小工具 Bundle ID。";
 "prefs.misc.rwb_third_party.editor_body" = "每行輸入一個 Bundle ID。";
@@ -202,10 +247,12 @@
 "prefs.misc.app_library_composite.subtitle" = "在 App 資料庫中同時採樣主畫面圖示，而不僅是背景圖片";
 "prefs.misc.live_capture.title" = "即時擷取設定";
 "prefs.misc.live_capture.subtitle" = "調整即時擷取影格率與擷取紋理品質。";
+
 "prefs.section.live_capture_general.title" = "擷取紋理";
 "prefs.section.live_capture_general.subtitle" = "較低的值可降低影像送達 Metal 前的 CPU 使用率。";
 "prefs.section.live_capture_fps.title" = "介面 FPS";
 "prefs.section.live_capture_fps.subtitle" = "限制每個即時擷取介面重新整理背景的頻率。";
+
 "prefs.live_capture.scale_factor.title" = "縮放比例";
 "prefs.live_capture.scale_factor.subtitle" = "套用於即時擷取紋理的裝置縮放倍率。";
 "prefs.live_capture.minimum_scale.title" = "最小縮放";
@@ -215,13 +262,19 @@
 "prefs.live_capture.maximum_pixels.title" = "最大像素";
 "prefs.live_capture.maximum_pixels.subtitle" = "每個即時擷取紋理的像素上限。";
 "prefs.live_capture.fps.subtitle" = "此介面的最大即時背景重新整理頻率。";
-"prefs.live_capture.control_center_blur_cap.title" = "控制中心模糊上限輔助";
+"prefs.control_center.live_capture_budget.title" = "Live Capture Budget";
+"prefs.control_center.live_capture_budget.subtitle" = "Control Center modules refreshed per tick. Higher values recover static modules faster but cost more CPU.";
+"prefs.control_center.fullscreen_backdrop_blur_radius.title" = "Fullscreen Blur Radius";
+"prefs.control_center.fullscreen_backdrop_blur_radius.subtitle" = "Caps the stock Control Center background material blur. Lower values make the fullscreen blur lighter.";
+
 "prefs.misc.display_link_toggle.subtitle" = "為使用 Display-Link 的介面顯示個別的控制項。";
 "prefs.misc.display_link_surface.subtitle" = "允許此介面執行由 Display-Link 驅動的玻璃更新。";
 "prefs.misc.debug_logging.title" = "除錯記錄";
 "prefs.misc.debug_logging.subtitle" = "啟用寫入 /tmp/LiquidAss.log 的詳細診斷記錄";
 "prefs.misc.debug_profiling.title" = "除錯效能分析";
 "prefs.misc.debug_profiling.subtitle" = "記錄簡短的效能摘要。";
+"prefs.misc.all_day_profiling.title" = "All-Day Profiler";
+"prefs.misc.all_day_profiling.subtitle" = "Keeps /tmp/LiquidAss-profiling.log across SpringBoard launches with preferences, memory, thermal, battery, and profile summaries.";
 "prefs.misc.invalidate_caches.title" = "使快照快取失效";
 "prefs.misc.invalidate_caches.subtitle" = "清除已快取的快照，然後重新建立它們。";
 "prefs.misc.import_export_section.title" = "匯入/匯出設定";
@@ -232,8 +285,53 @@
 "prefs.misc.import_prefs.subtitle" = "匯入 JSON 設定檔。";
 "prefs.misc.tint_override_per_surface.title" = "單獨調整各介面色調";
 "prefs.misc.tint_override_per_surface.subtitle" = "顯示每個介面的獨立色調覆蓋控制項";
+
 "prefs.tint_override.system.title" = "跟隨系統";
 "prefs.tint_override.light.title" = "強制淺色模式";
 "prefs.tint_override.dark.title" = "強制深色模式";
+
 "prefs.misc.settings_controls.title" = "iOS 26 設定";
 "prefs.misc.settings_controls.subtitle" = "嘗試重現 iOS 26 設定 App 的體驗。";
+"prefs.misc.custom_views.title" = "Custom Views (Advanced)";
+"prefs.misc.custom_views.subtitle" = "Inject glass into views matched by class hierarchy rules.";
+
+"prefs.custom_views.general.title" = "General";
+"prefs.custom_views.general.subtitle" = "Global controls for custom view injection.";
+"prefs.custom_views.rules.title" = "Rules";
+"prefs.custom_views.rules.subtitle" = "Each rule has its own match filters and glass parameters.";
+"prefs.custom_views.add_rule.title" = "Add Rule";
+"prefs.custom_views.add_rule.subtitle" = "Create a new custom view injection rule.";
+"prefs.custom_views.rule_empty.subtitle" = "No target class set.";
+"prefs.custom_views.rule_details.title" = "Custom View Rule";
+"prefs.custom_views.rule_name.title" = "Name";
+"prefs.custom_views.rule_name.subtitle" = "Optional label shown in the rule list.";
+"prefs.custom_views.rule_name.placeholder" = "Volume Slider";
+"prefs.custom_views.class_filters.title" = "Class Filters";
+"prefs.custom_views.class_filters.subtitle" = "Set the target class, then add optional context filters only when needed.";
+"prefs.custom_views.class_filters.hint" = "Exact class names. Use commas for alternatives.";
+"prefs.custom_views.appearance.title" = "Appearance";
+"prefs.custom_views.appearance.subtitle" = "Glass parameters for this rule.";
+"prefs.custom_views.clear_background.title" = "Clear Background";
+"prefs.custom_views.clear_background.subtitle" = "Clear the matched view background before inserting glass.";
+"prefs.custom_views.rule_format" = "Rule %ld";
+"prefs.custom_views.rule.subtitle" = "Class names are exact, you can find them using FLEX (FLEXList by Netskao works nice). Separate alternatives with commas.";
+"prefs.custom_views.rule_enabled.subtitle" = "Enable this match rule.";
+"prefs.custom_views.target_class.title" = "Target Class";
+"prefs.custom_views.target_class.subtitle" = "The class name of the view that receives glass.";
+"prefs.custom_views.parent_class.title" = "Parent Class";
+"prefs.custom_views.parent_class.subtitle" = "Optional direct superview class filter.";
+"prefs.custom_views.grandparent_class.title" = "Grandparent Class";
+"prefs.custom_views.grandparent_class.subtitle" = "Optional superview-superview class filter.";
+"prefs.custom_views.ancestor_class.title" = "Ancestor Class";
+"prefs.custom_views.ancestor_class.subtitle" = "Optional filter for any superview above the target.";
+"prefs.custom_views.child_class.title" = "Child Class";
+"prefs.custom_views.child_class.subtitle" = "Optional direct subview class filter.";
+"prefs.custom_views.grandchild_class.title" = "Grandchild Class";
+"prefs.custom_views.grandchild_class.subtitle" = "Optional child-of-child class filter.";
+"prefs.custom_views.descendant_class.title" = "Descendant Class";
+"prefs.custom_views.descendant_class.subtitle" = "Optional filter for any subview below the target.";
+"prefs.custom_views.sibling_class.title" = "Sibling Class";
+"prefs.custom_views.sibling_class.subtitle" = "Optional class filter for another view under the same parent.";
+"prefs.custom_views.delete_rule.title" = "Delete Rule";
+"prefs.custom_views.delete_rule.subtitle" = "Remove this custom view rule.";
+"prefs.custom_views.delete_rule.confirm" = "Delete this custom view rule and all of its settings?";

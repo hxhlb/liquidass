@@ -31,7 +31,7 @@ LG_FLOAT_PREF_FUNC(LGDockBlur, "Dock.Blur", 10.0)
 LG_FLOAT_PREF_FUNC(LGDockWallpaperScale, "Dock.WallpaperScale", 0.25)
 LG_FLOAT_PREF_FUNC(LGDockLightTintAlpha, "Dock.LightTintAlpha", 0.1)
 LG_FLOAT_PREF_FUNC(LGDockDarkTintAlpha, "Dock.DarkTintAlpha", 0.0)
-LG_FLOAT_PREF_FUNC(LGDockLiveCaptureFPS, "Dock.LiveCaptureFPS", 12.0)
+LG_FLOAT_PREF_FUNC(LGDockLiveCaptureFPS, "Dock.LiveCaptureFPS", 22.0)
 
 static NSHashTable<UIView *> *LGDockHostRegistry(void) {
     if (!sDockHosts) {
@@ -83,8 +83,17 @@ static BOOL isInsideFloatingDock(UIView *view) {
     return LGHasAncestorClass(view, cls);
 }
 
-static BOOL isReasonableDockMaterialBounds(CGRect bounds) {
-    return bounds.size.width >= 60.0 && bounds.size.height >= 40.0;
+static BOOL isReasonableDockMaterialBoundsForMode(CGRect bounds, BOOL insideFloating, BOOL insideRegular) {
+    CGFloat width = CGRectGetWidth(bounds);
+    CGFloat height = CGRectGetHeight(bounds);
+    if (width < 1.0 || height < 1.0) return NO;
+    if (insideFloating) {
+        return width >= 160.0 && height >= 40.0 && width >= height * 2.0;
+    }
+    if (insideRegular) {
+        return width >= 160.0 && height >= 40.0;
+    }
+    return NO;
 }
 
 static void *kDockRetryKey = &kDockRetryKey;
@@ -99,10 +108,10 @@ static void *kDockBackdropViewKey = &kDockBackdropViewKey;
 
 static LGDockMode LGResolveDockModeForView(UIView *view) {
     if (isInsideCategoryStackBackground(view)) return LGDockModeNone;
-    if (!isReasonableDockMaterialBounds(view.bounds)) return LGDockModeNone;
     BOOL insideFloating = isInsideFloatingDock(view);
     BOOL insideRegular = isInsideRegularDock(view);
     if (!insideFloating && !insideRegular) return LGDockModeNone;
+    if (!isReasonableDockMaterialBoundsForMode(view.bounds, insideFloating, insideRegular)) return LGDockModeNone;
     if (insideFloating && LGHasFloatingDockWindow()) return LGDockModeFloating;
     if (insideRegular) return LGDockModeRegular;
     if (insideFloating) return LGDockModeFloating;
@@ -301,9 +310,11 @@ static void injectIntoDock(UIView *self_) {
             initWithFrame:glassFrame wallpaper:wallpaper wallpaperOrigin:wallpaperOrigin];
         glass.autoresizingMask = UIViewAutoresizingFlexibleWidth |
                                  UIViewAutoresizingFlexibleHeight;
+        glass.userInteractionEnabled = NO;
         [self_ addSubview:glass];
         objc_setAssociatedObject(self_, kDockGlassKey, glass, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     } else {
+        glass.userInteractionEnabled = NO;
         if (!LG_prefersLiveCapture(@"Dock.RenderingMode")) {
             glass.wallpaperImage = wallpaper;
         }

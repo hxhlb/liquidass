@@ -6,6 +6,7 @@
 
 static const NSInteger kFolderIconTintTag      = 0xF01D;
 static NSUInteger sFolderSnapshotGeneration = 0;
+static BOOL sFolderIconScrollRefreshPending = NO;
 
 static BOOL isInsideFolderIcon(UIView *view) {
     static Class folderIconCls, iconViewCls;
@@ -25,6 +26,14 @@ static void *kFolderIconGlassKey = &kFolderIconGlassKey;
 static void *kFolderIconTintKey = &kFolderIconTintKey;
 static void *kFolderIconLastPageKey = &kFolderIconLastPageKey;
 static void *kFolderIconBackdropViewKey = &kFolderIconBackdropViewKey;
+static NSHashTable<UIView *> *sFolderIconHosts = nil;
+
+static NSHashTable<UIView *> *LGFolderIconHostRegistry(void) {
+    if (!sFolderIconHosts) {
+        sFolderIconHosts = [NSHashTable weakObjectsHashTable];
+    }
+    return sFolderIconHosts;
+}
 
 static void LGScheduleFolderSnapshotWarmup(NSTimeInterval delay) {
     if (LG_getFolderSnapshot()) return;
@@ -79,6 +88,7 @@ static UIColor *folderIconTintColorForView(UIView *view) {
 }
 
 static void removeFolderIconOverlays(UIView *self_) {
+    [LGFolderIconHostRegistry() removeObject:self_];
     LGRemoveAssociatedSubview(self_, kFolderIconTintKey);
     LiquidGlassView *glass = objc_getAssociatedObject(self_, kFolderIconGlassKey);
     if (glass) [glass removeFromSuperview];
@@ -97,7 +107,20 @@ static void ensureFolderIconTintOverlay(UIView *self_) {
                                LGFolderIconCornerRadius(self_.layer.cornerRadius),
                                self_.layer,
                                NO);
-    [self_ bringSubviewToFront:tint];
+    LiquidGlassView *glass = objc_getAssociatedObject(self_, kFolderIconGlassKey);
+    UIView *contentAnchor = nil;
+    for (UIView *subview in self_.subviews) {
+        if (subview == glass || subview == tint) continue;
+        contentAnchor = subview;
+        break;
+    }
+    if (contentAnchor) {
+        [self_ insertSubview:tint belowSubview:contentAnchor];
+    } else if (glass) {
+        [self_ insertSubview:tint aboveSubview:glass];
+    } else {
+        [self_ bringSubviewToFront:tint];
+    }
 }
 
 static void injectIntoFolderIcon(UIView *self_) {
@@ -154,11 +177,37 @@ static void injectIntoFolderIcon(UIView *self_) {
         objc_setAssociatedObject(self_, kFolderIconRetryKey, nil, OBJC_ASSOCIATION_ASSIGN);
         return;
     }
+    [LGFolderIconHostRegistry() addObject:self_];
     ensureFolderIconTintOverlay(self_);
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self_.window) ensureFolderIconTintOverlay(self_);
     });
     objc_setAssociatedObject(self_, kFolderIconRetryKey, nil, OBJC_ASSOCIATION_ASSIGN);
+}
+
+static BOOL LGFolderIconHostIsVisible(UIView *view) {
+    if (!view || !view.window || view.hidden || view.alpha <= 0.01f || view.layer.opacity <= 0.01f) return NO;
+    UIView *current = view.superview;
+    while (current && current != view.window) {
+        if (current.hidden || current.alpha <= 0.01f || current.layer.opacity <= 0.01f) return NO;
+        current = current.superview;
+    }
+    CALayer *layer = view.layer.presentationLayer ?: view.layer;
+    CGRect bounds = layer.bounds;
+    if (CGRectGetWidth(bounds) <= 1.0 || CGRectGetHeight(bounds) <= 1.0) return NO;
+    CGRect windowFrame = [layer convertRect:bounds toLayer:view.window.layer];
+    return CGRectIntersectsRect(CGRectInset(view.window.bounds, -8.0, -8.0), windowFrame);
+}
+
+static void LGFolderIconRefreshAttachedHosts(void) {
+    for (UIView *view in LGFolderIconHostRegistry().allObjects) {
+        if (!view.window || !isInsideFolderIcon(view)) {
+            removeFolderIconOverlays(view);
+            continue;
+        }
+        if (!LGFolderIconHostIsVisible(view)) continue;
+        injectIntoFolderIcon(view);
+    }
 }
 
 static void LGFolderIconRefreshAllHosts(void) {
@@ -168,6 +217,19 @@ static void LGFolderIconRefreshAllHosts(void) {
         if (![view isKindOfClass:NSClassFromString(@"MTMaterialView")]) return;
         if (!isInsideFolderIcon(view)) return;
         injectIntoFolderIcon(view);
+    });
+}
+
+static void LGScheduleFolderIconLiveScrollRefresh(void) {
+    if (sFolderIconScrollRefreshPending) return;
+    sFolderIconScrollRefreshPending = YES;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        sFolderIconScrollRefreshPending = NO;
+        if (LGFolderIconHostRegistry().allObjects.count > 0) {
+            LGFolderIconRefreshAttachedHosts();
+        } else {
+            LGFolderIconRefreshAllHosts();
+        }
     });
 }
 
@@ -188,7 +250,7 @@ static void LGHandleFolderSnapshotForScroll(UIScrollView *scrollView, CGPoint of
         LG_invalidateFolderSnapshot();
         LGScheduleFolderSnapshotWarmupForScroll(scrollView, 0.18);
     }
-    if (LG_prefersLiveCapture(@"FolderIcon.RenderingMode")) LGFolderIconRefreshAllHosts();
+    if (LG_prefersLiveCapture(@"FolderIcon.RenderingMode")) LGScheduleFolderIconLiveScrollRefresh();
     else LG_updateRegisteredGlassViews(LGUpdateGroupFolderIcon);
 }
 
@@ -209,7 +271,10 @@ static void LGFolderIconPrefsChanged(CFNotificationCenterRef center,
 - (void)didMoveToWindow {
     %orig;
     UIView *self_ = (UIView *)self;
-    if (!self_.window) return;
+    if (!self_.window) {
+        removeFolderIconOverlays(self_);
+        return;
+    }
     if (!isInsideFolderIcon(self_)) return;
     LGScheduleFolderSnapshotWarmup(0.18);
     injectIntoFolderIcon(self_);

@@ -25,14 +25,6 @@ static NSArray<NSString *> *RWBParseThirdPartyBundleIDs(NSString *rawText) {
     return bundleIDs.array;
 }
 
-static void RWBLog(NSString *format, ...) {
-    va_list args;
-    va_start(args, format);
-    NSString *body = [[NSString alloc] initWithFormat:format arguments:args];
-    va_end(args);
-    NSLog(@"[LiquidAssRWB] %@", body);
-}
-
 static void ReloadPrefs(void) {
     static NSUserDefaults *prefs = nil;
     static dispatch_once_t onceToken;
@@ -56,7 +48,6 @@ static void ReloadPrefs(void) {
     NSMutableOrderedSet<NSString *> *bundleIDs = [NSMutableOrderedSet orderedSetWithArray:RWBParseThirdPartyBundleIDs(rawBundleIDs)];
     kWidgetBundleIdentifiers = [NSSet setWithArray:bundleIDs.array];
 
-    RWBLog(@"reload enabled=%d maxWidth=%.1f maxHeight=%.1f bundleCount=%lu", kIsEnabled, kMaxWidgetWidth, kMaxWidgetHeight, (unsigned long)kWidgetBundleIdentifiers.count);
 }
 
 static void RWBReloadPrefsCallback(CFNotificationCenterRef __unused center,
@@ -376,11 +367,9 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
 
     NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier ?: @"";
     if ([bundleIdentifier isEqualToString:@"com.apple.springboard"]) {
-        RWBLog(@"initialized in SpringBoard");
         %init(RWBSpringBoard);
     } else if ([bundleIdentifier isEqualToString:@"com.apple.chronod"] ||
                [bundleIdentifier hasPrefix:@"com.apple.chrono.WidgetRenderer-"]) {
-        RWBLog(@"initialized in chronod/widget renderer");
         %init(RWB);
         if (@available(iOS 17, *)) {
             %init(RWB_17);

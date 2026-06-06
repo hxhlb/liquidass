@@ -4,9 +4,18 @@
 #import "LGPrefsLiquidSlider.h"
 #import "LGPrefsLiquidSwitch.h"
 #import "../Shared/LGRWBSupport.h"
+#import "../Shared/LGBannerCaptureSupport.h"
+#import "../Shared/LGGlassRenderer.h"
+#import "../Shared/LGHookSupport.h"
 #import "../Shared/LGSharedSupport.h"
+#import "../Shared/LGBackButtonSupport.h"
+#import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+
+#ifndef LG_PACKAGE_VERSION
+#define LG_PACKAGE_VERSION @""
+#endif
 
 static NSURL *LGTemporaryPreferencesExportURL(void) {
     NSString *filename = [NSString stringWithFormat:@"liquidass-preferences-%@.json",
@@ -15,6 +24,16 @@ static NSURL *LGTemporaryPreferencesExportURL(void) {
 }
 
 static void *kLGPanelItemKey = &kLGPanelItemKey;
+static void *kLGScrollTopBackdropViewKey = &kLGScrollTopBackdropViewKey;
+static void *kLGScrollTopGlassViewKey = &kLGScrollTopGlassViewKey;
+static void *kLGScrollTopBlurViewKey = &kLGScrollTopBlurViewKey;
+static void *kLGScrollTopTintViewKey = &kLGScrollTopTintViewKey;
+static void *kLGScrollTopLiveReadyKey = &kLGScrollTopLiveReadyKey;
+static void *kLGDonationAddressKey = &kLGDonationAddressKey;
+
+static BOOL LGPreferencesGoToTopButtonEnabled(void) {
+    return [LGReadPreference(@"Preferences.GoToTop.Enabled", @NO) boolValue];
+}
 
 static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
     NSString *visibleKey = item[@"visible_key"];
@@ -49,10 +68,13 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
     UIScrollView *_jumpScrollView;
     UIStackView *_jumpStack;
     NSMutableDictionary<NSString *, UIView *> *_sectionViews;
+    NSMutableArray<UIView *> *_orderedSectionViews;
     UIView *_respringBar;
     UIView *_scrollTopButton;
     NSLayoutConstraint *_scrollTopBottomConstraint;
     BOOL _scrollTopButtonVisible;
+    CGSize _lastBackdropLayoutSize;
+    CFTimeInterval _lastFloatingGlassScrollRefreshTime;
 }
 
 - (void)updateVisibleValueControlledItemsAnimated:(BOOL)animated {
@@ -144,13 +166,34 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
     } else if ([_screenIdentifier isEqualToString:@"MoreOptions"]) {
         _screenTitle = [LGLocalized(@"prefs.misc.about.title") copy];
         _screenSubtitle = [LGLocalized(@"prefs.misc.about.subtitle") copy];
-        _accentColor = [UIColor systemGrayColor];
+        _accentColor = [UIColor systemIndigoColor];
         _items = [LGMoreOptionsItems() copy];
+    } else if ([_screenIdentifier isEqualToString:@"PrefsSettings"]) {
+        _screenTitle = [LGLocalized(@"prefs.misc.prefs_settings.title") copy];
+        _screenSubtitle = [LGLocalized(@"prefs.misc.prefs_settings.subtitle") copy];
+        _accentColor = [UIColor systemGrayColor];
+        _items = [LGPrefsSettingsItems() copy];
+    } else if ([_screenIdentifier isEqualToString:@"PreferencesControls"]) {
+        _screenTitle = [LGLocalized(@"prefs.section.preferences.title") copy];
+        _screenSubtitle = [LGLocalized(@"prefs.section.preferences.subtitle") copy];
+        _accentColor = [UIColor systemIndigoColor];
+        _items = [LGPrefsControlsItems() copy];
     } else if ([_screenIdentifier isEqualToString:@"Experimental"]) {
         _screenTitle = [LGLocalized(@"prefs.misc.experimental.title") copy];
         _screenSubtitle = [LGLocalized(@"prefs.misc.experimental.subtitle") copy];
         _accentColor = [UIColor systemOrangeColor];
         _items = [LGExperimentalItems() copy];
+    } else if ([_screenIdentifier isEqualToString:@"CustomViews"]) {
+        _screenTitle = [LGLocalized(@"prefs.misc.custom_views.title") copy];
+        _screenSubtitle = [LGLocalized(@"prefs.misc.custom_views.subtitle") copy];
+        _accentColor = [UIColor systemPurpleColor];
+        _items = [LGCustomViewInjectionItems() copy];
+    } else if ([_screenIdentifier hasPrefix:@"CustomViewRule:"]) {
+        NSString *ruleID = [_screenIdentifier substringFromIndex:@"CustomViewRule:".length];
+        _screenTitle = [LGLocalized(@"prefs.custom_views.rule_details.title") copy];
+        _screenSubtitle = [LGLocalized(@"prefs.custom_views.rule.subtitle") copy];
+        _accentColor = [UIColor systemPurpleColor];
+        _items = [LGCustomViewRuleItems(ruleID) copy];
     } else if ([_screenIdentifier isEqualToString:@"LiveCapture"]) {
         _screenTitle = [LGLocalized(@"prefs.misc.live_capture.title") copy];
         _screenSubtitle = [LGLocalized(@"prefs.misc.live_capture.subtitle") copy];
@@ -180,7 +223,8 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
     [self configureCustomBackButton];
-    self.navigationItem.rightBarButtonItem = LGMakeTextBarButtonItem(LGLocalized(@"prefs.button.reset"), self, @selector(handleResetPressed));
+    self.navigationItem.rightBarButtonItem = LGMakeCircularResetItem(self, @selector(handleResetPressed));
+    LGRefreshCircularBackItem(self.navigationItem.rightBarButtonItem);
     [self applyNavigationBarStyle];
     LGInstallScrollableStack(self, 23.25, 12.0, &_scrollView, &_contentStack);
     _scrollView.delegate = self;
@@ -208,6 +252,10 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self applyNavigationBarStyle];
+    if ([_screenIdentifier isEqualToString:@"CustomViews"] || [_screenIdentifier hasPrefix:@"CustomViewRule:"]) {
+        [self reloadLocalizedContent];
+        [self reloadVisibleSettings];
+    }
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -216,6 +264,9 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
         LGSetLastSurfaceIdentifier(_screenIdentifier);
     }
     LGRefreshCircularBackItem(self.navigationItem.leftBarButtonItem);
+    LGRefreshCircularBackItem(self.navigationItem.rightBarButtonItem);
+    [self refreshScrollTopButtonBackdrop];
+    LGScheduleRespringBarGlassRefresh(_respringBar);
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
@@ -224,12 +275,19 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
 
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
+    CGSize layoutSize = self.view.bounds.size;
+    if (CGSizeEqualToSize(layoutSize, _lastBackdropLayoutSize)) return;
+    _lastBackdropLayoutSize = layoutSize;
     LGRefreshCircularBackItem(self.navigationItem.leftBarButtonItem);
+    LGRefreshCircularBackItem(self.navigationItem.rightBarButtonItem);
+    LGRefreshRespringBarGlass(_respringBar);
+    [self refreshScrollTopButtonBackdrop];
 }
 
 - (void)configureCustomBackButton {
     self.navigationItem.hidesBackButton = YES;
     self.navigationItem.leftBarButtonItem = LGMakeCircularBackItem(self, @selector(handleBackPressed));
+    LGRefreshCircularBackItem(self.navigationItem.leftBarButtonItem);
 }
 
 - (void)applyNavigationBarStyle {
@@ -253,11 +311,21 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
 }
 
 - (NSArray<NSString *> *)currentPreferenceKeys {
+    if ([_screenIdentifier isEqualToString:@"CustomViews"]) {
+        return LGAllCustomViewPreferenceKeys();
+    }
     NSMutableOrderedSet<NSString *> *keys = [NSMutableOrderedSet orderedSet];
     for (NSDictionary *item in _items) {
         NSString *key = item[@"key"];
-        if (!key.length) continue;
-        [keys addObject:key];
+        if (key.length) [keys addObject:key];
+        NSArray *itemKeys = item[@"keys"];
+        if ([itemKeys isKindOfClass:NSArray.class]) {
+            for (id itemKey in itemKeys) {
+                if ([itemKey isKindOfClass:NSString.class] && [itemKey length]) {
+                    [keys addObject:itemKey];
+                }
+            }
+        }
     }
     return keys.array;
 }
@@ -268,6 +336,12 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
 }
 
 - (void)performAnimatedSurfacePreferenceReset {
+    if ([_screenIdentifier isEqualToString:@"PrefsSettings"]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.18 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            LGSetCurrentPrefsLanguageCode(@"en");
+        });
+        return;
+    }
     [self animateVisibleControlsToDefaults];
     NSArray<NSString *> *keys = [self currentPreferenceKeys];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.67 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -295,6 +369,15 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
     [self.navigationController pushViewController:controller animated:YES];
 }
 
+- (void)openPreferencesControls {
+    LGPSurfaceController *controller = [[LGPSurfaceController alloc] initWithTitle:LGLocalized(@"prefs.section.preferences.title")
+                                                                          subtitle:LGLocalized(@"prefs.section.preferences.subtitle")
+                                                                         tintColor:[UIColor systemIndigoColor]
+                                                                        identifier:@"PreferencesControls"
+                                                                             items:LGPrefsControlsItems()];
+    [self.navigationController pushViewController:controller animated:YES];
+}
+
 - (void)openLiveCaptureConfiguration {
     LGPSurfaceController *controller = [[LGPSurfaceController alloc] initWithTitle:LGLocalized(@"prefs.misc.live_capture.title")
                                                                           subtitle:LGLocalized(@"prefs.misc.live_capture.subtitle")
@@ -302,6 +385,59 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
                                                                         identifier:@"LiveCapture"
                                                                              items:LGLiveCaptureItems()];
     [self.navigationController pushViewController:controller animated:YES];
+}
+
+- (void)openCustomViewInjection {
+    LGPSurfaceController *controller = [[LGPSurfaceController alloc] initWithTitle:LGLocalized(@"prefs.misc.custom_views.title")
+                                                                          subtitle:LGLocalized(@"prefs.misc.custom_views.subtitle")
+                                                                         tintColor:[UIColor systemPurpleColor]
+                                                                        identifier:@"CustomViews"
+                                                                             items:LGCustomViewInjectionItems()];
+    [self.navigationController pushViewController:controller animated:YES];
+}
+
+- (void)openCustomViewRule:(UIButton *)sender {
+    NSDictionary *item = objc_getAssociatedObject(sender, kLGPanelItemKey);
+    NSString *ruleID = item[@"rule_id"];
+    if (![ruleID isKindOfClass:NSString.class] || !ruleID.length) return;
+    LGPSurfaceController *controller = [[LGPSurfaceController alloc] initWithTitle:LGLocalized(@"prefs.custom_views.rule_details.title")
+                                                                          subtitle:LGLocalized(@"prefs.custom_views.rule.subtitle")
+                                                                         tintColor:[UIColor systemPurpleColor]
+                                                                        identifier:[@"CustomViewRule:" stringByAppendingString:ruleID]
+                                                                             items:LGCustomViewRuleItems(ruleID)];
+    [self.navigationController pushViewController:controller animated:YES];
+}
+
+- (void)addCustomViewRule:(UIButton *)sender {
+    (void)sender;
+    NSString *ruleID = LGCreateCustomViewRule();
+    [self reloadLocalizedContent];
+    [self reloadVisibleSettings];
+    if (!ruleID.length) return;
+    LGPSurfaceController *controller = [[LGPSurfaceController alloc] initWithTitle:LGLocalized(@"prefs.custom_views.rule_details.title")
+                                                                          subtitle:LGLocalized(@"prefs.custom_views.rule.subtitle")
+                                                                         tintColor:[UIColor systemPurpleColor]
+                                                                        identifier:[@"CustomViewRule:" stringByAppendingString:ruleID]
+                                                                             items:LGCustomViewRuleItems(ruleID)];
+    [self.navigationController pushViewController:controller animated:YES];
+}
+
+- (void)deleteCustomViewRule {
+    if (![_screenIdentifier hasPrefix:@"CustomViewRule:"]) return;
+    NSString *ruleID = [_screenIdentifier substringFromIndex:@"CustomViewRule:".length];
+    __weak typeof(self) weakSelf = self;
+    LGPresentConfirmationSheet(self,
+                               LGLocalized(@"prefs.custom_views.delete_rule.title"),
+                               LGLocalized(@"prefs.custom_views.delete_rule.confirm"),
+                               LGLocalized(@"prefs.button.cancel"),
+                               LGLocalized(@"prefs.custom_views.delete_rule.title"),
+                               YES,
+                               ^{
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self) return;
+        LGDeleteCustomViewRule(ruleID);
+        [self.navigationController popViewControllerAnimated:YES];
+    });
 }
 
 - (void)invalidateSnapshotCaches {
@@ -405,6 +541,7 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
 }
 
 - (void)dealloc {
+    LGRemoveLiveBackdropCaptureView(_scrollTopButton, kLGScrollTopBackdropViewKey);
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
@@ -430,6 +567,7 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
 - (void)updateRespringBarAnimated:(BOOL)animated {
     BOOL shouldShow = LGNeedsRespring() && !LGRespringBarDismissed();
     if (!_respringBar) return;
+    LGRefreshRespringBarGlass(_respringBar);
     _scrollTopBottomConstraint.constant = shouldShow ? -108.0 : -12.0;
     if (shouldShow == !_respringBar.hidden) {
         if (animated && !_scrollTopButton.hidden) {
@@ -439,21 +577,29 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
         } else {
             [self.view layoutIfNeeded];
         }
+        if (shouldShow) {
+            LGScheduleRespringBarGlassRefresh(_respringBar);
+        }
         return;
     }
     if (shouldShow) {
         _respringBar.hidden = NO;
+        LGRefreshRespringBarGlass(_respringBar);
         if (animated) {
             [UIView animateWithDuration:0.22 animations:^{
                 _respringBar.alpha = 1.0;
                 _respringBar.transform = CGAffineTransformIdentity;
                 [self.view layoutIfNeeded];
+            } completion:^(__unused BOOL finished) {
+                LGRefreshRespringBarGlass(_respringBar);
             }];
         } else {
             _respringBar.alpha = 1.0;
             _respringBar.transform = CGAffineTransformIdentity;
             [self.view layoutIfNeeded];
+            LGRefreshRespringBarGlass(_respringBar);
         }
+        LGScheduleRespringBarGlassRefresh(_respringBar);
     } else {
         void (^hideBlock)(void) = ^{
             _respringBar.alpha = 0.0;
@@ -480,15 +626,43 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
     container.alpha = 0.0;
     container.transform = CGAffineTransformMakeTranslation(0.0, 10.0);
 
-    UIVisualEffectView *blurView =
-        [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterial]];
+    LGSharedGlassView *glassView = [[LGSharedGlassView alloc] initWithFrame:CGRectZero sourceImage:nil sourceOrigin:CGPointZero];
+    glassView.translatesAutoresizingMaskIntoConstraints = NO;
+    glassView.userInteractionEnabled = NO;
+    glassView.releasesSourceAfterUpload = NO;
+    glassView.bezelWidth = 12.0;
+    glassView.glassThickness = 100.0;
+    glassView.refractionScale = 1.5;
+    glassView.refractiveIndex = 1.5;
+    glassView.specularOpacity = 0.03;
+    glassView.blur = 3.0;
+    glassView.sourceScale = 1.0;
+    glassView.cornerRadius = 19.0;
+    glassView.hidden = YES;
+    [container addSubview:glassView];
+    objc_setAssociatedObject(container, kLGScrollTopGlassViewKey, glassView, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+    UIView *blurView = LGMakeLowBlurFallbackView();
     blurView.translatesAutoresizingMaskIntoConstraints = NO;
+    blurView.userInteractionEnabled = NO;
+    blurView.hidden = NO;
     blurView.layer.cornerRadius = 19.0;
     blurView.layer.cornerCurve = kCACornerCurveContinuous;
     blurView.layer.masksToBounds = YES;
-    blurView.layer.borderWidth = 0.75;
-    blurView.layer.borderColor = [[UIColor separatorColor] colorWithAlphaComponent:0.20].CGColor;
     [container addSubview:blurView];
+    LGApplyLowBlurRadiusToView(blurView);
+    objc_setAssociatedObject(container, kLGScrollTopBlurViewKey, blurView, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+    UIView *tintView = [[UIView alloc] initWithFrame:CGRectZero];
+    tintView.translatesAutoresizingMaskIntoConstraints = NO;
+    tintView.userInteractionEnabled = NO;
+    tintView.backgroundColor = LGCustomTintColorForKey(@"Preferences.GoToTop.CustomTintColor") ?: [UIColor colorWithWhite:1.0 alpha:0.10];
+    tintView.layer.cornerRadius = 19.0;
+    tintView.layer.cornerCurve = kCACornerCurveContinuous;
+    tintView.layer.borderWidth = 0.75;
+    tintView.layer.borderColor = [[UIColor separatorColor] colorWithAlphaComponent:0.14].CGColor;
+    [container addSubview:tintView];
+    objc_setAssociatedObject(container, kLGScrollTopTintViewKey, tintView, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     UIImageSymbolConfiguration *config =
         [UIImageSymbolConfiguration configurationWithPointSize:13.0 weight:UIImageSymbolWeightSemibold];
@@ -506,32 +680,70 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
     button.imageEdgeInsets = UIEdgeInsetsMake(0.0, 6.0, 0.0, -6.0);
     #pragma clang diagnostic pop
     [button addTarget:self action:@selector(handleScrollTopPressed) forControlEvents:UIControlEventTouchUpInside];
-    [blurView.contentView addSubview:button];
+    [container addSubview:button];
 
     [NSLayoutConstraint activateConstraints:@[
         [container.widthAnchor constraintEqualToConstant:116.0],
         [container.heightAnchor constraintEqualToConstant:38.0],
+        [glassView.topAnchor constraintEqualToAnchor:container.topAnchor],
+        [glassView.leadingAnchor constraintEqualToAnchor:container.leadingAnchor],
+        [glassView.trailingAnchor constraintEqualToAnchor:container.trailingAnchor],
+        [glassView.bottomAnchor constraintEqualToAnchor:container.bottomAnchor],
         [blurView.topAnchor constraintEqualToAnchor:container.topAnchor],
         [blurView.leadingAnchor constraintEqualToAnchor:container.leadingAnchor],
         [blurView.trailingAnchor constraintEqualToAnchor:container.trailingAnchor],
         [blurView.bottomAnchor constraintEqualToAnchor:container.bottomAnchor],
-        [button.topAnchor constraintEqualToAnchor:blurView.contentView.topAnchor],
-        [button.leadingAnchor constraintEqualToAnchor:blurView.contentView.leadingAnchor],
-        [button.trailingAnchor constraintEqualToAnchor:blurView.contentView.trailingAnchor],
-        [button.bottomAnchor constraintEqualToAnchor:blurView.contentView.bottomAnchor],
+        [tintView.topAnchor constraintEqualToAnchor:container.topAnchor],
+        [tintView.leadingAnchor constraintEqualToAnchor:container.leadingAnchor],
+        [tintView.trailingAnchor constraintEqualToAnchor:container.trailingAnchor],
+        [tintView.bottomAnchor constraintEqualToAnchor:container.bottomAnchor],
+        [button.topAnchor constraintEqualToAnchor:container.topAnchor],
+        [button.leadingAnchor constraintEqualToAnchor:container.leadingAnchor],
+        [button.trailingAnchor constraintEqualToAnchor:container.trailingAnchor],
+        [button.bottomAnchor constraintEqualToAnchor:container.bottomAnchor],
     ]];
     return container;
 }
 
-- (CGFloat)scrollTopRevealThreshold {
-    UIView *targetSection = _sectionViews[LGLocalized(@"prefs.section.folder_icons.title")];
-    if (!targetSection) {
-        NSArray<NSDictionary *> *sections = [self sectionItems];
-        NSString *fallbackTitle = sections.count > 1 ? sections[1][@"title"] : sections.firstObject[@"title"];
-        if (fallbackTitle.length) {
-            targetSection = _sectionViews[fallbackTitle];
-        }
+- (void)refreshScrollTopButtonBackdrop {
+    if (!_scrollTopButton || _scrollTopButton.hidden || !_scrollTopButton.window || CGRectIsEmpty(_scrollTopButton.bounds)) return;
+    LGSharedGlassView *glassView = objc_getAssociatedObject(_scrollTopButton, kLGScrollTopGlassViewKey);
+    if (!glassView) return;
+    UIView *blurView = objc_getAssociatedObject(_scrollTopButton, kLGScrollTopBlurViewKey);
+    UIView *tintView = objc_getAssociatedObject(_scrollTopButton, kLGScrollTopTintViewKey);
+    tintView.backgroundColor = LGCustomTintColorForKey(@"Preferences.GoToTop.CustomTintColor") ?: [UIColor colorWithWhite:1.0 alpha:0.10];
+    BOOL glassEnabled = LGPreferencesGoToTopButtonEnabled();
+    BOOL liveReady = [objc_getAssociatedObject(_scrollTopButton, kLGScrollTopLiveReadyKey) boolValue];
+    glassView.hidden = !glassEnabled || !liveReady;
+    if (blurView) {
+        blurView.hidden = glassEnabled && liveReady;
+        LGApplyLowBlurRadiusToView(blurView);
     }
+    if (!glassEnabled) {
+        objc_setAssociatedObject(_scrollTopButton, kLGScrollTopLiveReadyKey, @NO, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        LGRemoveLiveBackdropCaptureView(_scrollTopButton, kLGScrollTopBackdropViewKey);
+        return;
+    }
+    glassView.cornerRadius = CGRectGetHeight(_scrollTopButton.bounds) * 0.5;
+    CGPoint captureOrigin = CGPointZero;
+    CGSize samplingResolution = CGSizeZero;
+    if (LGCaptureLiveBackdropTextureForHost(_scrollTopButton,
+                                            glassView,
+                                            kLGScrollTopBackdropViewKey,
+                                            &captureOrigin,
+                                            &samplingResolution)) {
+        objc_setAssociatedObject(_scrollTopButton, kLGScrollTopLiveReadyKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        glassView.hidden = NO;
+        if (blurView) blurView.hidden = YES;
+        glassView.wallpaperOrigin = captureOrigin;
+        glassView.wallpaperSamplingResolution = samplingResolution;
+        [glassView updateOrigin];
+        [glassView scheduleDraw];
+    }
+}
+
+- (CGFloat)scrollTopRevealThreshold {
+    UIView *targetSection = _orderedSectionViews.count > 1 ? _orderedSectionViews[1] : _orderedSectionViews.firstObject;
     if (targetSection) {
         CGRect targetRect = [_contentStack convertRect:targetSection.frame toView:_scrollView];
         CGFloat topInset = _scrollView.adjustedContentInset.top;
@@ -547,10 +759,12 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
     _scrollTopButtonVisible = shouldShow;
     if (shouldShow) {
         _scrollTopButton.hidden = NO;
+        [self refreshScrollTopButtonBackdrop];
         void (^showBlock)(void) = ^{
             _scrollTopButton.alpha = 1.0;
             _scrollTopButton.transform = CGAffineTransformIdentity;
             [self.view layoutIfNeeded];
+            [self refreshScrollTopButtonBackdrop];
         };
         if (animated) {
             _scrollTopButton.transform = CGAffineTransformMakeTranslation(0.0, 8.0);
@@ -558,10 +772,18 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
                                   delay:0.0
                                 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut
                              animations:showBlock
-                             completion:nil];
+                             completion:^(__unused BOOL finished) {
+                [self refreshScrollTopButtonBackdrop];
+            }];
         } else {
             showBlock();
         }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self refreshScrollTopButtonBackdrop];
+        });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self refreshScrollTopButtonBackdrop];
+        });
     } else {
         void (^hideBlock)(void) = ^{
             _scrollTopButton.alpha = 0.0;
@@ -570,6 +792,7 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
         };
         void (^completion)(BOOL) = ^(BOOL finished) {
             if (!_scrollTopButtonVisible) {
+                LGRemoveLiveBackdropCaptureView(_scrollTopButton, kLGScrollTopBackdropViewKey);
                 _scrollTopButton.hidden = YES;
             }
         };
@@ -593,6 +816,7 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
 
 - (void)reloadVisibleSettings {
     _sectionViews = [NSMutableDictionary dictionary];
+    _orderedSectionViews = [NSMutableArray array];
     for (UIView *subview in [_contentStack.arrangedSubviews copy]) {
         [_contentStack removeArrangedSubview:subview];
         [subview removeFromSuperview];
@@ -607,6 +831,11 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
     while (index < _items.count) {
         NSDictionary *item = _items[index];
         NSString *type = item[@"type"];
+        if ([type isEqualToString:@"about_content"]) {
+            [_contentStack addArrangedSubview:[self aboutContentView]];
+            index += 1;
+            continue;
+        }
         if ([type isEqualToString:@"section"]) {
             NSString *sectionTitle = item[@"title"] ?: @"";
             NSString *sectionSubtitle = item[@"subtitle"] ?: @"";
@@ -614,15 +843,26 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
                 UIView *spacer = [[UIView alloc] initWithFrame:CGRectZero];
                 spacer.backgroundColor = UIColor.clearColor;
                 spacer.translatesAutoresizingMaskIntoConstraints = NO;
-                [spacer.heightAnchor constraintEqualToConstant:18.0].active = YES;
+                NSNumber *height = item[@"height"];
+                [spacer.heightAnchor constraintEqualToConstant:height ? height.doubleValue : 18.0].active = YES;
+                UIView *previousView = _contentStack.arrangedSubviews.lastObject;
+                if (previousView && height && [_contentStack respondsToSelector:@selector(setCustomSpacing:afterView:)]) {
+                    [_contentStack setCustomSpacing:0.0 afterView:previousView];
+                }
                 [_contentStack addArrangedSubview:spacer];
+                NSNumber *afterSpacing = item[@"after_spacing"];
+                if (afterSpacing && [_contentStack respondsToSelector:@selector(setCustomSpacing:afterView:)]) {
+                    [_contentStack setCustomSpacing:afterSpacing.doubleValue afterView:spacer];
+                }
                 index += 1;
                 continue;
             }
             [_contentStack addArrangedSubview:[self sectionViewForItem:item]];
             NSMutableArray<NSDictionary *> *groupItems = [NSMutableArray array];
             index += 1;
-            while (index < _items.count && ![_items[index][@"type"] isEqualToString:@"section"]) {
+            while (index < _items.count
+                   && ![_items[index][@"type"] isEqualToString:@"section"]
+                   && ![_items[index][@"type"] isEqualToString:@"about_content"]) {
                 [groupItems addObject:_items[index]];
                 index += 1;
             }
@@ -633,7 +873,9 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
         }
 
         NSMutableArray<NSDictionary *> *groupItems = [NSMutableArray array];
-        while (index < _items.count && ![_items[index][@"type"] isEqualToString:@"section"]) {
+        while (index < _items.count
+               && ![_items[index][@"type"] isEqualToString:@"section"]
+               && ![_items[index][@"type"] isEqualToString:@"about_content"]) {
             [groupItems addObject:_items[index]];
             index += 1;
         }
@@ -693,6 +935,13 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
                     NSInteger decimals = decimalsNumber ? [decimalsNumber integerValue] : 0;
                     LGAnimateSliderToDefault(slider, targetValue, valueLabel, decimals);
                 }
+            } else if ([subview isKindOfClass:[UILabel class]]) {
+                UILabel *label = (UILabel *)subview;
+                NSString *preferenceKey = objc_getAssociatedObject(label, kLGPreferenceKeyKey);
+                NSString *defaultValue = objc_getAssociatedObject(label, kLGDefaultValueKey);
+                if (preferenceKey.length && [defaultValue isKindOfClass:[NSString class]]) {
+                    label.text = defaultValue;
+                }
             }
         }
     }
@@ -745,6 +994,405 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
         [subtitleLabel.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-18.0],
     ]];
     return card;
+}
+
+- (NSString *)currentPackageVersion {
+    NSString *compiledVersion = LG_PACKAGE_VERSION;
+    if (compiledVersion.length) {
+        return compiledVersion;
+    }
+    NSBundle *bundle = [NSBundle bundleForClass:[self class]];
+    NSString *shortVersion = [bundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
+    if (shortVersion.length) {
+        return shortVersion;
+    }
+    NSString *bundleVersion = [bundle objectForInfoDictionaryKey:@"CFBundleVersion"];
+    return bundleVersion.length ? bundleVersion : @"";
+}
+
+- (NSString *)latestBundledChangelogPathInBundle:(NSBundle *)bundle {
+    NSString *directoryPath = [bundle pathForResource:@"changelogs" ofType:nil];
+    if (!directoryPath.length) return nil;
+
+    NSArray<NSString *> *filenames = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:directoryPath error:nil];
+    NSMutableArray<NSString *> *markdownFilenames = [NSMutableArray array];
+    for (NSString *filename in filenames) {
+        if ([[filename pathExtension] isEqualToString:@"md"]) {
+            [markdownFilenames addObject:filename];
+        }
+    }
+    if (!markdownFilenames.count) return nil;
+
+    [markdownFilenames sortUsingComparator:^NSComparisonResult(NSString *first, NSString *second) {
+        NSString *firstVersion = [first stringByDeletingPathExtension];
+        NSString *secondVersion = [second stringByDeletingPathExtension];
+        return [firstVersion localizedStandardCompare:secondVersion];
+    }];
+    return [directoryPath stringByAppendingPathComponent:markdownFilenames.lastObject];
+}
+
+- (NSString *)aboutChangelogMarkdownText {
+    NSBundle *bundle = [NSBundle bundleForClass:[self class]];
+    NSString *version = [self currentPackageVersion];
+    NSString *path = version.length ? [bundle pathForResource:version ofType:@"md" inDirectory:@"changelogs"] : nil;
+    if (!path.length) {
+        path = [self latestBundledChangelogPathInBundle:bundle];
+    }
+    if (!path.length) return @"";
+    return [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil] ?: @"";
+}
+
+- (UILabel *)aboutMarkdownLabelWithText:(NSString *)text
+                                   font:(UIFont *)font
+                                  color:(UIColor *)color {
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    label.text = text;
+    label.numberOfLines = 0;
+    label.font = font;
+    label.textColor = color;
+    return label;
+}
+
+- (void)addMarkdownLine:(NSString *)line toStack:(UIStackView *)stack {
+    NSString *trimmed = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (!trimmed.length) {
+        UIView *spacer = [[UIView alloc] initWithFrame:CGRectZero];
+        spacer.translatesAutoresizingMaskIntoConstraints = NO;
+        [spacer.heightAnchor constraintEqualToConstant:4.0].active = YES;
+        [stack addArrangedSubview:spacer];
+        return;
+    }
+
+    NSUInteger headingLevel = 0;
+    while (headingLevel < trimmed.length && [trimmed characterAtIndex:headingLevel] == '#') {
+        headingLevel += 1;
+    }
+    if (headingLevel > 0 && headingLevel < trimmed.length && [trimmed characterAtIndex:headingLevel] == ' ') {
+        NSString *heading = [[trimmed substringFromIndex:headingLevel + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        CGFloat fontSize = headingLevel == 1 ? 20.0 : 17.0;
+        UILabel *label = [self aboutMarkdownLabelWithText:heading
+                                                     font:[UIFont systemFontOfSize:fontSize weight:UIFontWeightBold]
+                                                    color:[UIColor labelColor]];
+        [stack addArrangedSubview:label];
+        return;
+    }
+
+    BOOL isBullet = [trimmed hasPrefix:@"- "] || [trimmed hasPrefix:@"* "];
+    NSString *body = isBullet ? [trimmed substringFromIndex:2] : trimmed;
+    if (isBullet) {
+        UIView *row = [[UIView alloc] initWithFrame:CGRectZero];
+        row.translatesAutoresizingMaskIntoConstraints = NO;
+
+        UILabel *bullet = [self aboutMarkdownLabelWithText:@"•"
+                                                      font:[UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold]
+                                                     color:[UIColor secondaryLabelColor]];
+        UILabel *label = [self aboutMarkdownLabelWithText:body
+                                                     font:[UIFont systemFontOfSize:15.0 weight:UIFontWeightRegular]
+                                                    color:[UIColor labelColor]];
+        [row addSubview:bullet];
+        [row addSubview:label];
+        [NSLayoutConstraint activateConstraints:@[
+            [bullet.topAnchor constraintEqualToAnchor:row.topAnchor constant:1.0],
+            [bullet.leadingAnchor constraintEqualToAnchor:row.leadingAnchor],
+            [bullet.widthAnchor constraintEqualToConstant:18.0],
+            [label.topAnchor constraintEqualToAnchor:row.topAnchor],
+            [label.leadingAnchor constraintEqualToAnchor:bullet.trailingAnchor],
+            [label.trailingAnchor constraintEqualToAnchor:row.trailingAnchor],
+            [label.bottomAnchor constraintEqualToAnchor:row.bottomAnchor],
+        ]];
+        [stack addArrangedSubview:row];
+        return;
+    }
+
+    UILabel *label = [self aboutMarkdownLabelWithText:body
+                                                 font:[UIFont systemFontOfSize:15.0 weight:UIFontWeightRegular]
+                                                color:[UIColor labelColor]];
+    [stack addArrangedSubview:label];
+}
+
+- (void)handleDonationRowPressed:(UIButton *)sender {
+    NSString *address = objc_getAssociatedObject(sender, kLGDonationAddressKey);
+    if (!address.length) return;
+    UIPasteboard.generalPasteboard.string = address;
+    LGPresentInfoSheet(self, @"Copied", @"Wallet address copied to clipboard.");
+}
+
+- (UIView *)donationRowWithName:(NSString *)name
+                        network:(NSString *)network
+                         symbol:(NSString *)symbol
+                          color:(UIColor *)color
+                        address:(NSString *)address {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
+    button.translatesAutoresizingMaskIntoConstraints = NO;
+    button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentFill;
+    button.contentVerticalAlignment = UIControlContentVerticalAlignmentFill;
+    button.contentEdgeInsets = UIEdgeInsetsZero;
+    [button addTarget:self action:@selector(handleDonationRowPressed:) forControlEvents:UIControlEventTouchUpInside];
+    objc_setAssociatedObject(button, kLGDonationAddressKey, address, OBJC_ASSOCIATION_COPY_NONATOMIC);
+
+    UIView *body = [[UIView alloc] initWithFrame:CGRectZero];
+    body.userInteractionEnabled = NO;
+    body.translatesAutoresizingMaskIntoConstraints = NO;
+    [button addSubview:body];
+
+    UILabel *badge = [[UILabel alloc] initWithFrame:CGRectZero];
+    badge.translatesAutoresizingMaskIntoConstraints = NO;
+    badge.text = symbol;
+    badge.textAlignment = NSTextAlignmentCenter;
+    badge.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightBold];
+    badge.textColor = UIColor.whiteColor;
+    badge.backgroundColor = color;
+    badge.layer.cornerRadius = 14.0;
+    badge.layer.cornerCurve = kCACornerCurveContinuous;
+    badge.layer.masksToBounds = YES;
+
+    UILabel *nameLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    nameLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    nameLabel.text = name;
+    nameLabel.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];
+    nameLabel.textColor = [UIColor labelColor];
+
+    UILabel *networkLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    networkLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    networkLabel.text = network;
+    networkLabel.font = [UIFont systemFontOfSize:12.0 weight:UIFontWeightMedium];
+    networkLabel.textColor = [UIColor secondaryLabelColor];
+
+    UILabel *addressLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    addressLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    addressLabel.text = address;
+    addressLabel.font = [UIFont monospacedSystemFontOfSize:12.0 weight:UIFontWeightRegular];
+    addressLabel.textColor = [UIColor tertiaryLabelColor];
+    addressLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
+    addressLabel.numberOfLines = 1;
+
+    UIImageView *copyIcon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"doc.on.doc"]];
+    copyIcon.translatesAutoresizingMaskIntoConstraints = NO;
+    copyIcon.tintColor = [UIColor tertiaryLabelColor];
+    copyIcon.contentMode = UIViewContentModeScaleAspectFit;
+
+    UIView *titleRow = [[UIView alloc] initWithFrame:CGRectZero];
+    titleRow.translatesAutoresizingMaskIntoConstraints = NO;
+    [titleRow addSubview:nameLabel];
+    [titleRow addSubview:networkLabel];
+
+    UIStackView *textStack = [[UIStackView alloc] initWithArrangedSubviews:@[titleRow, addressLabel]];
+    textStack.translatesAutoresizingMaskIntoConstraints = NO;
+    textStack.axis = UILayoutConstraintAxisVertical;
+    textStack.spacing = 3.0;
+
+    [body addSubview:badge];
+    [body addSubview:textStack];
+    [body addSubview:copyIcon];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [body.topAnchor constraintEqualToAnchor:button.topAnchor],
+        [body.leadingAnchor constraintEqualToAnchor:button.leadingAnchor],
+        [body.trailingAnchor constraintEqualToAnchor:button.trailingAnchor],
+        [body.bottomAnchor constraintEqualToAnchor:button.bottomAnchor],
+        [badge.leadingAnchor constraintEqualToAnchor:body.leadingAnchor constant:14.0],
+        [badge.centerYAnchor constraintEqualToAnchor:body.centerYAnchor],
+        [badge.widthAnchor constraintEqualToConstant:28.0],
+        [badge.heightAnchor constraintEqualToConstant:28.0],
+        [copyIcon.trailingAnchor constraintEqualToAnchor:body.trailingAnchor constant:-14.0],
+        [copyIcon.centerYAnchor constraintEqualToAnchor:body.centerYAnchor],
+        [copyIcon.widthAnchor constraintEqualToConstant:18.0],
+        [copyIcon.heightAnchor constraintEqualToConstant:18.0],
+        [nameLabel.topAnchor constraintEqualToAnchor:titleRow.topAnchor],
+        [nameLabel.leadingAnchor constraintEqualToAnchor:titleRow.leadingAnchor],
+        [nameLabel.bottomAnchor constraintEqualToAnchor:titleRow.bottomAnchor],
+        [networkLabel.firstBaselineAnchor constraintEqualToAnchor:nameLabel.firstBaselineAnchor],
+        [networkLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:nameLabel.trailingAnchor constant:8.0],
+        [networkLabel.trailingAnchor constraintEqualToAnchor:titleRow.trailingAnchor],
+        [textStack.topAnchor constraintEqualToAnchor:body.topAnchor constant:10.0],
+        [textStack.leadingAnchor constraintEqualToAnchor:badge.trailingAnchor constant:12.0],
+        [textStack.trailingAnchor constraintEqualToAnchor:copyIcon.leadingAnchor constant:-12.0],
+        [textStack.bottomAnchor constraintEqualToAnchor:body.bottomAnchor constant:-10.0],
+    ]];
+
+    return button;
+}
+
+- (UIView *)donationCard {
+    UIView *card = [[UIView alloc] initWithFrame:CGRectZero];
+    card.translatesAutoresizingMaskIntoConstraints = NO;
+    card.backgroundColor = LGSubpageCardBackgroundColor();
+    card.layer.cornerRadius = 23.25;
+    card.layer.cornerCurve = kCACornerCurveContinuous;
+    card.layer.masksToBounds = YES;
+
+    UIStackView *stack = [[UIStackView alloc] initWithFrame:CGRectZero];
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.spacing = 0.0;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [card addSubview:stack];
+
+    UIView *header = [[UIView alloc] initWithFrame:CGRectZero];
+    header.translatesAutoresizingMaskIntoConstraints = NO;
+    UIStackView *headerStack = [[UIStackView alloc] initWithFrame:CGRectZero];
+    headerStack.axis = UILayoutConstraintAxisVertical;
+    headerStack.spacing = 3.0;
+    headerStack.translatesAutoresizingMaskIntoConstraints = NO;
+    [header addSubview:headerStack];
+
+    UILabel *title = [self aboutMarkdownLabelWithText:@"Donate"
+                                                 font:[UIFont systemFontOfSize:20.0 weight:UIFontWeightBold]
+                                                color:[UIColor labelColor]];
+    UILabel *subtitle = [self aboutMarkdownLabelWithText:@"Crypto only for now. Tap a row to copy the address."
+                                                    font:[UIFont systemFontOfSize:13.0 weight:UIFontWeightMedium]
+                                                   color:[UIColor secondaryLabelColor]];
+    [headerStack addArrangedSubview:title];
+    [headerStack addArrangedSubview:subtitle];
+    [stack addArrangedSubview:header];
+
+    // BTC: bc1qlv830emqsffqslns2e3kglkgcdnlag0nfnyj4k
+    // ETH: 0x6245EF47c749D1b5c2830b145cB943a8aD826bea
+    // LTC: ltc1q7j6vlgvymxdtwm46u0n22h7m4890cexfp22vfm
+    // DOGE: D76nuR1HWSymSLhFYYhkfpc4JHg1HjvgWD
+    // SOL: F1rH3PSMHFHXbGLGQiWXGLRaahfYoVULUwhsvrewM37W
+    // TRX: TVuW2KcYBMcr2VAMhYVqYmoT15N3MbZ8eX
+    // USDC (Polygon): 0x6245EF47c749D1b5c2830b145cB943a8aD826bea
+    // USDT (Tron/trc-20): TVuW2KcYBMcr2VAMhYVqYmoT15N3MbZ8eX
+
+    NSArray<NSDictionary *> *methods = @[
+        @{@"name": @"BTC", @"network": @"Bitcoin", @"symbol": @"B", @"color": [UIColor systemOrangeColor], @"address": @"bc1qlv830emqsffqslns2e3kglkgcdnlag0nfnyj4k"},
+        @{@"name": @"ETH", @"network": @"Ethereum", @"symbol": @"E", @"color": [UIColor systemIndigoColor], @"address": @"0x6245EF47c749D1b5c2830b145cB943a8aD826bea"},
+        @{@"name": @"LTC", @"network": @"Litecoin", @"symbol": @"L", @"color": [UIColor systemGrayColor], @"address": @"ltc1q7j6vlgvymxdtwm46u0n22h7m4890cexfp22vfm"},
+        @{@"name": @"DOGE", @"network": @"Dogecoin", @"symbol": @"D", @"color": [UIColor systemYellowColor], @"address": @"D76nuR1HWSymSLhFYYhkfpc4JHg1HjvgWD"},
+        @{@"name": @"SOL", @"network": @"Solana", @"symbol": @"S", @"color": [UIColor systemPurpleColor], @"address": @"F1rH3PSMHFHXbGLGQiWXGLRaahfYoVULUwhsvrewM37W"},
+        @{@"name": @"TRX", @"network": @"Tron", @"symbol": @"T", @"color": [UIColor systemRedColor], @"address": @"TVuW2KcYBMcr2VAMhYVqYmoT15N3MbZ8eX"},
+        @{@"name": @"USDC", @"network": @"Polygon", @"symbol": @"U", @"color": [UIColor systemBlueColor], @"address": @"0x6245EF47c749D1b5c2830b145cB943a8aD826bea"},
+        @{@"name": @"USDT", @"network": @"Tron TRC-20", @"symbol": @"U", @"color": [UIColor systemGreenColor], @"address": @"TVuW2KcYBMcr2VAMhYVqYmoT15N3MbZ8eX"},
+    ];
+
+    for (NSUInteger index = 0; index < methods.count; index++) {
+        NSDictionary *method = methods[index];
+        UIView *row = [self donationRowWithName:method[@"name"]
+                                        network:method[@"network"]
+                                         symbol:method[@"symbol"]
+                                          color:method[@"color"]
+                                        address:method[@"address"]];
+        [stack addArrangedSubview:row];
+        if (index + 1 < methods.count) {
+            UIView *dividerRow = [[UIView alloc] initWithFrame:CGRectZero];
+            dividerRow.translatesAutoresizingMaskIntoConstraints = NO;
+            UIView *divider = LGMakeSectionDivider();
+            [dividerRow addSubview:divider];
+            [NSLayoutConstraint activateConstraints:@[
+                [divider.leadingAnchor constraintEqualToAnchor:dividerRow.leadingAnchor constant:54.0],
+                [divider.trailingAnchor constraintEqualToAnchor:dividerRow.trailingAnchor constant:-14.0],
+                [divider.centerYAnchor constraintEqualToAnchor:dividerRow.centerYAnchor],
+            ]];
+            [stack addArrangedSubview:dividerRow];
+        }
+    }
+
+    [NSLayoutConstraint activateConstraints:@[
+        [stack.topAnchor constraintEqualToAnchor:card.topAnchor],
+        [stack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor],
+        [stack.trailingAnchor constraintEqualToAnchor:card.trailingAnchor],
+        [stack.bottomAnchor constraintEqualToAnchor:card.bottomAnchor],
+        [headerStack.topAnchor constraintEqualToAnchor:header.topAnchor constant:16.0],
+        [headerStack.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:16.0],
+        [headerStack.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-16.0],
+        [headerStack.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-13.0],
+    ]];
+
+    return card;
+}
+
+- (UIView *)aboutContentView {
+    UIView *container = [[UIView alloc] initWithFrame:CGRectZero];
+    container.backgroundColor = UIColor.clearColor;
+
+    UIStackView *stack = [[UIStackView alloc] initWithFrame:CGRectZero];
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.alignment = UIStackViewAlignmentCenter;
+    stack.spacing = 7.0;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [container addSubview:stack];
+
+    NSBundle *bundle = [NSBundle bundleForClass:[self class]];
+    UIImage *icon = [UIImage imageNamed:@"original" inBundle:bundle compatibleWithTraitCollection:nil];
+    if (!icon) {
+        icon = [UIImage imageNamed:@"icon" inBundle:bundle compatibleWithTraitCollection:nil];
+    }
+    UIImageView *iconView = [[UIImageView alloc] initWithImage:icon];
+    iconView.translatesAutoresizingMaskIntoConstraints = NO;
+    iconView.contentMode = UIViewContentModeScaleAspectFit;
+    iconView.layer.cornerRadius = 19.0;
+    iconView.layer.cornerCurve = kCACornerCurveContinuous;
+    iconView.layer.masksToBounds = YES;
+    [iconView.widthAnchor constraintEqualToConstant:82.0].active = YES;
+    [iconView.heightAnchor constraintEqualToConstant:82.0].active = YES;
+
+    UILabel *nameLabel = [self aboutMarkdownLabelWithText:LGLocalized(@"prefs.app_name")
+                                                     font:[UIFont systemFontOfSize:28.0 weight:UIFontWeightBold]
+                                                    color:[UIColor labelColor]];
+    nameLabel.textAlignment = NSTextAlignmentCenter;
+
+    UILabel *subtitleLabel = [self aboutMarkdownLabelWithText:LGLocalized(@"prefs.hero.subtitle")
+                                                         font:[UIFont systemFontOfSize:15.0 weight:UIFontWeightMedium]
+                                                        color:[UIColor secondaryLabelColor]];
+    subtitleLabel.textAlignment = NSTextAlignmentCenter;
+
+    UIView *markdownCard = [[UIView alloc] initWithFrame:CGRectZero];
+    markdownCard.translatesAutoresizingMaskIntoConstraints = NO;
+    markdownCard.backgroundColor = LGSubpageCardBackgroundColor();
+    markdownCard.layer.cornerRadius = 23.25;
+    markdownCard.layer.cornerCurve = kCACornerCurveContinuous;
+    markdownCard.layer.masksToBounds = YES;
+
+    UIStackView *markdownStack = [[UIStackView alloc] initWithFrame:CGRectZero];
+    markdownStack.axis = UILayoutConstraintAxisVertical;
+    markdownStack.alignment = UIStackViewAlignmentFill;
+    markdownStack.spacing = 7.0;
+    markdownStack.translatesAutoresizingMaskIntoConstraints = NO;
+    [markdownCard addSubview:markdownStack];
+
+    NSString *markdownText = [self aboutChangelogMarkdownText];
+    if (markdownText.length) {
+        NSArray<NSString *> *lines = [markdownText componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+        for (NSString *line in lines) {
+            [self addMarkdownLine:line toStack:markdownStack];
+        }
+    } else {
+        UILabel *fallbackLabel = [self aboutMarkdownLabelWithText:[NSString stringWithFormat:@"No changelog found for %@.", [self currentPackageVersion]]
+                                                             font:[UIFont systemFontOfSize:15.0 weight:UIFontWeightRegular]
+                                                            color:[UIColor secondaryLabelColor]];
+        [markdownStack addArrangedSubview:fallbackLabel];
+    }
+
+    [stack addArrangedSubview:iconView];
+    [stack addArrangedSubview:nameLabel];
+    [stack addArrangedSubview:subtitleLabel];
+    [stack setCustomSpacing:18.0 afterView:subtitleLabel];
+    UIView *donationCard = [self donationCard];
+    [stack addArrangedSubview:markdownCard];
+    [stack setCustomSpacing:12.0 afterView:markdownCard];
+    [stack addArrangedSubview:donationCard];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [stack.topAnchor constraintEqualToAnchor:container.topAnchor constant:8.0],
+        [stack.leadingAnchor constraintEqualToAnchor:container.leadingAnchor],
+        [stack.trailingAnchor constraintEqualToAnchor:container.trailingAnchor],
+        [stack.bottomAnchor constraintEqualToAnchor:container.bottomAnchor constant:-8.0],
+        [nameLabel.leadingAnchor constraintEqualToAnchor:stack.leadingAnchor constant:18.0],
+        [nameLabel.trailingAnchor constraintEqualToAnchor:stack.trailingAnchor constant:-18.0],
+        [subtitleLabel.leadingAnchor constraintEqualToAnchor:stack.leadingAnchor constant:22.0],
+        [subtitleLabel.trailingAnchor constraintEqualToAnchor:stack.trailingAnchor constant:-22.0],
+        [markdownCard.leadingAnchor constraintEqualToAnchor:stack.leadingAnchor],
+        [markdownCard.trailingAnchor constraintEqualToAnchor:stack.trailingAnchor],
+        [donationCard.leadingAnchor constraintEqualToAnchor:stack.leadingAnchor],
+        [donationCard.trailingAnchor constraintEqualToAnchor:stack.trailingAnchor],
+        [markdownStack.topAnchor constraintEqualToAnchor:markdownCard.topAnchor constant:16.0],
+        [markdownStack.leadingAnchor constraintEqualToAnchor:markdownCard.leadingAnchor constant:16.0],
+        [markdownStack.trailingAnchor constraintEqualToAnchor:markdownCard.trailingAnchor constant:-16.0],
+        [markdownStack.bottomAnchor constraintEqualToAnchor:markdownCard.bottomAnchor constant:-16.0],
+    ]];
+
+    return container;
 }
 
 - (NSArray<NSDictionary *> *)sectionItems {
@@ -838,22 +1486,7 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
 - (void)handleSliderInfoPressed:(UIButton *)sender {
     NSString *controlTitle = objc_getAssociatedObject(sender, kLGControlTitleKey);
     NSString *subtitle = objc_getAssociatedObject(sender, kLGControlSubtitleKey);
-    NSNumber *minNumber = objc_getAssociatedObject(sender, kLGMinValueKey);
-    NSNumber *maxNumber = objc_getAssociatedObject(sender, kLGMaxValueKey);
-    NSNumber *decimalsNumber = objc_getAssociatedObject(sender, kLGDecimalsKey);
-
-    NSInteger decimals = decimalsNumber.integerValue;
-    NSString *rangeText = (minNumber && maxNumber)
-        ? [NSString stringWithFormat:LGLocalized(@"prefs.range_format"),
-           LGFormatSliderValue(minNumber.doubleValue, decimals),
-           LGFormatSliderValue(maxNumber.doubleValue, decimals)]
-        : nil;
-
-    NSMutableArray<NSString *> *parts = [NSMutableArray array];
-    if (subtitle.length) [parts addObject:subtitle];
-    if (rangeText.length) [parts addObject:rangeText];
-    NSString *message = parts.count ? [parts componentsJoinedByString:@"\n\n"] : nil;
-    LGPresentInfoSheet(self, (controlTitle.length ? controlTitle : LGLocalized(@"prefs.info.title")), message);
+    LGPresentInfoSheet(self, (controlTitle.length ? controlTitle : LGLocalized(@"prefs.info.title")), subtitle);
 }
 
 - (void)jumpToSectionNamed:(NSString *)title {
@@ -868,7 +1501,39 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView {
     if (scrollView == _scrollView) {
         [self updateScrollTopButtonAnimated:YES];
+        CFTimeInterval now = CACurrentMediaTime();
+        if (now - _lastFloatingGlassScrollRefreshTime >= (1.0 / 30.0)) {
+            _lastFloatingGlassScrollRefreshTime = now;
+            LGRefreshCircularBackItem(self.navigationItem.leftBarButtonItem);
+            LGRefreshCircularBackItem(self.navigationItem.rightBarButtonItem);
+            LGRefreshRespringBarGlass(_respringBar);
+            [self refreshScrollTopButtonBackdrop];
+        }
+    }
+}
+
+- (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate {
+    if (scrollView != _scrollView) return;
+    if (!decelerate) {
+        [self refreshScrollTopButtonBackdrop];
         LGRefreshCircularBackItem(self.navigationItem.leftBarButtonItem);
+        LGRefreshCircularBackItem(self.navigationItem.rightBarButtonItem);
+    }
+}
+
+- (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView {
+    if (scrollView == _scrollView) {
+        [self refreshScrollTopButtonBackdrop];
+        LGRefreshCircularBackItem(self.navigationItem.leftBarButtonItem);
+        LGRefreshCircularBackItem(self.navigationItem.rightBarButtonItem);
+    }
+}
+
+- (void)scrollViewDidEndScrollingAnimation:(UIScrollView *)scrollView {
+    if (scrollView == _scrollView) {
+        [self refreshScrollTopButtonBackdrop];
+        LGRefreshCircularBackItem(self.navigationItem.leftBarButtonItem);
+        LGRefreshCircularBackItem(self.navigationItem.rightBarButtonItem);
     }
 }
 
@@ -878,6 +1543,7 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
     NSString *sectionTitleText = item[@"title"];
     if (sectionTitleText.length) {
         _sectionViews[sectionTitleText] = sectionView;
+        [_orderedSectionViews addObject:sectionView];
     }
 
     UIStackView *sectionStack = [[UIStackView alloc] initWithFrame:CGRectZero];
@@ -968,6 +1634,12 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
         if ([item[@"key"] isEqualToString:@"SettingsControls.Enabled"]) {
             LGWritePreference(item[@"key"], @(sender.isOn));
             LGPresentReopenSettingsConfirmation(self);
+        } else if ([item[@"key"] hasPrefix:@"Preferences."]) {
+            LGWritePreference(item[@"key"], @(sender.isOn));
+            [self configureCustomBackButton];
+            [self updateScrollTopButtonAnimated:YES];
+            [self refreshScrollTopButtonBackdrop];
+            LGRefreshRespringBarGlass(_respringBar);
         } else {
             LGWritePreferenceAndMaybeRequireRespring(item[@"key"], @(sender.isOn));
             [self handleRespringStateChanged:nil];
@@ -1277,6 +1949,194 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
     return body;
 }
 
+- (UIView *)stringControlBodyForItem:(NSDictionary *)item titleLabel:(UILabel *)titleLabel {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
+    button.translatesAutoresizingMaskIntoConstraints = NO;
+    button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentFill;
+    button.contentVerticalAlignment = UIControlContentVerticalAlignmentFill;
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    button.contentEdgeInsets = UIEdgeInsetsZero;
+    #pragma clang diagnostic pop
+
+    UIView *body = [[UIView alloc] initWithFrame:CGRectZero];
+    body.userInteractionEnabled = NO;
+    UIStackView *stack = [[UIStackView alloc] initWithFrame:CGRectZero];
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.spacing = 9.0;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [body addSubview:stack];
+
+    NSString *preferenceKey = item[@"key"];
+    NSString *fallback = item[@"default"];
+    id storedObject = LGReadPreferenceObject(preferenceKey, fallback);
+    NSString *stored = [storedObject isKindOfClass:[NSString class]] ? storedObject : fallback;
+
+    UILabel *valueLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    valueLabel.text = stored.length ? stored : fallback;
+    valueLabel.font = [UIFont monospacedSystemFontOfSize:15.0 weight:UIFontWeightSemibold];
+    valueLabel.textColor = _accentColor;
+    valueLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
+    [valueLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultLow
+                                                forAxis:UILayoutConstraintAxisHorizontal];
+    objc_setAssociatedObject(valueLabel, kLGPreferenceKeyKey, preferenceKey, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    objc_setAssociatedObject(valueLabel, kLGDefaultValueKey, fallback, OBJC_ASSOCIATION_COPY_NONATOMIC);
+
+    UIImageView *chevron = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right"]];
+    chevron.tintColor = [UIColor tertiaryLabelColor];
+    chevron.contentMode = UIViewContentModeScaleAspectFit;
+    [chevron.widthAnchor constraintEqualToConstant:12.0].active = YES;
+    [chevron.heightAnchor constraintEqualToConstant:20.0].active = YES;
+
+    UIView *headerRow = [self controlHeaderRowWithTitleLabel:titleLabel
+                                              accessoryViews:@[chevron, valueLabel]
+                                                     spacing:8.0];
+    [stack addArrangedSubview:headerRow];
+    NSString *subtitle = item[@"subtitle"];
+    if (subtitle.length) {
+        [stack addArrangedSubview:[self controlSubtitleLabelWithText:subtitle]];
+    }
+    [NSLayoutConstraint activateConstraints:@[
+        [valueLabel.widthAnchor constraintLessThanOrEqualToConstant:150.0],
+        [stack.topAnchor constraintEqualToAnchor:body.topAnchor constant:13.0],
+        [stack.leadingAnchor constraintEqualToAnchor:body.leadingAnchor constant:14.0],
+        [stack.trailingAnchor constraintEqualToAnchor:body.trailingAnchor constant:-14.0],
+        [stack.bottomAnchor constraintEqualToAnchor:body.bottomAnchor constant:-13.0],
+    ]];
+
+    [button addSubview:body];
+    body.translatesAutoresizingMaskIntoConstraints = NO;
+    [NSLayoutConstraint activateConstraints:@[
+        [body.topAnchor constraintEqualToAnchor:button.topAnchor],
+        [body.leadingAnchor constraintEqualToAnchor:button.leadingAnchor],
+        [body.trailingAnchor constraintEqualToAnchor:button.trailingAnchor],
+        [body.bottomAnchor constraintEqualToAnchor:button.bottomAnchor],
+    ]];
+
+    __weak typeof(self) weakSelf = self;
+    __weak UILabel *weakValueLabel = valueLabel;
+    [button addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        NSString *current = weakValueLabel.text.length ? weakValueLabel.text : fallback;
+        LGPresentTextInputSheet(strongSelf,
+                                item[@"title"],
+                                item[@"subtitle"],
+                                current,
+                                item[@"placeholder"],
+                                UIKeyboardTypeASCIICapable,
+                                YES,
+                                ^(NSString *inputText) {
+            NSString *text = inputText ?: @"";
+            text = [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (!text.length) text = fallback ?: @"";
+            weakValueLabel.text = text;
+            LGWritePreferenceObject(preferenceKey, text);
+        });
+    }] forControlEvents:UIControlEventTouchUpInside];
+    return button;
+}
+
+- (UITextField *)customClassFilterTextFieldForField:(NSDictionary *)field {
+    NSString *preferenceKey = field[@"key"];
+    NSString *stored = LGReadPreferenceObject(preferenceKey, @"");
+    if (![stored isKindOfClass:NSString.class]) stored = @"";
+
+    UITextField *textField = [[UITextField alloc] initWithFrame:CGRectZero];
+    textField.translatesAutoresizingMaskIntoConstraints = NO;
+    textField.text = stored;
+    textField.placeholder = field[@"placeholder"];
+    textField.textColor = UIColor.labelColor;
+    textField.tintColor = _accentColor;
+    textField.font = [UIFont monospacedSystemFontOfSize:14.0 weight:UIFontWeightMedium];
+    textField.textAlignment = NSTextAlignmentRight;
+    textField.clearButtonMode = UITextFieldViewModeWhileEditing;
+    textField.autocorrectionType = UITextAutocorrectionTypeNo;
+    textField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    textField.smartDashesType = UITextSmartDashesTypeNo;
+    textField.smartQuotesType = UITextSmartQuotesTypeNo;
+    textField.smartInsertDeleteType = UITextSmartInsertDeleteTypeNo;
+    textField.keyboardType = UIKeyboardTypeASCIICapable;
+    textField.returnKeyType = UIReturnKeyDone;
+    objc_setAssociatedObject(textField, kLGPreferenceKeyKey, preferenceKey, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    objc_setAssociatedObject(textField, kLGDefaultValueKey, @"", OBJC_ASSOCIATION_COPY_NONATOMIC);
+    [textField addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
+        UITextField *sender = (UITextField *)action.sender;
+        NSString *key = objc_getAssociatedObject(sender, kLGPreferenceKeyKey);
+        NSString *text = [sender.text ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if (text.length) {
+            LGWritePreferenceObject(key, text);
+        } else {
+            LGRemovePreference(key);
+        }
+    }] forControlEvents:UIControlEventEditingDidEnd | UIControlEventEditingDidEndOnExit];
+    return textField;
+}
+
+- (UIView *)customClassFiltersBodyForItem:(NSDictionary *)item titleLabel:(UILabel *)titleLabel {
+    UIView *body = [[UIView alloc] initWithFrame:CGRectZero];
+    UIStackView *stack = [[UIStackView alloc] initWithFrame:CGRectZero];
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.spacing = 10.0;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [body addSubview:stack];
+
+    [stack addArrangedSubview:titleLabel];
+    NSString *subtitle = item[@"subtitle"];
+    if (subtitle.length) {
+        [stack addArrangedSubview:[self controlSubtitleLabelWithText:subtitle]];
+    }
+
+    NSArray<NSDictionary *> *fields = item[@"fields"];
+    UIStackView *fieldStack = [[UIStackView alloc] initWithFrame:CGRectZero];
+    fieldStack.axis = UILayoutConstraintAxisVertical;
+    fieldStack.spacing = 7.0;
+    fieldStack.translatesAutoresizingMaskIntoConstraints = NO;
+    [stack addArrangedSubview:fieldStack];
+
+    for (NSDictionary *field in fields) {
+        UIView *row = [[UIView alloc] initWithFrame:CGRectZero];
+        row.translatesAutoresizingMaskIntoConstraints = NO;
+        row.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
+        row.layer.cornerRadius = 12.0;
+        row.layer.cornerCurve = kCACornerCurveContinuous;
+        row.layer.masksToBounds = YES;
+
+        UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
+        label.translatesAutoresizingMaskIntoConstraints = NO;
+        label.text = field[@"title"];
+        label.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightSemibold];
+        label.textColor = UIColor.labelColor;
+        [row addSubview:label];
+
+        UITextField *textField = [self customClassFilterTextFieldForField:field];
+        [row addSubview:textField];
+
+        [NSLayoutConstraint activateConstraints:@[
+            [row.heightAnchor constraintGreaterThanOrEqualToConstant:42.0],
+            [label.leadingAnchor constraintEqualToAnchor:row.leadingAnchor constant:12.0],
+            [label.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
+            [label.widthAnchor constraintEqualToConstant:126.0],
+            [textField.leadingAnchor constraintEqualToAnchor:label.trailingAnchor constant:10.0],
+            [textField.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:-12.0],
+            [textField.topAnchor constraintEqualToAnchor:row.topAnchor constant:6.0],
+            [textField.bottomAnchor constraintEqualToAnchor:row.bottomAnchor constant:-6.0],
+        ]];
+        [fieldStack addArrangedSubview:row];
+    }
+
+    UILabel *hint = [self controlSubtitleLabelWithText:LGLocalized(@"prefs.custom_views.class_filters.hint")];
+    [stack addArrangedSubview:hint];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [stack.topAnchor constraintEqualToAnchor:body.topAnchor constant:13.0],
+        [stack.leadingAnchor constraintEqualToAnchor:body.leadingAnchor constant:14.0],
+        [stack.trailingAnchor constraintEqualToAnchor:body.trailingAnchor constant:-14.0],
+        [stack.bottomAnchor constraintEqualToAnchor:body.bottomAnchor constant:-13.0],
+    ]];
+    return body;
+}
+
 - (UIView *)navControlBodyForItem:(NSDictionary *)item titleLabel:(UILabel *)titleLabel {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
     button.translatesAutoresizingMaskIntoConstraints = NO;
@@ -1293,6 +2153,7 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
             [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
         }
     }
+    objc_setAssociatedObject(button, kLGPanelItemKey, item, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     UIView *body = [[UIView alloc] initWithFrame:CGRectZero];
     body.userInteractionEnabled = NO;
@@ -1341,6 +2202,12 @@ static BOOL LGItemVisibleForCurrentPreferences(NSDictionary *item) {
     }
     if ([item[@"type"] isEqualToString:@"switch"]) {
         return [self switchControlBodyForItem:item titleLabel:titleLabel];
+    }
+    if ([item[@"type"] isEqualToString:@"string"]) {
+        return [self stringControlBodyForItem:item titleLabel:titleLabel];
+    }
+    if ([item[@"type"] isEqualToString:@"custom_class_filters"]) {
+        return [self customClassFiltersBodyForItem:item titleLabel:titleLabel];
     }
     return [self sliderControlBodyForItem:item titleLabel:titleLabel];
 }

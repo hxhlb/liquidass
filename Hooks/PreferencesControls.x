@@ -1,7 +1,6 @@
-// massive monolith, will be split in later updates ig
-
 #import "../LiquidAssPrefs/LGPrefsLiquidSlider.h"
 #import "../LiquidAssPrefs/LGPrefsLiquidSwitch.h"
+#import "../Shared/LGBackButtonSupport.h"
 #import "../Shared/LGGlassRenderer.h"
 #import "../Shared/LGHookSupport.h"
 #import "../Shared/LGLiquidMotion.h"
@@ -10,6 +9,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <float.h>
 #import <math.h>
+#import <objc/message.h>
 #import <objc/runtime.h>
 
 static void *kLGSettingsSwitchOverlayKey = &kLGSettingsSwitchOverlayKey;
@@ -55,7 +55,14 @@ static void *kLGSettingsSegmentedLastActiveStateKey = &kLGSettingsSegmentedLastA
 static void *kLGSettingsSegmentedDeactivateTokenKey = &kLGSettingsSegmentedDeactivateTokenKey;
 static void *kLGSettingsSegmentedFadingOutKey = &kLGSettingsSegmentedFadingOutKey;
 static void *kLGSettingsTopFadeViewKey = &kLGSettingsTopFadeViewKey;
+static void *kLGSettingsBackButtonGlassViewKey = &kLGSettingsBackButtonGlassViewKey;
+static void *kLGSettingsBackButtonGlassFrameKey = &kLGSettingsBackButtonGlassFrameKey;
+static void *kLGSettingsBackButtonTargetKey = &kLGSettingsBackButtonTargetKey;
+static void *kLGSettingsBackButtonStockHiddenKey = &kLGSettingsBackButtonStockHiddenKey;
 static const CGFloat kLGSettingsSwitchTrailingInset = 8.0;
+static CADisplayLink *sLGSettingsBackButtonDisplayLink = nil;
+static id sLGSettingsBackButtonDisplayLinkDriver = nil;
+static NSHashTable<LGSharedBackButtonView *> *sLGSettingsBackButtonGlassViews = nil;
 
 @interface UISegmentedControl (LGSettingsSegmentedGlass)
 - (void)lg_startSettingsSegmentedDisplayLinkIfNeeded;
@@ -114,17 +121,32 @@ static UIColor *LGSettingsSegmentedAppearanceBorderColor(LGSettingsSegmentedAppe
 @end
 
 @implementation LGSettingsTopFadeView {
-    CAGradientLayer *_gradientLayer;
+    UIView *_blurView;
+    CAGradientLayer *_blurMaskLayer;
+    CAGradientLayer *_tintLayer;
 }
 
 - (void)lg_updateGradientColors {
+    UIColor *maskColor = UIColor.blackColor;
+    _blurMaskLayer.colors = @[
+        (__bridge id)[maskColor colorWithAlphaComponent:1.0].CGColor,
+        (__bridge id)[maskColor colorWithAlphaComponent:0.96].CGColor,
+        (__bridge id)[maskColor colorWithAlphaComponent:0.78].CGColor,
+        (__bridge id)[maskColor colorWithAlphaComponent:0.34].CGColor,
+        (__bridge id)[maskColor colorWithAlphaComponent:0.10].CGColor,
+        (__bridge id)[maskColor colorWithAlphaComponent:0.0].CGColor
+    ];
+    _blurMaskLayer.locations = @[ @0.0, @0.34, @0.62, @0.82, @0.94, @1.0 ];
+
     UIColor *baseColor = [UIColor systemBackgroundColor];
-    _gradientLayer.colors = @[
-        (__bridge id)[baseColor colorWithAlphaComponent:0.98].CGColor,
-        (__bridge id)[baseColor colorWithAlphaComponent:0.55].CGColor,
+    _tintLayer.colors = @[
+        (__bridge id)[baseColor colorWithAlphaComponent:0.86].CGColor,
+        (__bridge id)[baseColor colorWithAlphaComponent:0.74].CGColor,
+        (__bridge id)[baseColor colorWithAlphaComponent:0.42].CGColor,
+        (__bridge id)[baseColor colorWithAlphaComponent:0.14].CGColor,
         (__bridge id)[baseColor colorWithAlphaComponent:0.0].CGColor
     ];
-    _gradientLayer.locations = @[ @0.0, @0.45, @1.0 ];
+    _tintLayer.locations = @[ @0.0, @0.36, @0.68, @0.90, @1.0 ];
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -132,17 +154,32 @@ static UIColor *LGSettingsSegmentedAppearanceBorderColor(LGSettingsSegmentedAppe
     if (!self) return nil;
     self.userInteractionEnabled = NO;
     self.backgroundColor = UIColor.clearColor;
-    _gradientLayer = [CAGradientLayer layer];
-    _gradientLayer.startPoint = CGPointMake(0.5, 0.0);
-    _gradientLayer.endPoint = CGPointMake(0.5, 1.0);
-    [self.layer addSublayer:_gradientLayer];
+    _blurView = LGMakeLowBlurFallbackView();
+    _blurView.userInteractionEnabled = NO;
+    _blurView.frame = self.bounds;
+    _blurView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [self addSubview:_blurView];
+    LGApplyLowBlurRadiusToView(_blurView);
+
+    _blurMaskLayer = [CAGradientLayer layer];
+    _blurMaskLayer.startPoint = CGPointMake(0.5, 0.0);
+    _blurMaskLayer.endPoint = CGPointMake(0.5, 1.0);
+    _blurView.layer.mask = _blurMaskLayer;
+
+    _tintLayer = [CAGradientLayer layer];
+    _tintLayer.startPoint = CGPointMake(0.5, 0.0);
+    _tintLayer.endPoint = CGPointMake(0.5, 1.0);
+    [self.layer addSublayer:_tintLayer];
     [self lg_updateGradientColors];
     return self;
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    _gradientLayer.frame = self.bounds;
+    _blurView.frame = self.bounds;
+    _blurMaskLayer.frame = self.bounds;
+    _tintLayer.frame = self.bounds;
+    LGApplyLowBlurRadiusToView(_blurView);
 }
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
@@ -186,26 +223,361 @@ static void LGApplySettingsNavigationBarAppearance(UINavigationBar *navigationBa
     }
 }
 
+static BOOL LGSettingsControllerTreeContainsLiquidAssPrefs(UIViewController *controller) {
+    if (!controller) return NO;
+    NSBundle *controllerBundle = [NSBundle bundleForClass:controller.class];
+    if ([controllerBundle.bundleIdentifier isEqualToString:@"dylv.liquidassprefs"]) return YES;
+    for (UIViewController *childController in controller.childViewControllers) {
+        if (LGSettingsControllerTreeContainsLiquidAssPrefs(childController)) return YES;
+    }
+    UIViewController *presentedController = controller.presentedViewController;
+    if (presentedController && LGSettingsControllerTreeContainsLiquidAssPrefs(presentedController)) return YES;
+    return NO;
+}
+
 static BOOL LGSettingsShouldInstallTopFadeForController(UIViewController *controller) {
     if (!controller) return NO;
     if (!controller.navigationController) return NO;
     if (!controller.isViewLoaded || !controller.view.window) return NO;
     if (controller.navigationController.navigationBarHidden) return NO;
+    if (LGSettingsControllerTreeContainsLiquidAssPrefs(controller)) return NO;
     return YES;
 }
 
+static void LGRemoveSettingsTopFadeForController(UIViewController *controller) {
+    LGSettingsTopFadeView *fadeView = objc_getAssociatedObject(controller, kLGSettingsTopFadeViewKey);
+    if (!fadeView) return;
+    [fadeView removeFromSuperview];
+    objc_setAssociatedObject(controller, kLGSettingsTopFadeViewKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
 static void LGUpdateSettingsTopFadeForController(UIViewController *controller) {
-    if (!LGSettingsShouldInstallTopFadeForController(controller)) return;
+    if (!LGSettingsShouldInstallTopFadeForController(controller)) {
+        LGRemoveSettingsTopFadeForController(controller);
+        return;
+    }
+    
+    UIView *superview = controller.view.superview;
+    if (!superview || ![NSStringFromClass(superview.class) isEqualToString:@"UIViewControllerWrapperView"]) {
+        LGRemoveSettingsTopFadeForController(controller);
+        return;
+    }
+    
     LGApplySettingsNavigationBarAppearance(controller.navigationController.navigationBar);
+    UIView *targetView = controller.view;
+
     LGSettingsTopFadeView *fadeView = objc_getAssociatedObject(controller, kLGSettingsTopFadeViewKey);
     if (!fadeView) {
         fadeView = [[LGSettingsTopFadeView alloc] initWithFrame:CGRectZero];
-        fadeView.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-        [controller.view addSubview:fadeView];
+        [targetView addSubview:fadeView];
         objc_setAssociatedObject(controller, kLGSettingsTopFadeViewKey, fadeView, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    } else if (fadeView.superview != targetView) {
+        [fadeView removeFromSuperview];
+        [targetView addSubview:fadeView];
     }
-    [controller.view bringSubviewToFront:fadeView];
-    fadeView.frame = CGRectMake(0.0, 0.0, CGRectGetWidth(controller.view.bounds), 100.0);
+    [targetView bringSubviewToFront:fadeView];
+    CGFloat topInset = controller.view.safeAreaInsets.top;
+    CGFloat fadeHeight = MAX(60.0, topInset + 16.0);
+    CGFloat yOffset = 0.0;
+    if ([targetView isKindOfClass:[UIScrollView class]]) {
+        yOffset = ((UIScrollView *)targetView).contentOffset.y;
+    }
+    fadeView.frame = CGRectMake(0.0, yOffset, CGRectGetWidth(targetView.bounds), fadeHeight);
+}
+
+static BOOL LGSettingsViewHasExactClassName(UIView *view, NSString *className) {
+    return view && [NSStringFromClass(view.class) isEqualToString:className];
+}
+
+static BOOL LGSettingsViewBelongsToLiquidAssPrefs(UIView *view) {
+    UIResponder *responder = view;
+    while (responder) {
+        if ([responder isKindOfClass:[UIViewController class]]) {
+            NSBundle *controllerBundle = [NSBundle bundleForClass:responder.class];
+            if ([controllerBundle.bundleIdentifier isEqualToString:@"dylv.liquidassprefs"]) return YES;
+        }
+        responder = responder.nextResponder;
+    }
+    return NO;
+}
+
+static UIView *LGSettingsFirstDescendantWithClassName(UIView *root, NSString *className) {
+    if (!root || !className.length) return nil;
+    NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithArray:root.subviews];
+    while (stack.count > 0) {
+        UIView *view = stack.lastObject;
+        [stack removeLastObject];
+        if (LGSettingsViewHasExactClassName(view, className)) return view;
+        for (UIView *subview in view.subviews.reverseObjectEnumerator) {
+            [stack addObject:subview];
+        }
+    }
+    return nil;
+}
+
+static CGRect LGSettingsBackButtonStockImageFrame(UIView *buttonBarButton) {
+    if (!buttonBarButton) return CGRectNull;
+    __block CGRect imageFrame = CGRectNull;
+    LGTraverseViews(buttonBarButton, ^(UIView *view) {
+        if (!CGRectIsNull(imageFrame)) return;
+        if (![view isKindOfClass:[UIImageView class]]) return;
+        if (LGHasAncestorClass(view, [LGSharedBackButtonView class])) return;
+        imageFrame = [view.superview convertRect:view.frame toView:buttonBarButton];
+    });
+    return imageFrame;
+}
+
+static void LGSettingsHideStockBackContent(UIView *buttonBarButton) {
+    if (!buttonBarButton) return;
+    for (UIView *subview in buttonBarButton.subviews) {
+        subview.hidden = YES;
+        subview.alpha = 0.0;
+        subview.userInteractionEnabled = NO;
+    }
+    buttonBarButton.hidden = YES;
+    buttonBarButton.alpha = 0.0;
+    buttonBarButton.userInteractionEnabled = NO;
+    objc_setAssociatedObject(buttonBarButton, kLGSettingsBackButtonStockHiddenKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static UINavigationController *LGSettingsNavigationControllerForView(UIView *view) {
+    UIResponder *responder = view;
+    while (responder) {
+        if ([responder isKindOfClass:[UINavigationController class]]) {
+            return (UINavigationController *)responder;
+        }
+        if ([responder isKindOfClass:[UIViewController class]]) {
+            UINavigationController *navigationController = ((UIViewController *)responder).navigationController;
+            if (navigationController) return navigationController;
+        }
+        responder = responder.nextResponder;
+    }
+    return nil;
+}
+
+static BOOL LGSettingsInvokeControlActions(UIControl *control) {
+    if (!control) return NO;
+    NSSet *targets = control.allTargets;
+    if (!targets.count) return NO;
+    [control sendActionsForControlEvents:UIControlEventTouchUpInside];
+    return YES;
+}
+
+static BOOL LGSettingsInvokeGestureActions(UIView *view) {
+    for (UIGestureRecognizer *recognizer in view.gestureRecognizers) {
+        if (!recognizer.enabled) continue;
+        NSArray *targets = nil;
+        @try {
+            targets = [recognizer valueForKey:@"_targets"];
+        } @catch (NSException *exception) {
+            LGDebugLog(@"settings gesture target read failed %@ %@", exception.name, exception.reason);
+            targets = nil;
+        }
+        for (id targetAction in targets) {
+            id target = nil;
+            NSString *actionName = nil;
+            @try {
+                target = [targetAction valueForKey:@"target"];
+                actionName = [targetAction valueForKey:@"action"];
+            } @catch (NSException *exception) {
+                LGDebugLog(@"settings gesture action read failed %@ %@", exception.name, exception.reason);
+                target = nil;
+                actionName = nil;
+            }
+            SEL action = NSSelectorFromString(actionName);
+            if (target && action && [target respondsToSelector:action]) {
+                ((void (*)(id, SEL, id))objc_msgSend)(target, action, recognizer);
+                return YES;
+            }
+        }
+    }
+    return NO;
+}
+
+static BOOL LGSettingsInvokeStockBackButtonAction(UIView *buttonBarButton) {
+    if (!buttonBarButton) return NO;
+    if ([buttonBarButton isKindOfClass:[UIControl class]] &&
+        LGSettingsInvokeControlActions((UIControl *)buttonBarButton)) {
+        return YES;
+    }
+    if (LGSettingsInvokeGestureActions(buttonBarButton)) {
+        return YES;
+    }
+    for (UIView *subview in buttonBarButton.subviews) {
+        if (LGHasAncestorClass(subview, [LGSharedBackButtonView class])) continue;
+        if ([subview isKindOfClass:[UIControl class]] &&
+            LGSettingsInvokeControlActions((UIControl *)subview)) {
+            return YES;
+        }
+        if (LGSettingsInvokeGestureActions(subview)) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static void LGSettingsStopBackButtonDisplayLinkIfIdle(void) {
+    if (sLGSettingsBackButtonGlassViews.count > 0) return;
+    LGStopDisplayLink(&sLGSettingsBackButtonDisplayLink, &sLGSettingsBackButtonDisplayLinkDriver);
+}
+
+static void LGSettingsStartBackButtonDisplayLinkIfNeeded(void) {
+    if (sLGSettingsBackButtonDisplayLink) return;
+    LGStartDisplayLink(&sLGSettingsBackButtonDisplayLink,
+                       &sLGSettingsBackButtonDisplayLinkDriver,
+                       30,
+                       ^{
+        NSArray<LGSharedBackButtonView *> *glassViews = sLGSettingsBackButtonGlassViews.allObjects;
+        for (LGSharedBackButtonView *glassButton in glassViews) {
+            if (!glassButton.window || glassButton.hidden || glassButton.alpha <= 0.01) {
+                continue;
+            }
+            [glassButton refreshBackdropAfterScreenUpdates:NO];
+        }
+    });
+}
+
+static void LGSettingsRegisterBackButtonGlass(LGSharedBackButtonView *glassButton) {
+    if (!glassButton) return;
+    if (!sLGSettingsBackButtonGlassViews) {
+        sLGSettingsBackButtonGlassViews = [NSHashTable weakObjectsHashTable];
+    }
+    [sLGSettingsBackButtonGlassViews addObject:glassButton];
+    LGSettingsStartBackButtonDisplayLinkIfNeeded();
+}
+
+static void LGSettingsUnregisterBackButtonGlass(LGSharedBackButtonView *glassButton) {
+    if (!glassButton) return;
+    [sLGSettingsBackButtonGlassViews removeObject:glassButton];
+    LGSettingsStopBackButtonDisplayLinkIfIdle();
+}
+
+static void LGSettingsRemoveBackButtonReplacement(UIView *container) {
+    if (!container) return;
+    LGSharedBackButtonView *glassButton = objc_getAssociatedObject(container, kLGSettingsBackButtonGlassViewKey);
+    LGSettingsUnregisterBackButtonGlass(glassButton);
+    [glassButton cleanupBackdropCapture];
+    [glassButton removeFromSuperview];
+    objc_setAssociatedObject(container, kLGSettingsBackButtonGlassViewKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(container, kLGSettingsBackButtonTargetKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(container, kLGSettingsBackButtonGlassFrameKey, nil, OBJC_ASSOCIATION_ASSIGN);
+}
+
+static void LGSettingsInstallBackButtonGlass(UIView *buttonBarButton, UIView *container, CGRect stockImageFrame) {
+    if (!buttonBarButton || !container) return;
+    LGSharedBackButtonView *glassButton = objc_getAssociatedObject(container, kLGSettingsBackButtonGlassViewKey);
+    UIView *currentTarget = objc_getAssociatedObject(container, kLGSettingsBackButtonTargetKey);
+    if (glassButton && currentTarget && currentTarget != buttonBarButton) {
+        LGSettingsUnregisterBackButtonGlass(glassButton);
+        [glassButton cleanupBackdropCapture];
+        [glassButton removeFromSuperview];
+        objc_setAssociatedObject(container, kLGSettingsBackButtonGlassViewKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        objc_setAssociatedObject(container, kLGSettingsBackButtonGlassFrameKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        glassButton = nil;
+    }
+    BOOL created = NO;
+    if (!glassButton) {
+        glassButton = [[LGSharedBackButtonView alloc] initWithTarget:buttonBarButton
+                                                               action:@selector(lg_activateLiquidAssSettingsBackButton)];
+        glassButton.userInteractionEnabled = YES;
+        [container addSubview:glassButton];
+        objc_setAssociatedObject(container, kLGSettingsBackButtonGlassViewKey, glassButton, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        LGSettingsRegisterBackButtonGlass(glassButton);
+        created = YES;
+    } else if (glassButton.superview != container) {
+        [glassButton removeFromSuperview];
+        [container addSubview:glassButton];
+        LGSettingsRegisterBackButtonGlass(glassButton);
+        created = YES;
+    }
+    objc_setAssociatedObject(container, kLGSettingsBackButtonTargetKey, buttonBarButton, OBJC_ASSOCIATION_ASSIGN);
+
+    CGSize buttonSize = CGSizeMake(44.0, 44.0);
+    CGRect buttonBounds = CGRectIsEmpty(buttonBarButton.bounds)
+        ? CGRectMake(0.0, 0.0, buttonSize.width, buttonSize.height)
+        : buttonBarButton.bounds;
+    CGPoint centerInButton = CGPointMake(CGRectGetMidX(buttonBounds),
+                                         CGRectGetMidY(buttonBounds));
+    if (!CGRectIsNull(stockImageFrame) &&
+        isfinite(CGRectGetMidX(stockImageFrame)) &&
+        isfinite(CGRectGetMidY(stockImageFrame))) {
+        centerInButton = CGPointMake(CGRectGetMidX(stockImageFrame), CGRectGetMidY(stockImageFrame));
+    }
+    CGPoint center = [buttonBarButton convertPoint:centerInButton toView:container];
+    UIEdgeInsets margins = container.layoutMargins;
+    CGFloat leadingInset = margins.left;
+    if (@available(iOS 11.0, *)) {
+        NSDirectionalEdgeInsets directionalMargins = container.directionalLayoutMargins;
+        if (container.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft) {
+            leadingInset = directionalMargins.trailing;
+        } else {
+            leadingInset = directionalMargins.leading;
+        }
+    }
+    CGRect targetFrame = CGRectMake(floor(center.x - buttonSize.width * 0.5),
+                                   floor(center.y - buttonSize.height * 0.5),
+                                   buttonSize.width,
+                                   buttonSize.height);
+    if (leadingInset > 0.0 && isfinite(leadingInset)) {
+        if (container.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft) {
+            targetFrame.origin.x = floor(CGRectGetWidth(container.bounds) - leadingInset - buttonSize.width);
+        } else {
+            targetFrame.origin.x = floor(leadingInset);
+        }
+    }
+    NSValue *lastFrameValue = objc_getAssociatedObject(container, kLGSettingsBackButtonGlassFrameKey);
+    BOOL frameChanged = !lastFrameValue || !CGRectEqualToRect(lastFrameValue.CGRectValue, targetFrame);
+    glassButton.frame = targetFrame;
+    objc_setAssociatedObject(container,
+                             kLGSettingsBackButtonGlassFrameKey,
+                             [NSValue valueWithCGRect:targetFrame],
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    glassButton.autoresizingMask = UIViewAutoresizingFlexibleRightMargin |
+                                   UIViewAutoresizingFlexibleTopMargin |
+                                   UIViewAutoresizingFlexibleBottomMargin;
+    [glassButton setGlassEnabled:YES];
+    glassButton.hidden = NO;
+    glassButton.alpha = 1.0;
+    [container bringSubviewToFront:glassButton];
+    LGSettingsHideStockBackContent(buttonBarButton);
+    if (created || frameChanged) {
+        [glassButton scheduleBackdropWarmupRefresh];
+    } else {
+        [glassButton refreshBackdropAfterScreenUpdates:NO];
+    }
+}
+
+static void LGUpdateSettingsNavigationBackButtons(UINavigationBar *navigationBar) {
+    if (!navigationBar || LGSettingsViewBelongsToLiquidAssPrefs(navigationBar)) return;
+    UIView *contentView = nil;
+    for (UIView *subview in navigationBar.subviews) {
+        if (LGSettingsViewHasExactClassName(subview, @"_UINavigationBarContentView")) {
+            contentView = subview;
+            break;
+        }
+    }
+    if (!contentView) return;
+
+    UINavigationController *navigationController = LGSettingsNavigationControllerForView(navigationBar);
+    if (navigationController.viewControllers.count <= 1 || !navigationBar.backItem) {
+        LGSettingsRemoveBackButtonReplacement(contentView);
+        return;
+    }
+
+    BOOL installed = NO;
+    for (UIView *buttonBarButton in contentView.subviews) {
+        if (!LGSettingsViewHasExactClassName(buttonBarButton, @"_UIButtonBarButton")) continue;
+        if (!LGSettingsFirstDescendantWithClassName(buttonBarButton, @"_UIBackButtonMaskView")) continue;
+        CGRect stockImageFrame = LGSettingsBackButtonStockImageFrame(buttonBarButton);
+        if (CGRectIsNull(stockImageFrame)) continue;
+        LGSettingsHideStockBackContent(buttonBarButton);
+        LGSettingsInstallBackButtonGlass(buttonBarButton, contentView, stockImageFrame);
+        installed = YES;
+        break;
+    }
+    if (!installed) {
+        LGSettingsRemoveBackButtonReplacement(contentView);
+    }
 }
 
 static void LGUpdateSettingsRoundedCellShape(UIView *view) {
@@ -238,7 +610,7 @@ static void LGUpdateSettingsCellSeparatorInsets(UITableViewCell *cell) {
     }
 }
 
-static void LGLogSettingsSegmentedControlViewTree(UIView *view, NSInteger depth) {
+static void LGDebugSettingsSegmentedControlViewTree(UIView *view, NSInteger depth) {
     if (!view || depth > 3) return;
     NSString *indent = [@"" stringByPaddingToLength:(NSUInteger)(depth * 2) withString:@" " startingAtIndex:0];
     BOOL selected = NO;
@@ -275,7 +647,7 @@ static void LGLogSettingsSegmentedControlViewTree(UIView *view, NSInteger depth)
                    (unsigned long)view.layer.sublayers.count);
     }
     for (UIView *subview in view.subviews) {
-        LGLogSettingsSegmentedControlViewTree(subview, depth + 1);
+        LGDebugSettingsSegmentedControlViewTree(subview, depth + 1);
     }
 }
 
@@ -319,7 +691,7 @@ static void LGProbeSettingsSegmentedControl(UISegmentedControl *control, NSStrin
                segments);
 
     if (shouldDumpTree) {
-        LGLogSettingsSegmentedControlViewTree(control, 0);
+        LGDebugSettingsSegmentedControlViewTree(control, 0);
     }
 }
 
@@ -1117,7 +1489,8 @@ static id LGCellSpecifier(id cell) {
     }
     @try {
         return [cell valueForKey:@"specifier"];
-    } @catch (__unused NSException *exception) {
+    } @catch (NSException *exception) {
+        LGDebugLog(@"specifier KVC read failed %@ %@", exception.name, exception.reason);
         return nil;
     }
 }
@@ -1127,7 +1500,8 @@ static BOOL LGSpecifierBoolProperty(id specifier, NSString *key) {
     id value = nil;
     @try {
         value = [specifier propertyForKey:key];
-    } @catch (__unused NSException *exception) {
+    } @catch (NSException *exception) {
+        LGDebugLog(@"specifier bool property read failed key=%@ %@ %@", key, exception.name, exception.reason);
         value = nil;
     }
     return value ? [value boolValue] : NO;
@@ -1138,7 +1512,8 @@ static NSInteger LGSpecifierIntegerProperty(id specifier, NSString *key) {
     id value = nil;
     @try {
         value = [specifier propertyForKey:key];
-    } @catch (__unused NSException *exception) {
+    } @catch (NSException *exception) {
+        LGDebugLog(@"specifier integer property read failed key=%@ %@ %@", key, exception.name, exception.reason);
         value = nil;
     }
     return value ? [value integerValue] : 0;
@@ -1999,6 +2374,51 @@ static void LGUpdateSettingsSliderVisualElement(UIView *host) {
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
     LGUpdateSettingsTopFadeForController((UIViewController *)self);
+}
+
+%end
+
+%hook UINavigationBar
+
+- (void)layoutSubviews {
+    %orig;
+    LGUpdateSettingsNavigationBackButtons((UINavigationBar *)self);
+}
+
+- (void)didMoveToWindow {
+    %orig;
+    LGUpdateSettingsNavigationBackButtons((UINavigationBar *)self);
+}
+
+%end
+
+%hook _UIButtonBarButton
+
+%new
+- (void)lg_activateLiquidAssSettingsBackButton {
+    if (LGSettingsInvokeStockBackButtonAction((UIView *)self)) {
+        return;
+    }
+
+    UINavigationController *navigationController = LGSettingsNavigationControllerForView((UIView *)self);
+    if (navigationController.viewControllers.count > 1) {
+        [navigationController popViewControllerAnimated:YES];
+        return;
+    }
+}
+
+- (void)setHighlighted:(BOOL)highlighted {
+    %orig;
+    if (LGSettingsFirstDescendantWithClassName((UIView *)self, @"_UIBackButtonMaskView")) {
+        LGSettingsHideStockBackContent((UIView *)self);
+    }
+}
+
+- (void)layoutSubviews {
+    %orig;
+    if (LGSettingsFirstDescendantWithClassName((UIView *)self, @"_UIBackButtonMaskView")) {
+        LGSettingsHideStockBackContent((UIView *)self);
+    }
 }
 
 %end

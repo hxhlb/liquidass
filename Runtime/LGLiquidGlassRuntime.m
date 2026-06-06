@@ -1,7 +1,11 @@
 #import "LGLiquidGlassRuntime.h"
+#import "../Shared/LGBackButtonSupport.h"
 #import "../Shared/LGSharedSupport.h"
+#import <CoreLocation/CoreLocation.h>
+#import <CoreMotion/CoreMotion.h>
 #import <CoreVideo/CoreVideo.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
+#import <objc/runtime.h>
 #include <stdatomic.h>
 
 typedef struct {
@@ -18,18 +22,412 @@ typedef struct {
     float specularAngle;
     float blur;
     vector_float2 wallpaperOrigin;
+    vector_float2 samplingTransformX;
+    vector_float2 samplingTransformY;
+    vector_float2 samplingTransformOffset;
     float samplingOrientation;
     float hasShapeMask;
 } LGUniforms;
 
-static float LG_samplingOrientationForGlassView(UIView *view, LGUpdateGroup group) {
-    if (UIDevice.currentDevice.userInterfaceIdiom != UIUserInterfaceIdiomPad) return 1.0f;
-    if (group == LGUpdateGroupLockscreen) return 1.0f;
+static CMMotionManager *sSpecularMotionManager = nil;
+static NSOperationQueue *sSpecularMotionQueue = nil;
+static CLLocationManager *sSpecularHeadingManager = nil;
+static id sSpecularHeadingDelegate = nil;
+static BOOL sSpecularMotionRunning = NO;
+static CGFloat sSpecularMotionAngle = 0.0;
+static CGFloat sSpecularMotionGyroOffset = 0.0;
+static CGFloat sSpecularHeadingRadians = 0.0;
+static CFTimeInterval sSpecularHeadingLastUpdate = 0.0;
+static CFTimeInterval sSpecularMotionLastSampleTime = 0.0;
+static CFTimeInterval sSpecularMotionLastRedraw = 0.0;
+static CFTimeInterval sSpecularMotionLastDebugLog = 0.0;
+static CFTimeInterval sSpecularMotionLastDrawDebugLog = 0.0;
+static void *kLGStockBlurOriginalFiltersKey = &kLGStockBlurOriginalFiltersKey;
+static void *kLGStockBlurOriginalBackgroundFiltersKey = &kLGStockBlurOriginalBackgroundFiltersKey;
+static void *kLGStockBlurSuppressedKey = &kLGStockBlurSuppressedKey;
+
+@interface LGSpecularHeadingDelegate : NSObject <CLLocationManagerDelegate>
+@end
+
+@implementation LGSpecularHeadingDelegate
+- (void)locationManager:(CLLocationManager *)manager didUpdateHeading:(CLHeading *)newHeading {
+    CLLocationDirection heading = newHeading.trueHeading >= 0.0 ? newHeading.trueHeading : newHeading.magneticHeading;
+    if (heading < 0.0) return;
+    sSpecularHeadingRadians = heading * (M_PI / 180.0);
+    sSpecularHeadingLastUpdate = CACurrentMediaTime();
+    if (manager.headingOrientation != CLDeviceOrientationUnknown) return;
+    UIInterfaceOrientation orientation = UIInterfaceOrientationUnknown;
+    if (@available(iOS 13.0, *)) {
+        orientation = UIApplication.sharedApplication.connectedScenes.anyObject
+            ? ((UIWindowScene *)UIApplication.sharedApplication.connectedScenes.anyObject).interfaceOrientation
+            : UIInterfaceOrientationUnknown;
+    } else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        orientation = UIApplication.sharedApplication.statusBarOrientation;
+#pragma clang diagnostic pop
+    }
+    manager.headingOrientation = orientation;
+}
+
+- (BOOL)locationManagerShouldDisplayHeadingCalibration:(CLLocationManager *)manager {
+    return NO;
+}
+
+- (void)locationManager:(CLLocationManager *)manager didFailWithError:(NSError *)error {
+    LGDebugLog(@"[SpecularMotion] heading error: %@ (code %ld)",
+               error.localizedDescription, (long)error.code);
+}
+@end
+
+static BOOL LGSpecularMotionEnabled(void) {
+    return LG_globalEnabled() && LG_prefBool(@"Specular.Motion.Enabled", NO);
+}
+
+static CGFloat LGSpecularMotionFPS(void) {
+    return MAX(1.0, MIN(60.0, LG_prefFloat(@"Specular.Motion.FPS", 30.0)));
+}
+
+static CGFloat LGSpecularMotionSensitivity(void) {
+    return MAX(0.0, MIN(8.0, LG_prefFloat(@"Specular.Motion.Sensitivity", 1.5)));
+}
+
+static CGFloat LGSpecularMotionCurrentAngle(void) {
+    return LGSpecularMotionEnabled() ? sSpecularMotionAngle : 0.0;
+}
+
+
+static void LGStockBlurSetLayerBackgroundFilters(CALayer *layer, id filters) {
+    @try {
+        [layer setValue:filters forKey:@"backgroundFilters"];
+    } @catch (__unused NSException *exception) {
+    }
+}
+
+static id LGStockBlurGetLayerBackgroundFilters(CALayer *layer) {
+    @try {
+        return [layer valueForKey:@"backgroundFilters"];
+    } @catch (__unused NSException *exception) {
+        return nil;
+    }
+}
+
+static void LGStockBlurSuppressLayerTree(CALayer *layer, CALayer *excludedLayer, BOOL suppressed) {
+    if (!layer || layer == excludedLayer) return;
+
+    if (suppressed) {
+        if (!objc_getAssociatedObject(layer, kLGStockBlurSuppressedKey)) {
+            objc_setAssociatedObject(layer,
+                                     kLGStockBlurOriginalFiltersKey,
+                                     layer.filters ?: [NSNull null],
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            id backgroundFilters = LGStockBlurGetLayerBackgroundFilters(layer);
+            objc_setAssociatedObject(layer,
+                                     kLGStockBlurOriginalBackgroundFiltersKey,
+                                     backgroundFilters ?: [NSNull null],
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(layer, kLGStockBlurSuppressedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        layer.filters = nil;
+        LGStockBlurSetLayerBackgroundFilters(layer, nil);
+        layer.compositingFilter = nil;
+    } else if (objc_getAssociatedObject(layer, kLGStockBlurSuppressedKey)) {
+        id filters = objc_getAssociatedObject(layer, kLGStockBlurOriginalFiltersKey);
+        id backgroundFilters = objc_getAssociatedObject(layer, kLGStockBlurOriginalBackgroundFiltersKey);
+        layer.filters = (filters == [NSNull null]) ? nil : filters;
+        LGStockBlurSetLayerBackgroundFilters(layer, (backgroundFilters == [NSNull null]) ? nil : backgroundFilters);
+        objc_setAssociatedObject(layer, kLGStockBlurOriginalFiltersKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        objc_setAssociatedObject(layer, kLGStockBlurOriginalBackgroundFiltersKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        objc_setAssociatedObject(layer, kLGStockBlurSuppressedKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    }
+
+    for (CALayer *sublayer in layer.sublayers) {
+        LGStockBlurSuppressLayerTree(sublayer, excludedLayer, suppressed);
+    }
+}
+
+static void LGSpecularMotionStop(void) {
+    if (!sSpecularMotionRunning) return;
+    LGDebugLog(@"[SpecularMotion] stopping device motion and heading updates");
+    [sSpecularMotionManager stopDeviceMotionUpdates];
+    [sSpecularHeadingManager stopUpdatingHeading];
+    sSpecularMotionRunning = NO;
+    sSpecularMotionGyroOffset = 0.0;
+    sSpecularHeadingLastUpdate = 0.0;
+    sSpecularMotionLastSampleTime = 0.0;
+}
+
+static void LGSpecularMotionConfigure(void) {
+    if (!LGSpecularMotionEnabled()) {
+        LGDebugLog(@"[SpecularMotion] configure called but motion disabled — stopping");
+        LGSpecularMotionStop();
+        return;
+    }
+    if (!sSpecularMotionManager) {
+        sSpecularMotionManager = [CMMotionManager new];
+        sSpecularMotionQueue = [NSOperationQueue mainQueue];
+        LGDebugLog(@"[SpecularMotion] created CMMotionManager");
+    }
+    if (!sSpecularHeadingManager && [CLLocationManager headingAvailable]) {
+        sSpecularHeadingManager = [CLLocationManager new];
+        sSpecularHeadingDelegate = [LGSpecularHeadingDelegate new];
+        sSpecularHeadingManager.delegate = sSpecularHeadingDelegate;
+        sSpecularHeadingManager.headingFilter = 1.0;
+        LGDebugLog(@"[SpecularMotion] created CLLocationManager headingAvailable=1 servicesEnabled=%d auth=%ld",
+                   [CLLocationManager locationServicesEnabled],
+                   (long)sSpecularHeadingManager.authorizationStatus);
+    } else if (![CLLocationManager headingAvailable]) {
+        LGDebugLog(@"[SpecularMotion] headingAvailable=NO; falling back to gravity angle");
+    }
+    if (!sSpecularMotionManager.deviceMotionAvailable) {
+        LGDebugLog(@"[SpecularMotion] deviceMotionAvailable=NO — cannot start");
+        return;
+    }
+
+    NSTimeInterval interval = 1.0 / LGSpecularMotionFPS();
+    sSpecularMotionManager.deviceMotionUpdateInterval = interval;
+    LGDebugLog(@"[SpecularMotion] configure: fps=%.1f interval=%.4fs sensitivity=%.2f alreadyRunning=%d",
+               LGSpecularMotionFPS(), interval, LGSpecularMotionSensitivity(), sSpecularMotionRunning);
+    if (sSpecularMotionRunning) return;
+
+    sSpecularMotionRunning = YES;
+    LGDebugLog(@"[SpecularMotion] starting device motion updates");
+    if (sSpecularHeadingManager) {
+        [sSpecularHeadingManager startUpdatingHeading];
+        LGDebugLog(@"[SpecularMotion] starting heading updates");
+    }
+    __weak CMMotionManager *weakManager = sSpecularMotionManager;
+    [sSpecularMotionManager startDeviceMotionUpdatesToQueue:sSpecularMotionQueue
+                                                withHandler:^(CMDeviceMotion *motion, NSError *error) {
+        if (error) {
+            LGDebugLog(@"[SpecularMotion] CMDeviceMotion error: %@ (code %ld) — stopping",
+                       error.localizedDescription, (long)error.code);
+            LGSpecularMotionStop();
+            return;
+        }
+        if (!motion) {
+            LGDebugLog(@"[SpecularMotion] nil motion object received — stopping");
+            LGSpecularMotionStop();
+            return;
+        }
+        if (!LGSpecularMotionEnabled()) {
+            LGDebugLog(@"[SpecularMotion] pref disabled mid-flight — stopping");
+            LGSpecularMotionStop();
+            return;
+        }
+        CGFloat sensitivity = LGSpecularMotionSensitivity();
+        CMAcceleration gravity = motion.gravity;
+        CMRotationRate rotation = motion.rotationRate;
+        CFTimeInterval now = CACurrentMediaTime();
+        CFTimeInterval sampleTime = motion.timestamp > 0.0 ? motion.timestamp : now;
+        CFTimeInterval dt = sSpecularMotionLastSampleTime > 0.0
+            ? MAX(1.0 / 120.0, MIN(0.1, sampleTime - sSpecularMotionLastSampleTime))
+            : (1.0 / LGSpecularMotionFPS());
+        sSpecularMotionLastSampleTime = sampleTime;
+
+        CGFloat planeX = gravity.x;
+        CGFloat planeY = -gravity.y;
+        CGFloat tiltMagnitude = MIN(1.0, hypot(planeX, planeY) / 0.65);
+        CGFloat gravityAngle = atan2(planeX, planeY);
+        BOOL hasFreshHeading = sSpecularHeadingLastUpdate > 0.0 && now - sSpecularHeadingLastUpdate <= 5.0;
+        CGFloat compassAngle = hasFreshHeading ? sSpecularHeadingRadians : gravityAngle;
+        CGFloat gyroSpin = rotation.y - rotation.x + rotation.z * 0.35;
+        CGFloat response = 0.75 + sensitivity * 0.85;
+        sSpecularMotionGyroOffset += gyroSpin * dt * response;
+        sSpecularMotionGyroOffset *= MAX(0.0, 1.0 - dt * 3.6);
+
+        CGFloat headingWeight = hasFreshHeading ? 1.0 : tiltMagnitude;
+        CGFloat target = -compassAngle * headingWeight * response + sSpecularMotionGyroOffset;
+        CGFloat prevAngle = sSpecularMotionAngle;
+        CGFloat diff = target - sSpecularMotionAngle;
+        while (diff >  M_PI) diff -= 2.0 * M_PI;
+        while (diff < -M_PI) diff += 2.0 * M_PI;
+        sSpecularMotionAngle = sSpecularMotionAngle + diff * 0.34;
+
+        CGFloat fps = LGSpecularMotionFPS();
+        CFTimeInterval sinceLast = now - sSpecularMotionLastRedraw;
+        BOOL willRedraw = sinceLast >= 1.0 / fps;
+
+        if (now - sSpecularMotionLastDebugLog >= 0.25) {
+            sSpecularMotionLastDebugLog = now;
+            LGDebugLog(@"[SpecularMotion] headingFresh=%d heading=%.3f gravity={%.3f,%.3f,%.3f} rotation={%.3f,%.3f,%.3f} "
+                       @"tiltMag=%.3f gravityAngle=%.3f compassAngle=%.3f gyroOffset=%.3f target=%.3f "
+                       @"prev=%.3f smoothed=%.3f delta=%.3f dt=%.3f | sinceLast=%.4fs fps=%.1f willRedraw=%d",
+                       hasFreshHeading, sSpecularHeadingRadians,
+                       gravity.x, gravity.y, gravity.z,
+                       rotation.x, rotation.y, rotation.z,
+                       tiltMagnitude, gravityAngle, compassAngle, sSpecularMotionGyroOffset, target,
+                       prevAngle, sSpecularMotionAngle, sSpecularMotionAngle - prevAngle,
+                       dt, sinceLast, fps, willRedraw);
+        }
+
+        if (willRedraw) {
+            sSpecularMotionLastRedraw = now;
+            LG_redrawRegisteredGlassViews(LGUpdateGroupAll);
+        }
+
+        CMMotionManager *manager = weakManager;
+        if (manager && fabs(manager.deviceMotionUpdateInterval - (1.0 / fps)) > 0.001) {
+            LGDebugLog(@"[SpecularMotion] correcting update interval: was %.4f want %.4f",
+                       manager.deviceMotionUpdateInterval, 1.0 / fps);
+            manager.deviceMotionUpdateInterval = 1.0 / fps;
+        }
+    }];
+}
+
+__attribute__((constructor))
+static void LGSpecularMotionInit(void) {
+    if (!LGIsSpringBoardProcess() && !LGIsPreferencesProcess()) return;
+    LGDebugLog(@"[SpecularMotion] init — process eligible, scheduling configure on main queue");
+    dispatch_async(dispatch_get_main_queue(), ^{
+        LGDebugLog(@"[SpecularMotion] initial configure (enabled=%d)", LGSpecularMotionEnabled());
+        LGSpecularMotionConfigure();
+        LGObservePreferenceChanges(^{
+            dispatch_async(dispatch_get_main_queue(), ^{
+                LGDebugLog(@"[SpecularMotion] pref changed — reconfiguring (enabled=%d)", LGSpecularMotionEnabled());
+                LGSpecularMotionConfigure();
+            });
+        });
+    });
+}
+
+static float LG_samplingOrientationForGlassView(__unused UIView *view, __unused LGUpdateGroup group) {
+    return 1.0f;
+}
+
+typedef struct {
+    vector_float2 x;
+    vector_float2 y;
+    vector_float2 offset;
+    BOOL fixedCoordinateSpace;
+    BOOL sourceLooksFixedScreen;
+    BOOL swapsAxes;
+    UIInterfaceOrientation interfaceOrientation;
+    UIDeviceOrientation deviceOrientation;
+} LGSamplingTransform;
+
+static CGRect LG_fixedScreenCoordinateBounds(void) {
+    if (@available(iOS 8.0, *)) {
+        id<UICoordinateSpace> space = UIScreen.mainScreen.fixedCoordinateSpace;
+        if (space && !CGRectIsEmpty(space.bounds)) return space.bounds;
+    }
+    return UIScreen.mainScreen.bounds;
+}
+
+static UIInterfaceOrientation LG_interfaceOrientationForGlassView(UIView *view) {
     if (@available(iOS 13.0, *)) {
         UIWindowScene *scene = view.window.windowScene;
-        if (scene) return (float)scene.interfaceOrientation;
+        if (scene) return scene.interfaceOrientation;
     }
-    return 1.0f;
+    return UIInterfaceOrientationUnknown;
+}
+
+static CGRect LG_screenCoordinateBoundsForGlassView(UIView *view) {
+    if (@available(iOS 8.0, *)) {
+        id<UICoordinateSpace> space = UIScreen.mainScreen.coordinateSpace;
+        if (space) return space.bounds;
+    }
+    return UIScreen.mainScreen.bounds;
+}
+
+static CGFloat LGAspectError(CGSize a, CGSize b) {
+    if (a.width <= 1.0 || a.height <= 1.0 || b.width <= 1.0 || b.height <= 1.0) return CGFLOAT_MAX;
+    CGFloat aspectA = a.width / a.height;
+    CGFloat aspectB = b.width / b.height;
+    return fabs(log(MAX(aspectA, 0.0001) / MAX(aspectB, 0.0001)));
+}
+
+static BOOL LG_samplingSourceLooksFixedScreen(CGSize sourcePixelSize, CGRect currentBounds, CGRect fixedBounds, CGFloat scale) {
+    if (CGSizeEqualToSize(sourcePixelSize, CGSizeZero)) return NO;
+    CGSize currentPixelSize = CGSizeMake(CGRectGetWidth(currentBounds) * scale,
+                                         CGRectGetHeight(currentBounds) * scale);
+    CGSize fixedPixelSize = CGSizeMake(CGRectGetWidth(fixedBounds) * scale,
+                                       CGRectGetHeight(fixedBounds) * scale);
+    if (fabs(currentPixelSize.width - fixedPixelSize.width) < 1.0 &&
+        fabs(currentPixelSize.height - fixedPixelSize.height) < 1.0) {
+        return NO;
+    }
+
+    CGFloat currentError = LGAspectError(sourcePixelSize, currentPixelSize);
+    CGFloat fixedError = LGAspectError(sourcePixelSize, fixedPixelSize);
+    return fixedError + 0.01 < currentError;
+}
+
+static BOOL LG_imageUsesFixedScreenSampling(UIImage *image) {
+    NSString *cacheKey = LGImageStableCacheKey(image);
+    return [cacheKey hasPrefix:@"wallpaper:home:"] ||
+        [cacheKey hasPrefix:@"wallpaper:lock:"] ||
+        [cacheKey hasPrefix:@"wallpaper:home-flat"] ||
+        [cacheKey hasPrefix:@"wallpaper:lock-flat"];
+}
+
+static LGSamplingTransform LG_samplingTransformForGlassView(UIView *view,
+                                                            CGSize sourcePixelSize,
+                                                            BOOL usesExternalWallpaperTexture,
+                                                            BOOL usesFixedScreenSampling) {
+    CGFloat scale = UIScreen.mainScreen.scale ?: 1.0;
+    CGRect currentBounds = LG_screenCoordinateBoundsForGlassView(view);
+    CGRect fixedBounds = LG_fixedScreenCoordinateBounds();
+    LGSamplingTransform transform = {
+        .x = { 1.0f, 0.0f },
+        .y = { 0.0f, 1.0f },
+        .offset = { 0.0f, 0.0f },
+        .fixedCoordinateSpace = NO,
+        .sourceLooksFixedScreen = NO,
+        .swapsAxes = NO,
+        .interfaceOrientation = LG_interfaceOrientationForGlassView(view),
+        .deviceOrientation = UIDevice.currentDevice.orientation,
+    };
+
+    if (UIDevice.currentDevice.userInterfaceIdiom != UIUserInterfaceIdiomPad) return transform;
+    if (usesExternalWallpaperTexture) return transform;
+    transform.sourceLooksFixedScreen = LG_samplingSourceLooksFixedScreen(sourcePixelSize, currentBounds, fixedBounds, scale);
+    if (!usesFixedScreenSampling && !transform.sourceLooksFixedScreen) {
+        return transform;
+    }
+
+    if (@available(iOS 8.0, *)) {
+        id<UICoordinateSpace> currentSpace = UIScreen.mainScreen.coordinateSpace;
+        id<UICoordinateSpace> fixedSpace = UIScreen.mainScreen.fixedCoordinateSpace;
+        if (!currentSpace || !fixedSpace) return transform;
+
+        CGPoint p0 = [currentSpace convertPoint:CGPointZero toCoordinateSpace:fixedSpace];
+        CGPoint px = [currentSpace convertPoint:CGPointMake(1.0, 0.0) toCoordinateSpace:fixedSpace];
+        CGPoint py = [currentSpace convertPoint:CGPointMake(0.0, 1.0) toCoordinateSpace:fixedSpace];
+        vector_float2 xAxis = (vector_float2){ (float)(px.x - p0.x), (float)(px.y - p0.y) };
+        vector_float2 yAxis = (vector_float2){ (float)(py.x - p0.x), (float)(py.y - p0.y) };
+        BOOL swapsAxes = fabsf(xAxis.y) > 0.5f || fabsf(yAxis.x) > 0.5f;
+        transform.swapsAxes = swapsAxes;
+        if (!usesFixedScreenSampling && !swapsAxes) return transform;
+
+        transform.x = xAxis;
+        transform.y = yAxis;
+        transform.offset = (vector_float2){ (float)(p0.x * scale), (float)(p0.y * scale) };
+        transform.fixedCoordinateSpace = YES;
+    }
+    return transform;
+}
+
+static vector_float2 LGApplySamplingTransform(LGSamplingTransform transform, vector_float2 screenPx) {
+    return transform.offset + screenPx.x * transform.x + screenPx.y * transform.y;
+}
+
+static NSString *LGFormatSamplePoint(NSString *name,
+                                     vector_float2 screenPx,
+                                     LGSamplingTransform transform,
+                                     vector_float2 wallpaperOriginPx,
+                                     CGSize sourcePixelSize) {
+    vector_float2 mappedPx = LGApplySamplingTransform(transform, screenPx);
+    vector_float2 imgPx = mappedPx - wallpaperOriginPx;
+    CGFloat sourceW = MAX(sourcePixelSize.width, 1.0);
+    CGFloat sourceH = MAX(sourcePixelSize.height, 1.0);
+    return [NSString stringWithFormat:@"%@ screen={%.1f,%.1f} mapped={%.1f,%.1f} img={%.1f,%.1f} uv={%.3f,%.3f}",
+            name,
+            screenPx.x, screenPx.y,
+            mappedPx.x, mappedPx.y,
+            imgPx.x, imgPx.y,
+            imgPx.x / (float)sourceW,
+            imgPx.y / (float)sourceH];
 }
 
 static NSInteger LG_defaultPreferredFPS(void) {
@@ -61,16 +459,17 @@ static NSInteger LG_preferredFPSForUpdateGroup(LGUpdateGroup group) {
 
 static id<MTLDevice>               sDevice;
 static id<MTLRenderPipelineState>  sPipeline;
-static id<MTLCommandQueue>         sCommandQueues[LGUpdateGroupWidgets + 1];
+static id<MTLCommandQueue>         sCommandQueue;
 static NSMapTable *sTextureCache = nil;
 static NSMutableDictionary<NSNumber *, MPSImageGaussianBlur *> *sBlurKernelCache = nil;
+static NSMutableArray<NSNumber *> *sBlurKernelLRUKeys = nil;
 static id<MTLTexture> sOpaqueMaskTexture = nil;
 static dispatch_once_t sRuntimeInitOnce;
 static atomic_bool sRuntimeReady = false;
+static const NSUInteger kLGBlurKernelCacheLimit = 16;
 
-static id<MTLCommandQueue> LGCommandQueueForUpdateGroup(LGUpdateGroup group) {
-    NSInteger index = (group >= LGUpdateGroupAll && group <= LGUpdateGroupWidgets) ? group : LGUpdateGroupAll;
-    return sCommandQueues[index] ?: sCommandQueues[LGUpdateGroupAll];
+static id<MTLCommandQueue> LGCommandQueueForUpdateGroup(__unused LGUpdateGroup group) {
+    return sCommandQueue;
 }
 
 static BOOL LGEnsureRuntimeReady(void) {
@@ -85,6 +484,7 @@ static void LG_clearTextureCache(void) {
 void LGClearGlassTextureCache(void) {
     LG_clearTextureCache();
     [sBlurKernelCache removeAllObjects];
+    [sBlurKernelLRUKeys removeAllObjects];
 }
 
 static LGTextureCacheEntry *LG_getCacheForImage(UIImage *image, CGFloat scale) {
@@ -104,13 +504,24 @@ static void LG_setCacheForImage(UIImage *image, CGFloat scale, LGTextureCacheEnt
 static MPSImageGaussianBlur *LGGaussianBlurKernelForSigma(float sigma) {
     if (!sBlurKernelCache) {
         sBlurKernelCache = [NSMutableDictionary dictionary];
+        sBlurKernelLRUKeys = [NSMutableArray array];
     }
     NSNumber *key = LGBlurSettingKey(sigma);
     MPSImageGaussianBlur *kernel = sBlurKernelCache[key];
-    if (kernel) return kernel;
+    if (kernel) {
+        [sBlurKernelLRUKeys removeObject:key];
+        [sBlurKernelLRUKeys addObject:key];
+        return kernel;
+    }
+    while (sBlurKernelCache.count >= kLGBlurKernelCacheLimit && sBlurKernelLRUKeys.count > 0) {
+        NSNumber *oldestKey = sBlurKernelLRUKeys.firstObject;
+        [sBlurKernelCache removeObjectForKey:oldestKey];
+        [sBlurKernelLRUKeys removeObjectAtIndex:0];
+    }
     kernel = [[MPSImageGaussianBlur alloc] initWithDevice:sDevice sigma:sigma];
     kernel.edgeMode = MPSImageEdgeModeClamp;
     sBlurKernelCache[key] = kernel;
+    [sBlurKernelLRUKeys addObject:key];
     return kernel;
 }
 
@@ -135,13 +546,10 @@ void LGPrewarmPipelines(void) {
             return;
         }
 
-        sCommandQueues[LGUpdateGroupAll] = [sDevice newCommandQueue];
-        if (!sCommandQueues[LGUpdateGroupAll]) {
+        sCommandQueue = [sDevice newCommandQueue];
+        if (!sCommandQueue) {
             LGLog(@"metal command queue creation failed");
             return;
-        }
-        for (NSInteger group = LGUpdateGroupDock; group <= LGUpdateGroupWidgets; group++) {
-            sCommandQueues[group] = [sDevice newCommandQueue] ?: sCommandQueues[LGUpdateGroupAll];
         }
 
         LG_clearTextureCache();
@@ -179,14 +587,25 @@ void LGPrewarmPipelines(void) {
     float _cachedVisualScale;
     BOOL _hasCachedVisualMetrics;
     BOOL _drawScheduled;
+    BOOL _usesModelLayerVisualMetrics;
     CGFloat _effectiveTextureScale;
     CGSize _lastLayoutBounds;
     CFTimeInterval _lastDrawSubmissionTime;
     UIImage *_shapeMaskImage;
     id<MTLTexture> _shapeMaskTexture;
     LGZeroCopyBridge *_shapeMaskBridge;
+    BOOL _systemBlurFallbackEnabled;
+    UIView *_systemBlurFallbackView;
+    UIImageView *_systemBlurFallbackMaskView;
+    __weak UIView *_stockBlurSuppressionHost;
+    __weak UIView *_appliedStockBlurSuppressionHost;
+    BOOL _stockBlurSuppressionApplied;
     LGZeroCopyBridge *_wallpaperTextureBridge;
     BOOL _usesExternalWallpaperTexture;
+    BOOL _usesFixedScreenSampling;
+    NSString *_sourceCacheKey;
+    NSString *_lastIPadSamplingDiagnosticSignature;
+    CFTimeInterval _lastIPadSamplingDiagnosticTime;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame wallpaper:(UIImage *)wallpaper wallpaperOrigin:(CGPoint)origin {
@@ -203,6 +622,7 @@ void LGPrewarmPipelines(void) {
     _blur = 8;
     _wallpaperScale = 1.0;
     _wallpaperSamplingResolution = CGSizeZero;
+    _systemBlurFallbackEnabled = NO;
     _updateGroup = LGUpdateGroupAll;
     _wallpaperOriginPt = origin;
     _needsBlurBake = YES;
@@ -231,7 +651,48 @@ void LGPrewarmPipelines(void) {
         self.layer.cornerCurve = kCACornerCurveContinuous;
 
     _wallpaperImage = wallpaper;
+    _usesFixedScreenSampling = LG_imageUsesFixedScreenSampling(wallpaper);
+    _sourceCacheKey = [LGImageStableCacheKey(wallpaper) copy];
     return self;
+}
+
+
+- (void)_ensureSystemBlurFallbackView {
+    if (_systemBlurFallbackView) return;
+    _systemBlurFallbackView = LGMakeLowBlurFallbackView();
+    _systemBlurFallbackView.frame = self.bounds;
+    _systemBlurFallbackView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    _systemBlurFallbackView.userInteractionEnabled = NO;
+    _systemBlurFallbackView.hidden = YES;
+    [self insertSubview:_systemBlurFallbackView belowSubview:_mtkView];
+}
+
+- (void)_syncSystemBlurFallbackMask {
+    if (!_systemBlurFallbackView) return;
+    if (!_shapeMaskImage) {
+        _systemBlurFallbackView.maskView = nil;
+        _systemBlurFallbackMaskView = nil;
+        return;
+    }
+    if (!_systemBlurFallbackMaskView) {
+        _systemBlurFallbackMaskView = [[UIImageView alloc] initWithFrame:_systemBlurFallbackView.bounds];
+        _systemBlurFallbackMaskView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        _systemBlurFallbackView.maskView = _systemBlurFallbackMaskView;
+    }
+    _systemBlurFallbackMaskView.frame = _systemBlurFallbackView.bounds;
+    _systemBlurFallbackMaskView.image = _shapeMaskImage;
+}
+
+- (void)_syncSystemBlurFallbackVisibility {
+    BOOL visible = NO;
+    if (!visible) {
+        if (_stockBlurSuppressionApplied && _appliedStockBlurSuppressionHost && _appliedStockBlurSuppressionHost != self) {
+            LGStockBlurSuppressLayerTree(_appliedStockBlurSuppressionHost.layer, self.layer, NO);
+        }
+        _appliedStockBlurSuppressionHost = nil;
+        _stockBlurSuppressionApplied = NO;
+    }
+    _systemBlurFallbackView.hidden = !visible;
 }
 
 - (UIImage *)shapeMaskImage {
@@ -318,12 +779,43 @@ void LGPrewarmPipelines(void) {
     if (_shapeMaskImage == image || [_shapeMaskImage isEqual:image]) return;
     _shapeMaskImage = image;
     [self _reloadShapeMaskTexture];
+    [self _syncSystemBlurFallbackMask];
     [self scheduleDraw];
 }
+
+- (void)setSystemBlurFallbackEnabled:(BOOL)enabled {
+    if (_systemBlurFallbackEnabled == enabled) return;
+    _systemBlurFallbackEnabled = enabled;
+    [self _syncSystemBlurFallbackVisibility];
+    [self scheduleDraw];
+}
+
+- (UIView *)stockBlurSuppressionHost {
+    return _stockBlurSuppressionHost;
+}
+
+- (void)setStockBlurSuppressionHost:(UIView *)host {
+    if (_stockBlurSuppressionHost == host) return;
+    UIView *oldHost = _stockBlurSuppressionHost;
+    if (oldHost && oldHost != self) {
+        LGStockBlurSuppressLayerTree(oldHost.layer, self.layer, NO);
+    }
+    if (_appliedStockBlurSuppressionHost && _appliedStockBlurSuppressionHost != oldHost && _appliedStockBlurSuppressionHost != self) {
+        LGStockBlurSuppressLayerTree(_appliedStockBlurSuppressionHost.layer, self.layer, NO);
+    }
+    _appliedStockBlurSuppressionHost = nil;
+    _stockBlurSuppressionApplied = NO;
+    _stockBlurSuppressionHost = host;
+    [self _syncSystemBlurFallbackVisibility];
+    [self scheduleDraw];
+}
+
 
 - (void)setWallpaperImage:(UIImage *)img {
     if (!_usesExternalWallpaperTexture && _wallpaperImage == img) return;
     _usesExternalWallpaperTexture = NO;
+    _usesFixedScreenSampling = LG_imageUsesFixedScreenSampling(img);
+    _sourceCacheKey = [LGImageStableCacheKey(img) copy];
     _wallpaperTextureBridge = nil;
     _cacheEntry = nil;
     _wallpaperImage = img;
@@ -341,6 +833,17 @@ void LGPrewarmPipelines(void) {
         return;
     }
     _wallpaperOriginPt = origin;
+    [self scheduleDraw];
+}
+
+- (BOOL)usesModelLayerVisualMetrics {
+    return _usesModelLayerVisualMetrics;
+}
+
+- (void)setUsesModelLayerVisualMetrics:(BOOL)usesModelLayerVisualMetrics {
+    if (_usesModelLayerVisualMetrics == usesModelLayerVisualMetrics) return;
+    _usesModelLayerVisualMetrics = usesModelLayerVisualMetrics;
+    _hasCachedVisualMetrics = NO;
     [self scheduleDraw];
 }
 
@@ -384,16 +887,18 @@ void LGPrewarmPipelines(void) {
     if (self.hidden || self.alpha <= 0.01f || self.layer.opacity <= 0.01f) return;
     BOOL metricsChanged = [self _refreshVisualMetrics];
     CGFloat scale = UIScreen.mainScreen.scale;
-    CGRect screenBoundsPx = CGRectMake(0, 0,
-                                       UIScreen.mainScreen.bounds.size.width * scale,
-                                       UIScreen.mainScreen.bounds.size.height * scale);
+    CGRect screenBounds = LG_screenCoordinateBoundsForGlassView(self);
+    CGRect screenBoundsPx = CGRectMake(CGRectGetMinX(screenBounds) * scale,
+                                       CGRectGetMinY(screenBounds) * scale,
+                                       CGRectGetWidth(screenBounds) * scale,
+                                       CGRectGetHeight(screenBounds) * scale);
     if (!CGRectIntersectsRect(_cachedVisualRectPx, screenBoundsPx)) return;
     if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad && metricsChanged) {
         LGDebugLog(@"glass update group=%ld bounds=%@ visualPx=%@ screen=%@ origin=%@ wallpaper=%@",
                    (long)_updateGroup,
                    NSStringFromCGRect(self.bounds),
                    NSStringFromCGRect(_cachedVisualRectPx),
-                   NSStringFromCGSize(UIScreen.mainScreen.bounds.size),
+                   NSStringFromCGSize(screenBounds.size),
                    NSStringFromCGPoint(_wallpaperOriginPt),
                    self.wallpaperImage ? NSStringFromCGSize(self.wallpaperImage.size) : @"(null)");
     }
@@ -417,6 +922,7 @@ void LGPrewarmPipelines(void) {
         if (!self->_mtkView.superview) return;
         if (self.hidden || self.alpha <= 0.01f || self.layer.opacity <= 0.01f) return;
         self->_lastDrawSubmissionTime = CACurrentMediaTime();
+        [self _syncSystemBlurFallbackVisibility];
         [self->_mtkView draw];
     };
     if (delay > 0.0) {
@@ -432,8 +938,28 @@ void LGPrewarmPipelines(void) {
     CGRect visualRect;
     BOOL useDirectScreenConversion = (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad &&
                                       _updateGroup != LGUpdateGroupLockscreen &&
+                                      _updateGroup != LGUpdateGroupFolderOpen &&
                                       self.window != nil);
-    if (useDirectScreenConversion) {
+    if (_usesModelLayerVisualMetrics) {
+        CGRect rectInSuperview = self.frame;
+        if (self.superview) {
+            CALayer *layer = self.layer;
+            CGSize size = layer.bounds.size;
+            CGPoint anchor = layer.anchorPoint;
+            CGPoint position = layer.position;
+            rectInSuperview = CGRectMake(position.x - size.width * anchor.x,
+                                         position.y - size.height * anchor.y,
+                                         size.width,
+                                         size.height);
+        }
+        CGRect screenRect = self.window.windowScene
+            ? [self.superview convertRect:rectInSuperview toCoordinateSpace:UIScreen.mainScreen.coordinateSpace]
+            : [self.superview convertRect:rectInSuperview toView:nil];
+        visualRect = CGRectMake(screenRect.origin.x * scale,
+                                screenRect.origin.y * scale,
+                                screenRect.size.width * scale,
+                                screenRect.size.height * scale);
+    } else if (useDirectScreenConversion) {
         CGRect screenRect = self.window.windowScene
             ? [self convertRect:self.bounds toCoordinateSpace:UIScreen.mainScreen.coordinateSpace]
             : [self convertRect:self.bounds toView:nil];
@@ -540,6 +1066,7 @@ void LGPrewarmPipelines(void) {
 
 - (void)layoutSubviews {
     [super layoutSubviews];
+    [self _syncSystemBlurFallbackVisibility];
     CGFloat scale = UIScreen.mainScreen.scale;
     CGSize boundsSize = self.bounds.size;
     CGSize drawableSize = CGSizeMake(MAX(1.0, floor(boundsSize.width * scale)),
@@ -601,6 +1128,8 @@ void LGPrewarmPipelines(void) {
     if (!texture) return;
 
     _usesExternalWallpaperTexture = YES;
+    _usesFixedScreenSampling = NO;
+    _sourceCacheKey = [NSString stringWithFormat:@"live:%zux%zu", width, height];
     _wallpaperImage = nil;
     _cacheEntry = nil;
     _bgTexture = texture;
@@ -714,6 +1243,7 @@ void LGPrewarmPipelines(void) {
     CFTimeInterval profileStart = 0.0;
     BOOL shouldProfile = (_updateGroup == LGUpdateGroupLockscreen);
     if (shouldProfile) profileStart = LGProfileBegin();
+    [self _syncSystemBlurFallbackVisibility];
     if (!_bgTexture && self.wallpaperImage) [self _reloadTexture];
     if (_bgTexture && !_blurredTexture) [self _ensureBlurTexture];
     if (!sPipeline || !_bgTexture || !_blurredTexture) {
@@ -740,8 +1270,9 @@ void LGPrewarmPipelines(void) {
     }
 
     CGFloat scale = UIScreen.mainScreen.scale;
-    CGFloat screenW = UIScreen.mainScreen.bounds.size.width * scale;
-    CGFloat screenH = UIScreen.mainScreen.bounds.size.height * scale;
+    CGRect screenBounds = LG_screenCoordinateBoundsForGlassView(self);
+    CGFloat screenW = CGRectGetWidth(screenBounds) * scale;
+    CGFloat screenH = CGRectGetHeight(screenBounds) * scale;
 
     float visOriginX = CGRectGetMinX(_cachedVisualRectPx);
     float visOriginY = CGRectGetMinY(_cachedVisualRectPx);
@@ -753,16 +1284,12 @@ void LGPrewarmPipelines(void) {
         !CGSizeEqualToSize(_wallpaperSamplingResolution, CGSizeZero)
             ? _wallpaperSamplingResolution
             : _sourceWallpaperPixelSize;
+    LGSamplingTransform samplingTransform =
+        LG_samplingTransformForGlassView(self,
+                                         samplingWallpaperPixelSize,
+                                         _usesExternalWallpaperTexture,
+                                         _usesFixedScreenSampling);
 
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        LGDebugLog(@"glass draw group=%ld screenPx={%.1f %.1f} visualPx=%@ drawable=%@ wallpaperPx=%@ wallpaperOrigin=%@",
-                   (long)_updateGroup,
-                   screenW, screenH,
-                   NSStringFromCGRect(_cachedVisualRectPx),
-                   NSStringFromCGSize(drawableSize),
-                   NSStringFromCGSize(samplingWallpaperPixelSize),
-                   NSStringFromCGPoint(_wallpaperOriginPt));
-    }
     float imgW = (float)_bgTexture.width;
     float imgH = (float)_bgTexture.height;
     float samplingW = (float)samplingWallpaperPixelSize.width;
@@ -771,6 +1298,67 @@ void LGPrewarmPipelines(void) {
         ? fmaxf(samplingW / imgW, samplingH / imgH)
         : fmaxf((float)screenW / imgW, (float)screenH / imgH);
     float blurPx = (float)_blur * (float)scale / fillScale;
+
+    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
+        CGRect fixedBounds = LG_fixedScreenCoordinateBounds();
+        vector_float2 wallpaperOriginPx = {
+            (float)(_wallpaperOriginPt.x * scale),
+            (float)(_wallpaperOriginPt.y * scale)
+        };
+        vector_float2 topLeft = { visOriginX, visOriginY };
+        vector_float2 center = { visOriginX + visW * 0.5f, visOriginY + visH * 0.5f };
+        vector_float2 bottomCenter = { visOriginX + visW * 0.5f, visOriginY + visH };
+        vector_float2 bottomRight = { visOriginX + visW, visOriginY + visH };
+        NSString *sourceKey = _sourceCacheKey ?: @"(none)";
+        NSString *signature = [NSString stringWithFormat:@"%ld|%@|%.0f,%.0f,%.0f,%.0f|%.0f,%.0f|%.0f,%.0f|%.0f,%.0f|%d|%d|%d|%d|%ld|%ld",
+                               (long)_updateGroup,
+                               sourceKey,
+                               visOriginX, visOriginY, visW, visH,
+                               samplingW, samplingH,
+                               samplingTransform.offset.x, samplingTransform.offset.y,
+                               samplingTransform.x.y, samplingTransform.y.x,
+                               _usesExternalWallpaperTexture ? 1 : 0,
+                               _usesFixedScreenSampling ? 1 : 0,
+                               samplingTransform.sourceLooksFixedScreen ? 1 : 0,
+                               samplingTransform.fixedCoordinateSpace ? 1 : 0,
+                               (long)samplingTransform.interfaceOrientation,
+                               (long)samplingTransform.deviceOrientation];
+        CFTimeInterval now = CACurrentMediaTime();
+        BOOL shouldLogDiagnostic = ![_lastIPadSamplingDiagnosticSignature isEqualToString:signature] ||
+            (now - _lastIPadSamplingDiagnosticTime) >= 1.5;
+        if (shouldLogDiagnostic) {
+            _lastIPadSamplingDiagnosticSignature = [signature copy];
+            _lastIPadSamplingDiagnosticTime = now;
+            LGDebugLog(@"ipad sampling diag group=%ld view=%@ source=%@ external=%d fixedSource=%d fixedGuess=%d fixedMap=%d swapsAxes=%d interface=%ld device=%ld currentBounds=%@ fixedBounds=%@ visualPx=%@ drawable=%@ bgTex={%.0f,%.0f} sourcePx=%@ screenPx={%.1f,%.1f} originPt=%@ originPx={%.1f,%.1f} mapX={%.2f,%.2f} mapY={%.2f,%.2f} mapO={%.1f,%.1f} fill=%.3f %@ | %@ | %@ | %@",
+                       (long)_updateGroup,
+                       NSStringFromClass(self.class),
+                       sourceKey,
+                       _usesExternalWallpaperTexture ? 1 : 0,
+                       _usesFixedScreenSampling ? 1 : 0,
+                       samplingTransform.sourceLooksFixedScreen ? 1 : 0,
+                       samplingTransform.fixedCoordinateSpace ? 1 : 0,
+                       samplingTransform.swapsAxes ? 1 : 0,
+                       (long)samplingTransform.interfaceOrientation,
+                       (long)samplingTransform.deviceOrientation,
+                       NSStringFromCGRect(screenBounds),
+                       NSStringFromCGRect(fixedBounds),
+                       NSStringFromCGRect(_cachedVisualRectPx),
+                       NSStringFromCGSize(drawableSize),
+                       imgW, imgH,
+                       NSStringFromCGSize(samplingWallpaperPixelSize),
+                       screenW, screenH,
+                       NSStringFromCGPoint(_wallpaperOriginPt),
+                       wallpaperOriginPx.x, wallpaperOriginPx.y,
+                       samplingTransform.x.x, samplingTransform.x.y,
+                       samplingTransform.y.x, samplingTransform.y.y,
+                       samplingTransform.offset.x, samplingTransform.offset.y,
+                       fillScale,
+                       LGFormatSamplePoint(@"tl", topLeft, samplingTransform, wallpaperOriginPx, samplingWallpaperPixelSize),
+                       LGFormatSamplePoint(@"center", center, samplingTransform, wallpaperOriginPx, samplingWallpaperPixelSize),
+                       LGFormatSamplePoint(@"bottomCenter", bottomCenter, samplingTransform, wallpaperOriginPx, samplingWallpaperPixelSize),
+                       LGFormatSamplePoint(@"bottomRight", bottomRight, samplingTransform, wallpaperOriginPx, samplingWallpaperPixelSize));
+        }
+    }
 
     if ((_needsBlurBake || blurPx != _lastBakedBlurRadius) && _cacheEntry) {
         LGBlurVariant *variant = _cacheEntry.blurVariants[LGBlurSettingKey(_blur)];
@@ -795,6 +1383,17 @@ void LGPrewarmPipelines(void) {
         }
     }
 
+    CGFloat specularAngleForDraw = LGSpecularMotionCurrentAngle();
+    CFTimeInterval motionDrawLogNow = CACurrentMediaTime();
+    if (LGSpecularMotionEnabled() && motionDrawLogNow - sSpecularMotionLastDrawDebugLog >= 0.5) {
+        sSpecularMotionLastDrawDebugLog = motionDrawLogNow;
+        LGDebugLog(@"[SpecularMotion] drawInMTKView group=%ld specularAngle=%.4f (%.1f°) opacity=%.2f",
+                   (long)_updateGroup,
+                   specularAngleForDraw,
+                   specularAngleForDraw * (180.0 / M_PI),
+                   _specularOpacity);
+    }
+
     id<MTLRenderCommandEncoder> enc =
         [cmdBuf renderCommandEncoderWithDescriptor:passDesc];
     LGUniforms u = {
@@ -809,10 +1408,13 @@ void LGPrewarmPipelines(void) {
         .refractionScale = (float)_refractionScale,
         .refractiveIndex = (float)_refractiveIndex,
         .specularOpacity = (float)_specularOpacity,
-        .specularAngle = 2.2689280f,
+        .specularAngle = (float)specularAngleForDraw,
         .blur = blurPx,
         .wallpaperOrigin = { (float)(_wallpaperOriginPt.x * scale),
                              (float)(_wallpaperOriginPt.y * scale) },
+        .samplingTransformX = samplingTransform.x,
+        .samplingTransformY = samplingTransform.y,
+        .samplingTransformOffset = samplingTransform.offset,
         .samplingOrientation = samplingOrientation,
         .hasShapeMask = _shapeMaskTexture ? 1.0f : 0.0f,
     };
@@ -828,6 +1430,10 @@ void LGPrewarmPipelines(void) {
 }
 
 - (void)dealloc {
+    UIView *suppressionHost = _appliedStockBlurSuppressionHost ?: _stockBlurSuppressionHost ?: self.superview;
+    if (_stockBlurSuppressionApplied && suppressionHost && suppressionHost != self) {
+        LGStockBlurSuppressLayerTree(suppressionHost.layer, self.layer, NO);
+    }
     if (_updateGroup != LGUpdateGroupAll)
         LG_unregisterGlassView(self, _updateGroup);
 }

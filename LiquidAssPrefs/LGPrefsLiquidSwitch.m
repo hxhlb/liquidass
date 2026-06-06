@@ -2,14 +2,6 @@
 #import "../Shared/LGGlassRenderer.h"
 #import <QuartzCore/QuartzCore.h>
 
-static void LGPrefsSwitchLog(NSString *format, ...) {
-    va_list args;
-    va_start(args, format);
-    NSString *message = [[NSString alloc] initWithFormat:format arguments:args];
-    va_end(args);
-    NSLog(@"[LiquidAss][Settings] %@", message);
-}
-
 static BOOL LGSwitchIsDarkMode(UITraitCollection *traitCollection) {
     if (@available(iOS 12.0, *)) {
         return traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
@@ -223,7 +215,6 @@ static void LGSettingsSwitchScheduleAutoContract(LGPrefsLiquidSwitch *self_) {
 }
 
 - (void)dealloc {
-    LGPrefsSwitchLog(@"switch dealloc self=%p displayLink=%p window=%p", self, self.displayLink, self.window);
     [self stopDisplayLink];
 }
 

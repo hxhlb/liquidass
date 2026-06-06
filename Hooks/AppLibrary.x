@@ -54,7 +54,7 @@ LG_FLOAT_PREF_FUNC(LGAppLibSearchBlur, "AppLibrary.SearchBlur", 25.0)
 LG_FLOAT_PREF_FUNC(LGAppLibSearchWallpaperScale, "AppLibrary.SearchWallpaperScale", 0.1)
 LG_FLOAT_PREF_FUNC(LGAppLibSearchLightTintAlpha, "AppLibrary.SearchLightTintAlpha", 0.1)
 LG_FLOAT_PREF_FUNC(LGAppLibSearchDarkTintAlpha, "AppLibrary.SearchDarkTintAlpha", 0.0)
-LG_FLOAT_PREF_FUNC(LGAppLibraryLiveCaptureFPS, "AppLibrary.LiveCaptureFPS", 12.0)
+LG_FLOAT_PREF_FUNC(LGAppLibraryLiveCaptureFPS, "AppLibrary.LiveCaptureFPS", 22.0)
 
 static NSHashTable<UIView *> *LGAppLibraryHostRegistry(void) {
     if (!sAppLibraryHosts) {
@@ -71,7 +71,8 @@ static BOOL LGFilterLooksLikeTintFilter(id filter) {
     NSString *name = nil;
     @try {
         name = [filter valueForKey:@"name"];
-    } @catch (__unused NSException *exception) {
+    } @catch (NSException *exception) {
+        LGDebugLog(@"app library filter name read failed %@ %@", exception.name, exception.reason);
         name = nil;
     }
     if (![name isKindOfClass:[NSString class]]) return NO;
@@ -109,7 +110,8 @@ static void stripTintFiltersFromLayerTree(CALayer *layer) {
             NSArray *cleanedBg = LGCleanedFilterArray((NSArray *)rawBackgroundFilters, &removedBg);
             if (removedBg) [layer setValue:cleanedBg forKey:@"backgroundFilters"];
         }
-    } @catch (__unused NSException *exception) {
+    } @catch (NSException *exception) {
+        LGDebugLog(@"app library background filter strip failed %@ %@", exception.name, exception.reason);
     }
 
     layer.compositingFilter = nil;
@@ -207,6 +209,11 @@ static NSUInteger LGAppLibraryActiveHostCount(void) {
     NSUInteger count = 0;
     for (UIView *view in LGAppLibraryHostRegistry().allObjects) {
         if (!view.window || view.hidden || view.alpha <= 0.01f || view.layer.opacity <= 0.01f) continue;
+        CALayer *layer = view.layer.presentationLayer ?: view.layer;
+        CGRect bounds = layer.bounds;
+        if (CGRectGetWidth(bounds) <= 1.0 || CGRectGetHeight(bounds) <= 1.0) continue;
+        CGRect windowFrame = [layer convertRect:bounds toLayer:view.window.layer];
+        if (!CGRectIntersectsRect(CGRectInset(view.window.bounds, -8.0, -8.0), windowFrame)) continue;
         count++;
     }
     return count;
@@ -597,6 +604,14 @@ static void LGAppLibraryRefreshAttachedHosts(void) {
             LGRemoveAppLibraryGlass(view);
             continue;
         }
+        CALayer *layer = view.layer.presentationLayer ?: view.layer;
+        CGRect bounds = layer.bounds;
+        CGRect windowFrame = [layer convertRect:bounds toLayer:view.window.layer];
+        if (CGRectGetWidth(bounds) <= 1.0 ||
+            CGRectGetHeight(bounds) <= 1.0 ||
+            !CGRectIntersectsRect(CGRectInset(view.window.bounds, -8.0, -8.0), windowFrame)) {
+            continue;
+        }
         if (isInsideSearchTextField(view)) {
             injectIntoSearchBar(view);
         } else {
@@ -749,6 +764,7 @@ static BOOL LGHandleSearchFieldMaterialView(UIView *view, BOOL updateOnly) {
 
 - (void)setContentOffset:(CGPoint)offset {
     %orig;
+    LGAppLibrarySyncDisplayLinkActivity();
     if (!sAppLibraryDisplayLinkState.link) LG_updateRegisteredGlassViews(LGUpdateGroupAppLibrary);
 }
 

@@ -146,7 +146,7 @@ static float LGSliderNearestSegmentValueForCenterX(UISlider *slider, CGFloat cen
     return bestValue;
 }
 
-static void LGLogSegmentedSliderSnap(UISlider *slider, NSString *phase, CGFloat centerX, float snappedValue) {
+static void LGDebugSegmentedSliderSnap(UISlider *slider, NSString *phase, CGFloat centerX, float snappedValue) {
     NSArray<NSNumber *> *segmentCenters = LGSliderSegmentCenters(slider);
     NSArray<NSNumber *> *endpointCenters = LGSliderEndpointCenters(slider);
     LGDebugLog(@"settings segmented slider phase=%@ slider=%p value=%.3f center=%.3f snapped=%.3f min=%.3f max=%.3f points=%ld endpoints=%@ centers=%@",
@@ -507,7 +507,7 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
     if (LGSliderUsesSegmentedMode(self)) {
         CGFloat snapCenterX = self.hasPresentedThumbCenter ? self.logicalThumbCenterX : [self resolvedThumbCenterX];
         float snappedValue = LGSliderNearestSegmentValueForCenterX(self, snapCenterX);
-        LGLogSegmentedSliderSnap(self, @"end", snapCenterX, snappedValue);
+        LGDebugSegmentedSliderSnap(self, @"end", snapCenterX, snappedValue);
         [super setValue:snappedValue animated:NO];
         [self sendActionsForControlEvents:UIControlEventValueChanged];
     }
@@ -527,7 +527,7 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
     if (LGSliderUsesSegmentedMode(self)) {
         CGFloat snapCenterX = self.hasPresentedThumbCenter ? self.logicalThumbCenterX : [self resolvedThumbCenterX];
         float snappedValue = LGSliderNearestSegmentValueForCenterX(self, snapCenterX);
-        LGLogSegmentedSliderSnap(self, @"cancel", snapCenterX, snappedValue);
+        LGDebugSegmentedSliderSnap(self, @"cancel", snapCenterX, snappedValue);
         [super setValue:snappedValue animated:NO];
         [self sendActionsForControlEvents:UIControlEventValueChanged];
     }

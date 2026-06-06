@@ -33,7 +33,7 @@ LG_FLOAT_PREF_FUNC(LGContextMenuDarkTintAlpha, "ContextMenu.DarkTintAlpha", 0.6)
 LG_FLOAT_PREF_FUNC(LGContextMenuWallpaperScale, "ContextMenu.WallpaperScale", 0.1)
 LG_FLOAT_PREF_FUNC(LGContextMenuRowInset, "ContextMenu.RowInset", 16.0)
 LG_FLOAT_PREF_FUNC(LGContextMenuIconSpacing, "ContextMenu.IconSpacing", 12.0)
-LG_FLOAT_PREF_FUNC(LGContextMenuLiveCaptureFPS, "ContextMenu.LiveCaptureFPS", 15.0)
+LG_FLOAT_PREF_FUNC(LGContextMenuLiveCaptureFPS, "ContextMenu.LiveCaptureFPS", 25.0)
 
 static void LGContextMenuRefreshAllHosts(void);
 static void LGContextMenuRefreshAttachedHosts(void);
