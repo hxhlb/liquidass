@@ -790,7 +790,7 @@ static NSArray<NSDictionary *> *LGAvailableLanguageChoices(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         NSBundle *baseBundle = LGPreferencesBaseBundle();
-        NSMutableOrderedSet<NSString *> *codes = [NSMutableOrderedSet orderedSetWithObject:@"en"];
+        NSMutableOrderedSet<NSString *> *codes = [NSMutableOrderedSet orderedSetWithArray:@[@"en", @"zh-Hans"]];
         if (baseBundle) {
             for (NSString *path in [baseBundle pathsForResourcesOfType:@"lproj" inDirectory:nil]) {
                 NSString *languageCode = [[path lastPathComponent] stringByDeletingPathExtension];
@@ -798,8 +798,6 @@ static NSArray<NSDictionary *> *LGAvailableLanguageChoices(void) {
                     [codes addObject:languageCode];
                 }
             }
-        } else {
-            [codes addObject:@"zh-Hans"];
         }
 
         NSMutableArray<NSDictionary *> *dynamicChoices = [NSMutableArray arrayWithCapacity:codes.count];
