@@ -102,3 +102,35 @@ jobs:
         with:
           name: ${{ matrix.scheme }}-package
           path: packages/*.deb
+
+  release:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./all-packages
+          pattern: "*-package"
+          merge-multiple: true
+
+      - name: update nightly release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "./all-packages/*.deb"
+          allowUpdates: true
+          tag: nightly
+          name: "Nightly"
+          body: |
+            This build was automatically generated from the latest commit on `main`.
+            
+            **Commit SHA:** ${{ github.sha }}
+            **Triggered by:** @${{ github.actor }}
+            
+            > [!NOTE]
+            > A nightly build is basically the next update partially done. Additionally, this build might have the old version number but the code itself should has the latest commit.
+          prerelease: true
+          token: ${{ secrets.GITHUB_TOKEN }}

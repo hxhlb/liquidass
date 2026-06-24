@@ -315,7 +315,11 @@ static void updateSeamlessLabelColor(UILabel *label) {
                 label.textColor = UIColor.blackColor;
             }
         } else {
-            label.textColor = UIColor.whiteColor;
+            if (LG_isLockscreenWallpaperLight()) {
+                label.textColor = UIColor.blackColor;
+            } else {
+                label.textColor = UIColor.whiteColor;
+            }
         }
     } else {
         UIColor *original = objc_getAssociatedObject(label, kLockOriginalTextColorKey);

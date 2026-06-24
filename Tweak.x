@@ -1482,6 +1482,64 @@ BOOL LG_imageLooksBlack(UIImage *img) {
     return YES;
 }
 
+static NSNumber *sLockscreenWallpaperIsLight = nil;
+
+BOOL LG_imageIsLight(UIImage *img) {
+    if (!img) return NO;
+    CGImageRef cg = img.CGImage;
+    if (!cg) return NO;
+
+    const size_t grid = 16;
+    unsigned char px[grid * grid * 4] = {0};
+    CGContextRef ctx = CGBitmapContextCreate(px,
+                                             grid,
+                                             grid,
+                                             8,
+                                             grid * 4,
+                                             LGSharedRGBColorSpace(),
+        kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    if (!ctx) return NO;
+    CGContextDrawImage(ctx, CGRectMake(0, 0, grid, grid), cg);
+    CGContextRelease(ctx);
+
+    NSUInteger sampleCount = grid * grid;
+    NSUInteger lightPixels = 0;
+    double totalLuminance = 0.0;
+
+    for (NSUInteger i = 0; i < sampleCount; i++) {
+        uint8_t r = px[i * 4];
+        uint8_t g = px[i * 4 + 1];
+        uint8_t b = px[i * 4 + 2];
+
+        double luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0;
+        totalLuminance += luminance;
+
+        if (luminance > 0.65) {
+            lightPixels++;
+        }
+    }
+
+    double averageLuminance = totalLuminance / sampleCount;
+    double lightRatio = (double)lightPixels / sampleCount;
+
+    return (averageLuminance > 0.6 || lightRatio > 0.3);
+}
+
+BOOL LG_isLockscreenWallpaperLight(void) {
+    if (sLockscreenWallpaperIsLight != nil) {
+        return [sLockscreenWallpaperIsLight boolValue];
+    }
+
+    UIImage *img = LG_getRawLockscreenWallpaperImage();
+    if (!img) {
+        return NO;
+    }
+
+    BOOL isLight = LG_imageIsLight(img);
+    sLockscreenWallpaperIsLight = @(isLight);
+    return isLight;
+}
+
 static BOOL LG_contextSnapshotLooksIncomplete(UIImage *img) {
     if (!img) return YES;
     CGImageRef cg = img.CGImage;
@@ -1774,6 +1832,7 @@ static void LGResetLockscreenSnapshotCaches(void) {
     sCachedSpringBoardLockPath = nil;
     [[NSFileManager defaultManager] removeItemAtPath:kLGLockscreenWallpaperFlatFilePath error:nil];
     LGInvalidateLockscreenSnapshotCache();
+    sLockscreenWallpaperIsLight = nil;
 }
 
 static void LGScheduleBlockAfterDelay(NSTimeInterval delay, dispatch_block_t block) {
