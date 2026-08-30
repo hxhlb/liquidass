@@ -5,6 +5,7 @@
 
 FOUNDATION_EXPORT NSString * const kLGPrefsUIRefreshNotification;
 FOUNDATION_EXPORT NSString * const kLGPrefsRespringChangedNotification;
+FOUNDATION_EXPORT NSString * const kLGPrefsLiveAppliedNotification;
 FOUNDATION_EXPORT NSString * const kLGLastSurfaceKey;
 FOUNDATION_EXPORT NSString * const kLGPrefsLanguageChangedNotification;
 FOUNDATION_EXPORT NSString * const kLGPrefsLanguageKey;

@@ -69,7 +69,6 @@
 "prefs.app_icons_warning.title" = "Włączyć ikony aplikacji?";
 "prefs.app_icons_warning.body" = "Pamiętaj, że włączenie ikon aplikacji może powodować znaczne spowolnienia. NIE narzekaj na problemy z wydajnością, jeśli masz włączoną tę powierzchnię, dziękuję.";
 "prefs.app_icons_warning.confirm" = "Włącz";
-"prefs.button.more" = "Więcej";
 "prefs.button.respring" = "Respring";
 "prefs.button.later" = "Później";
 "prefs.button.reopen_settings" = "Otwórz ponownie";
@@ -81,11 +80,12 @@
 "prefs.reset_confirm.body" = "Ta czynność zresetuje wszystkie preferencje do wartości domyślnych. Czy chcesz kontynuować?";
 "prefs.reset_confirm.surface_body_format" = "To zresetuje wszystkie ustawienia %@ do wartości domyślnych. Czy chcesz kontynuować?";
 "prefs.respring_confirm.title" = "Potwierdź respring";
-"prefs.respring_confirm.body" = "Czy chcesz wykonać resping teraz? Wszelkie uruchomione aplikacje w tle lub procesy mogą zostać zamknięte.";
+"prefs.respring_confirm.body" = "Spowoduje to ponowne uruchomienie backboardd i SpringBoard. Kontynuować?";
 "prefs.import_prefs.error_invalid" = "Schowek nie zawiera prawidłowego blobu preferencji LiquidAss.";
 "prefs.import_prefs.error_empty" = "Importowany blob preferencji jest pusty.";
 "prefs.import_prefs.error_read" = "Nie można odczytać wybranego pliku preferencji.";
-"prefs.import_prefs.success" = "Preferencje zaimportowane. Respring może nadal być potrzebny dla niektórych zmian.";
+"prefs.import_prefs.success" = "Preferencje zaimportowano i zastosowano natychmiast.";
+"prefs.live_applied.toast" = "Ustawienia zastosowano natychmiast. Jeśli coś wygląda nieprawidłowo, spróbuj ponownie uruchomić SpringBoard.";
 "prefs.export_prefs.error" = "Nie można utworzyć udostępnialnego eksportu preferencji.";
 "prefs.reopen_settings.title" = "Otwórz ponownie Ustawienia";
 "prefs.reopen_settings.body" = "Ta zmiana zostanie zastosowana przy następnym uruchomieniu Ustawień. Otworzyć Ustawienia ponownie teraz?";
@@ -168,3 +168,15 @@
 "prefs.section.keyboard_geometry.subtitle" = "Kształt i odstępy szkła klawiatury.";
 "prefs.control.keyboard_overhang" = "Nawis";
 "prefs.subtitle.keyboard_overhang" = "Dodatkowa wysokość zarezerwowana nad klawiaturą, gdy pasek predykcji jest ukryty.";
+
+/* TODO: Translate synced English fallback strings. */
+"prefs.rwb.section.title" = "Remove Widget Background";
+"prefs.rwb.section.subtitle" = "Control widget background removal and compatibility behavior.";
+"prefs.rwb.enabled.title" = "Remove Widget Background";
+"prefs.rwb.enabled.subtitle" = "Remove backgrounds for widgets included in the RWB allowlist.";
+"prefs.rwb.force_dark.title" = "Force Dark Appearance";
+"prefs.rwb.force_dark.subtitle" = "Render handled widgets using the dark appearance.";
+"prefs.rwb.system_widgets.title" = "Include System Widgets";
+"prefs.rwb.system_widgets.subtitle" = "Allow RWB to process Apple system widgets in the allowlist.";
+"prefs.rwb.material_view.title" = "Hide Stack Material";
+"prefs.rwb.material_view.subtitle" = "Also hide supported widget stack material backgrounds. Experimental.";

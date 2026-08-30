@@ -1,6 +1,7 @@
 #import "LGLiveBackdropView.h"
 #import "LGHostRegistry.h"
 #import "LGCoverSheetState.h"
+#import "LGSharedSupport.h"
 #import <CoreMotion/CoreMotion.h>
 #import <QuartzCore/QuartzCore.h>
 #import <objc/message.h>
@@ -13,32 +14,12 @@ static const void *kLGOutsetKey = &kLGOutsetKey;
 static const void *kLGRadiusKey = &kLGRadiusKey;
 static const void *kLGSpecularEnabledOverrideKey = &kLGSpecularEnabledOverrideKey;
 
-static NSDictionary<NSString *, id> *sLGGlassPreferences;
-
-static NSString *LGGlassPreferencesPath(void) {
-    static NSString *path;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        path = jbroot(@"/var/mobile/Library/Preferences/dylv.liquidassprefs.plist");
-    });
-    return path;
-}
-
 id LGGlassPreferenceValue(NSString *key) {
-    if (!key.length) return nil;
-    @synchronized([LGLiveBackdropView class]) {
-        if (!sLGGlassPreferences) {
-            sLGGlassPreferences =
-                [NSDictionary dictionaryWithContentsOfFile:LGGlassPreferencesPath()] ?: @{};
-        }
-        return sLGGlassPreferences[key];
-    }
+    return LGPreferenceValue(key);
 }
 
 void LGInvalidateGlassPreferenceCache(void) {
-    @synchronized([LGLiveBackdropView class]) {
-        sLGGlassPreferences = nil;
-    }
+    LGReloadPreferences();
 }
 
 NSString *LGFilterTypeForHostPrefix(NSString *prefix) {

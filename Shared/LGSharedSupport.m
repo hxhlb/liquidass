@@ -289,7 +289,7 @@ void LGObservePreferenceChanges(dispatch_block_t block) {
     }];
 }
 
-static id LGPreferenceValue(NSString *key) {
+id LGPreferenceValue(NSString *key) {
     if (!key.length) return nil;
     LGEnsurePreferenceCacheInitialized();
     NSDictionary<NSString *, id> *preferences = nil;

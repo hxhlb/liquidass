@@ -6,6 +6,7 @@
 
 static const CGFloat kWidgetCornerRadius = 20.2;
 static void *kWidgetGlassKey = &kWidgetGlassKey;
+static void *kWidgetContainerStateKey = &kWidgetContainerStateKey;
 
 @interface CHSWidget : NSObject
 @property (nonatomic, copy, readonly) NSString *extensionBundleIdentifier;
@@ -85,9 +86,18 @@ static BOOL isWidgetStackBackgroundMaterial(UIView *mat) {
 
 static void removeWidgetGlass(UIView *container) {
     LGLiveBackdropView *glass = objc_getAssociatedObject(container, kWidgetGlassKey);
-    if (!glass) return;
     [glass removeFromSuperview];
     objc_setAssociatedObject(container, kWidgetGlassKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    NSDictionary *state = objc_getAssociatedObject(container, kWidgetContainerStateKey);
+    if (state) {
+        container.layer.cornerRadius = [state[@"radius"] doubleValue];
+        container.layer.masksToBounds = [state[@"masks"] boolValue];
+        container.clipsToBounds = [state[@"clips"] boolValue];
+        id curve = state[@"curve"];
+        container.layer.cornerCurve = curve == NSNull.null ? nil : curve;
+        objc_setAssociatedObject(container, kWidgetContainerStateKey, nil,
+                                 OBJC_ASSOCIATION_ASSIGN);
+    }
 }
 
 static void injectWidgetGlass(UIView *container) {
@@ -107,6 +117,14 @@ static void injectWidgetGlass(UIView *container) {
     glass.layer.cornerCurve   = kCACornerCurveContinuous;
     glass.layer.masksToBounds = YES;
     [glass applyFilters];
+    if (!objc_getAssociatedObject(container, kWidgetContainerStateKey)) {
+        objc_setAssociatedObject(container, kWidgetContainerStateKey,
+            @{@"radius": @(container.layer.cornerRadius),
+              @"masks": @(container.layer.masksToBounds),
+              @"clips": @(container.clipsToBounds),
+              @"curve": container.layer.cornerCurve ?: NSNull.null},
+            OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
     container.layer.cornerRadius  = kWidgetCornerRadius;
     container.layer.cornerCurve   = kCACornerCurveContinuous;
     container.layer.masksToBounds = YES;
@@ -141,30 +159,30 @@ static void injectWidgetGlass(UIView *container) {
 
 %hook CHUISAvocadoHostViewController
 - (void)_updateBackgroundMaterialAndColor {
-    if (self.widget.extensionBundleIdentifier.length) return;
+    if (lgHostEnabled(@"Widgets") && self.widget.extensionBundleIdentifier.length) return;
     %orig;
 }
 - (id)screenshotManager {
-    if (self.widget.extensionBundleIdentifier.length) return nil;
+    if (lgHostEnabled(@"Widgets") && self.widget.extensionBundleIdentifier.length) return nil;
     return %orig;
 }
 %end
 
 %hook CHUISWidgetHostViewController
 - (void)_updateBackgroundMaterialAndColor {
-    if (self.widget.extensionBundleIdentifier.length) return;
+    if (lgHostEnabled(@"Widgets") && self.widget.extensionBundleIdentifier.length) return;
     %orig;
 }
 - (void)_updatePersistedSnapshotContent {
-    if (self.widget.extensionBundleIdentifier.length) return;
+    if (lgHostEnabled(@"Widgets") && self.widget.extensionBundleIdentifier.length) return;
     %orig;
 }
 - (void)_updatePersistedSnapshotContentIfNecessary {
-    if (self.widget.extensionBundleIdentifier.length) return;
+    if (lgHostEnabled(@"Widgets") && self.widget.extensionBundleIdentifier.length) return;
     %orig;
 }
 - (id)_snapshotImageFromURL:(id)arg1 {
-    if (self.widget.extensionBundleIdentifier.length) return nil;
+    if (lgHostEnabled(@"Widgets") && self.widget.extensionBundleIdentifier.length) return nil;
     return %orig;
 }
 %end

@@ -11,6 +11,9 @@ static BOOL kForceDarkMode = YES;
 static CGFloat kMaxWidgetWidth = 140.0;
 static CGFloat kMaxWidgetHeight = 140.0;
 static NSSet<NSString *> *kWidgetBundleIdentifiers = nil;
+static void *kRWBOriginalBackgroundColorKey = &kRWBOriginalBackgroundColorKey;
+static void *kRWBOriginalWindowStyleKey = &kRWBOriginalWindowStyleKey;
+static NSHashTable<UIWindow *> *sRWBWindows;
 
 static NSArray<NSString *> *RWBParseThirdPartyBundleIDs(NSString *rawText) {
     if (![rawText isKindOfClass:[NSString class]] || rawText.length == 0) return @[];
@@ -27,10 +30,12 @@ static NSArray<NSString *> *RWBParseThirdPartyBundleIDs(NSString *rawText) {
 
 static void ReloadPrefs(void) {
     LGReloadPreferences();
-    kIsEnabled = YES;
-    kIsEnabledForSystemWidgets = YES;
-    kIsEnabledForMaterialView = NO;
-    kForceDarkMode = YES;
+    kIsEnabled = LG_globalEnabled() &&
+                 LG_prefBool(@"Widgets.Enabled", YES) &&
+                 LG_prefBool(@"RWB.Enabled", YES);
+    kIsEnabledForSystemWidgets = LG_prefBool(@"RWB.SystemWidgets.Enabled", YES);
+    kIsEnabledForMaterialView = LG_prefBool(@"RWB.MaterialView.Enabled", NO);
+    kForceDarkMode = LG_prefBool(@"RWB.ForceDarkMode", YES);
     kMaxWidgetWidth = 140.0;
     kMaxWidgetHeight = 140.0;
 
@@ -42,6 +47,42 @@ static void ReloadPrefs(void) {
         [NSMutableOrderedSet orderedSetWithArray:
             RWBParseThirdPartyBundleIDs(configuredBundleIDs)];
     kWidgetBundleIdentifiers = [NSSet setWithArray:bundleIDs.array];
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        for (UIWindow *window in sRWBWindows.allObjects) {
+            NSNumber *originalStyle =
+                objc_getAssociatedObject(window, kRWBOriginalWindowStyleKey);
+            if (kIsEnabled && kForceDarkMode) {
+                if (!originalStyle) {
+                    objc_setAssociatedObject(window, kRWBOriginalWindowStyleKey,
+                                             @(window.overrideUserInterfaceStyle),
+                                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                }
+                window.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+            } else if (originalStyle) {
+                window.overrideUserInterfaceStyle = originalStyle.integerValue;
+                objc_setAssociatedObject(window, kRWBOriginalWindowStyleKey, nil,
+                                         OBJC_ASSOCIATION_ASSIGN);
+            }
+            if (!kIsEnabled) {
+                NSMutableArray<UIView *> *stack =
+                    [NSMutableArray arrayWithObject:window];
+                while (stack.count) {
+                    UIView *view = stack.lastObject;
+                    [stack removeLastObject];
+                    id original = objc_getAssociatedObject(
+                        view, kRWBOriginalBackgroundColorKey);
+                    if (original) {
+                        view.backgroundColor = original == NSNull.null ? nil : original;
+                        objc_setAssociatedObject(view,
+                            kRWBOriginalBackgroundColorKey, nil,
+                            OBJC_ASSOCIATION_ASSIGN);
+                    }
+                    [stack addObjectsFromArray:view.subviews];
+                }
+            }
+        }
+    });
 }
 
 static void RWBReloadPrefsCallback(CFNotificationCenterRef __unused center,
@@ -92,7 +133,10 @@ static void RWBReloadPrefsCallback(CFNotificationCenterRef __unused center,
 @end
 
 static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
-    return kIsEnabled && bundleIdentifier.length > 0 && [kWidgetBundleIdentifiers containsObject:bundleIdentifier];
+    if (!kIsEnabled || bundleIdentifier.length == 0) return NO;
+    if (!kIsEnabledForSystemWidgets && [bundleIdentifier hasPrefix:@"com.apple."])
+        return NO;
+    return [kWidgetBundleIdentifiers containsObject:bundleIdentifier];
 }
 
 %group RWBSpringBoard
@@ -194,7 +238,14 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
         }
     }
     UIWindow *window = %orig;
+    if (!sRWBWindows) sRWBWindows = [NSHashTable weakObjectsHashTable];
+    if (window) [sRWBWindows addObject:window];
     if (window && kIsEnabled && kForceDarkMode) {
+        if (!objc_getAssociatedObject(window, kRWBOriginalWindowStyleKey)) {
+            objc_setAssociatedObject(window, kRWBOriginalWindowStyleKey,
+                                     @(window.overrideUserInterfaceStyle),
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
         [window setOverrideUserInterfaceStyle:UIUserInterfaceStyleDark];
     }
     return window;
@@ -233,9 +284,19 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
 
 - (void)layoutSubviews {
     %orig;
-    if (!kIsEnabled) return;
-    if (![NSStringFromClass([self class]) containsString:@"UIHostingView"]) {
+    if ([NSStringFromClass([self class]) containsString:@"UIHostingView"]) return;
+    id original = objc_getAssociatedObject(self, kRWBOriginalBackgroundColorKey);
+    if (kIsEnabled) {
+        if (!original) {
+            objc_setAssociatedObject(self, kRWBOriginalBackgroundColorKey,
+                                     self.backgroundColor ?: NSNull.null,
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
         self.backgroundColor = UIColor.clearColor;
+    } else if (original) {
+        self.backgroundColor = original == NSNull.null ? nil : original;
+        objc_setAssociatedObject(self, kRWBOriginalBackgroundColorKey, nil,
+                                 OBJC_ASSOCIATION_ASSIGN);
     }
 }
 
@@ -350,7 +411,6 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
 
 %ctor {
     ReloadPrefs();
-    if (!kIsEnabled) return;
 
     CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
                                     NULL,

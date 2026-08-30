@@ -8,6 +8,7 @@
 #import "../Shared/LGLiveBackdropView.h"
 #import "../Shared/LGGlassKit.h"
 #import "../Shared/LGLiquidMotion.h"
+#import "../Shared/LGSharedSupport.h"
 
 static void *kLGSettingsSwitchOverlayKey = &kLGSettingsSwitchOverlayKey;
 static void *kLGSettingsSliderOverlayKey = &kLGSettingsSliderOverlayKey;
@@ -31,6 +32,14 @@ static void *kLGLiquidAssEntryFooterKey = &kLGLiquidAssEntryFooterKey;
 static void *kLGSettingsBarBackgroundStateKey =
     &kLGSettingsBarBackgroundStateKey;
 static void *kLGSettingsStockBackStateKey = &kLGSettingsStockBackStateKey;
+static void *kLGSettingsOriginalAlphaKey = &kLGSettingsOriginalAlphaKey;
+static void *kLGSettingsSwitchOwnerStateKey = &kLGSettingsSwitchOwnerStateKey;
+static void *kLGSettingsNativeViewStateKey = &kLGSettingsNativeViewStateKey;
+static void *kLGSettingsSegmentControlStateKey = &kLGSettingsSegmentControlStateKey;
+static void *kLGSettingsSegmentSubviewStateKey = &kLGSettingsSegmentSubviewStateKey;
+static void *kLGSettingsCellStateKey = &kLGSettingsCellStateKey;
+static void *kLGSettingsCellRadiusKey = &kLGSettingsCellRadiusKey;
+static void *kLGSettingsSliderCellRadiusKey = &kLGSettingsSliderCellRadiusKey;
 static BOOL gLGSettingsControlsEnabled = NO;
 static BOOL gLGSwitchControlsEnabled = NO;
 static BOOL gLGSliderControlsEnabled = NO;
@@ -72,7 +81,7 @@ static void LGUpdateLiquidAssEntryFooter(UITableViewCell *cell) {
     }
     if (!footer) {
         footer = [[UILabel alloc] initWithFrame:CGRectZero];
-        footer.text = @"dylv";
+        footer.text = @"dylv & banana";
         footer.font = [UIFont systemFontOfSize:10.0 weight:UIFontWeightRegular];
         footer.textColor = UIColor.tertiaryLabelColor;
         footer.textAlignment = NSTextAlignmentRight;
@@ -364,6 +373,7 @@ static void LGRecordControlsDiagnostic(LGControlsDiagnosticKind kind,
 @end
 
 static BOOL LGSettingsFeatureEnabled(void) {
+    if (!LG_globalEnabled()) return NO;
     id settings = LGGlassPreferenceValue(@"SettingsControls.Enabled");
 
     return ![settings respondsToSelector:@selector(boolValue)] ||
@@ -516,8 +526,25 @@ static void LGHideSettingsNavigationBarBackground(UINavigationBar *bar) {
 }
 
 static void LGHideStockControlContents(UIView *control, UIView *except) {
-    for (UIView *subview in control.subviews)
-        if (subview != except) subview.alpha = 0.0;
+    for (UIView *subview in control.subviews) {
+        if (subview == except) continue;
+        if (!objc_getAssociatedObject(subview, kLGSettingsOriginalAlphaKey)) {
+            objc_setAssociatedObject(subview, kLGSettingsOriginalAlphaKey,
+                                     @(subview.alpha), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        subview.alpha = 0.0;
+    }
+}
+
+static void LGRestoreStockControlContents(UIView *control, UIView *except) {
+    for (UIView *subview in control.subviews) {
+        if (subview == except) continue;
+        NSNumber *alpha = objc_getAssociatedObject(subview, kLGSettingsOriginalAlphaKey);
+        if (!alpha) continue;
+        subview.alpha = alpha.doubleValue;
+        objc_setAssociatedObject(subview, kLGSettingsOriginalAlphaKey, nil,
+                                 OBJC_ASSOCIATION_ASSIGN);
+    }
 }
 
 static BOOL LGViewTreeHasSpeechRateEndpoints(UIView *root);
@@ -530,6 +557,13 @@ static UISlider *LGSettingsSliderOwnerForVisualElement(UIView *view) {
 
 static void LGSetNativeSliderTreeSuppressed(UIView *view, BOOL preserve) {
     if (!view) return;
+    if (!objc_getAssociatedObject(view, kLGSettingsNativeViewStateKey)) {
+        objc_setAssociatedObject(view, kLGSettingsNativeViewStateKey,
+            @{@"hidden": @(view.hidden),
+              @"interaction": @(view.userInteractionEnabled),
+              @"alpha": @(view.alpha)},
+            OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
     view.hidden = NO;
     view.userInteractionEnabled = NO;
     view.alpha = preserve ? 1.0 : 0.0;
@@ -537,6 +571,47 @@ static void LGSetNativeSliderTreeSuppressed(UIView *view, BOOL preserve) {
         BOOL preserveSubview = preserve || [subview isKindOfClass:UILabel.class];
         LGSetNativeSliderTreeSuppressed(subview, preserveSubview);
     }
+}
+
+static void LGRestoreNativeSliderTree(UIView *view) {
+    if (!view) return;
+    NSDictionary *state = objc_getAssociatedObject(view, kLGSettingsNativeViewStateKey);
+    if (state) {
+        view.hidden = [state[@"hidden"] boolValue];
+        view.userInteractionEnabled = [state[@"interaction"] boolValue];
+        view.alpha = [state[@"alpha"] doubleValue];
+        objc_setAssociatedObject(view, kLGSettingsNativeViewStateKey, nil,
+                                 OBJC_ASSOCIATION_ASSIGN);
+    }
+    for (UIView *subview in view.subviews) LGRestoreNativeSliderTree(subview);
+}
+
+static void LGRemoveSettingsSwitch(UISwitch *owner) {
+    LGPrefsLiquidSwitch *overlay =
+        objc_getAssociatedObject(owner, kLGSettingsSwitchOverlayKey);
+    LGRestoreStockControlContents(owner, overlay);
+    [overlay removeFromSuperview];
+    objc_setAssociatedObject(owner, kLGSettingsSwitchOverlayKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+    NSDictionary *state = objc_getAssociatedObject(owner, kLGSettingsSwitchOwnerStateKey);
+    if (state) {
+        owner.clipsToBounds = [state[@"clips"] boolValue];
+        owner.layer.masksToBounds = [state[@"masks"] boolValue];
+        objc_setAssociatedObject(owner, kLGSettingsSwitchOwnerStateKey, nil,
+                                 OBJC_ASSOCIATION_ASSIGN);
+    }
+}
+
+static void LGRemoveSettingsSlider(UISlider *owner) {
+    LGPrefsLiquidSlider *overlay =
+        objc_getAssociatedObject(owner, kLGSettingsSliderOverlayKey);
+    UIView *visualHost = objc_getAssociatedObject(owner, kLGSettingsSliderVisualHostKey);
+    LGRestoreNativeSliderTree(visualHost ?: owner);
+    [overlay removeFromSuperview];
+    objc_setAssociatedObject(owner, kLGSettingsSliderOverlayKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(owner, kLGSettingsSliderVisualHostKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
 }
 
 static void LGSuppressNativeSliderContents(UISlider *owner,
@@ -589,7 +664,11 @@ static CGRect LGSettingsSliderOverlayFrame(UISlider *owner, UIView *container) {
 static void LGInstallSettingsSwitch(UISwitch *owner) {
     if (!gLGSwitchControlsEnabled || !owner.window ||
         [owner isKindOfClass:LGPrefsLiquidSwitch.class] ||
-        LGInsideLiquidAssPrefs(owner)) return;
+        LGInsideLiquidAssPrefs(owner)) {
+        if (![owner isKindOfClass:LGPrefsLiquidSwitch.class])
+            LGRemoveSettingsSwitch(owner);
+        return;
+    }
 
     LGPrefsLiquidSwitch *overlay =
         objc_getAssociatedObject(owner, kLGSettingsSwitchOverlayKey);
@@ -610,6 +689,11 @@ static void LGInstallSettingsSwitch(UISwitch *owner) {
         [owner addSubview:overlay];
     }
 
+    if (!objc_getAssociatedObject(owner, kLGSettingsSwitchOwnerStateKey)) {
+        objc_setAssociatedObject(owner, kLGSettingsSwitchOwnerStateKey,
+            @{@"clips": @(owner.clipsToBounds), @"masks": @(owner.layer.masksToBounds)},
+            OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
     owner.clipsToBounds = NO;
     owner.layer.masksToBounds = NO;
     overlay.frame = CGRectMake(-8.0, 0.0,
@@ -624,7 +708,11 @@ static void LGInstallSettingsSwitch(UISwitch *owner) {
 static void LGInstallSettingsSlider(UISlider *owner) {
     if (!gLGSliderControlsEnabled || !owner.window ||
         [owner isKindOfClass:LGPrefsLiquidSlider.class] ||
-        LGInsideLiquidAssPrefs(owner)) return;
+        LGInsideLiquidAssPrefs(owner)) {
+        if (![owner isKindOfClass:LGPrefsLiquidSlider.class])
+            LGRemoveSettingsSlider(owner);
+        return;
+    }
     for (UIView *candidate = owner; candidate; candidate = candidate.superview) {
         if (LGViewTreeHasSpeechRateEndpoints(candidate)) return;
         if ([candidate isKindOfClass:UITableViewCell.class]) break;
@@ -846,9 +934,59 @@ static BOOL LGViewTreeHasSpeechRateEndpoints(UIView *root) {
     return NO;
 }
 
+static void LGStopSettingsSegmentDisplayLink(UISegmentedControl *control);
+
+static void LGRemoveSettingsSegmentGlass(UISegmentedControl *control) {
+    LGStopSettingsSegmentDisplayLink(control);
+    LGLiveBackdropView *glass =
+        objc_getAssociatedObject(control, kLGSettingsSegmentGlassKey);
+    [glass removeFromSuperview];
+    objc_setAssociatedObject(control, kLGSettingsSegmentGlassKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+    id originalTint = objc_getAssociatedObject(control, kLGSettingsSegmentOriginalTintKey);
+    if (originalTint)
+        control.selectedSegmentTintColor = originalTint == NSNull.null ? nil : originalTint;
+    objc_setAssociatedObject(control, kLGSettingsSegmentOriginalTintKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+    NSDictionary *controlState =
+        objc_getAssociatedObject(control, kLGSettingsSegmentControlStateKey);
+    if (controlState) {
+        control.clipsToBounds = [controlState[@"clips"] boolValue];
+        control.layer.masksToBounds = [controlState[@"masks"] boolValue];
+        control.layer.cornerRadius = [controlState[@"radius"] doubleValue];
+        objc_setAssociatedObject(control, kLGSettingsSegmentControlStateKey, nil,
+                                 OBJC_ASSOCIATION_ASSIGN);
+    }
+    Class segmentClass = NSClassFromString(@"UISegment");
+    for (UIView *subview in control.subviews) {
+        if (!segmentClass || ![subview isKindOfClass:segmentClass]) continue;
+        NSDictionary *state =
+            objc_getAssociatedObject(subview, kLGSettingsSegmentSubviewStateKey);
+        if (!state) continue;
+        id background = state[@"background"];
+        id layerBackground = state[@"layerBackground"];
+        subview.backgroundColor = background == NSNull.null ? nil : background;
+        subview.layer.backgroundColor = layerBackground == NSNull.null
+            ? nil : (__bridge CGColorRef)layerBackground;
+        objc_setAssociatedObject(subview, kLGSettingsSegmentSubviewStateKey, nil,
+                                 OBJC_ASSOCIATION_ASSIGN);
+    }
+    objc_setAssociatedObject(control, kLGSettingsSegmentActiveKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(control, kLGSettingsSegmentReleasedKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(control, kLGSettingsSegmentFadingKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(control, kLGSettingsSegmentRenderedKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+}
+
 static void LGInstallSettingsSegmentGlass(UISegmentedControl *control) {
     if (!gLGSegmentControlsEnabled || !control.window ||
-        LGInsideLiquidAssPrefs(control)) return;
+        LGInsideLiquidAssPrefs(control)) {
+        LGRemoveSettingsSegmentGlass(control);
+        return;
+    }
     NSInteger count = control.numberOfSegments;
     if (count <= 0 || control.selectedSegmentIndex < 0 ||
         control.selectedSegmentIndex >= count) return;
@@ -863,6 +1001,13 @@ static void LGInstallSettingsSegmentGlass(UISegmentedControl *control) {
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         glass.hidden = YES;
         glass.alpha = 0.0;
+    }
+    if (!objc_getAssociatedObject(control, kLGSettingsSegmentControlStateKey)) {
+        objc_setAssociatedObject(control, kLGSettingsSegmentControlStateKey,
+            @{@"clips": @(control.clipsToBounds),
+              @"masks": @(control.layer.masksToBounds),
+              @"radius": @(control.layer.cornerRadius)},
+            OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     control.clipsToBounds = NO;
     control.layer.masksToBounds = NO;
@@ -929,7 +1074,14 @@ static void LGInstallSettingsSegmentGlass(UISegmentedControl *control) {
     Class segmentClass = NSClassFromString(@"UISegment");
     for (UIView *subview in control.subviews)
         if (subview != glass && segmentClass && [subview isKindOfClass:segmentClass]) {
-
+            if (!objc_getAssociatedObject(subview, kLGSettingsSegmentSubviewStateKey)) {
+                id background = subview.backgroundColor ?: NSNull.null;
+                id layerBackground = subview.layer.backgroundColor
+                    ? (__bridge id)subview.layer.backgroundColor : NSNull.null;
+                objc_setAssociatedObject(subview, kLGSettingsSegmentSubviewStateKey,
+                    @{@"background": background, @"layerBackground": layerBackground},
+                    OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
             subview.backgroundColor = UIColor.clearColor;
             subview.layer.backgroundColor = UIColor.clearColor.CGColor;
             [control bringSubviewToFront:subview];
@@ -1072,7 +1224,36 @@ static BOOL LGSettingsShouldModifyCell(UIView *cell) {
 }
 
 static void LGUpdateSettingsCell(UITableViewCell *cell) {
-    if (!gLGSettingsControlsEnabled) return;
+    NSDictionary *state = objc_getAssociatedObject(cell, kLGSettingsCellStateKey);
+    if (!gLGSettingsControlsEnabled) {
+        if (state) {
+            cell.separatorInset = [state[@"separator"] UIEdgeInsetsValue];
+            cell.layoutMargins = [state[@"margins"] UIEdgeInsetsValue];
+            cell.preservesSuperviewLayoutMargins = [state[@"preserves"] boolValue];
+            objc_setAssociatedObject(cell, kLGSettingsCellStateKey, nil,
+                                     OBJC_ASSOCIATION_ASSIGN);
+        }
+        NSMutableArray<UIView *> *restoreStack = [NSMutableArray arrayWithObject:cell];
+        while (restoreStack.count) {
+            UIView *view = restoreStack.lastObject;
+            [restoreStack removeLastObject];
+            NSNumber *radius = objc_getAssociatedObject(view, kLGSettingsCellRadiusKey);
+            if (radius) {
+                view.layer.cornerRadius = radius.doubleValue;
+                objc_setAssociatedObject(view, kLGSettingsCellRadiusKey, nil,
+                                         OBJC_ASSOCIATION_ASSIGN);
+            }
+            [restoreStack addObjectsFromArray:view.subviews];
+        }
+        return;
+    }
+    if (!state) {
+        objc_setAssociatedObject(cell, kLGSettingsCellStateKey,
+            @{@"separator": [NSValue valueWithUIEdgeInsets:cell.separatorInset],
+              @"margins": [NSValue valueWithUIEdgeInsets:cell.layoutMargins],
+              @"preserves": @(cell.preservesSuperviewLayoutMargins)},
+            OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
     UIEdgeInsets inset = UIEdgeInsetsMake(0.0, 16.0, 0.0, 16.0);
     cell.separatorInset = inset;
     cell.layoutMargins = inset;
@@ -1083,10 +1264,45 @@ static void LGUpdateSettingsCell(UITableViewCell *cell) {
         UIView *view = stack.lastObject;
         [stack removeLastObject];
         if (fabs(view.layer.cornerRadius - 10.0) <= 0.25 &&
-            CGRectGetHeight(view.bounds) > 0.0)
+            CGRectGetHeight(view.bounds) > 0.0) {
+            if (!objc_getAssociatedObject(view, kLGSettingsCellRadiusKey)) {
+                objc_setAssociatedObject(view, kLGSettingsCellRadiusKey,
+                                         @(view.layer.cornerRadius),
+                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
             view.layer.cornerRadius = 27.0;
+        }
         [stack addObjectsFromArray:view.subviews];
     }
+}
+
+static void LGReconcileGlobalControls(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        Class wrapperClass = NSClassFromString(@"UIViewControllerWrapperView");
+        Class prefsCellClass = NSClassFromString(@"PSTableCell");
+        for (UIWindow *window in UIApplication.sharedApplication.windows) {
+            NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:window];
+            while (stack.count) {
+                UIView *view = stack.lastObject;
+                [stack removeLastObject];
+                if ([view isKindOfClass:UISwitch.class])
+                    LGInstallSettingsSwitch((UISwitch *)view);
+                if ([view isKindOfClass:UISlider.class])
+                    LGInstallSettingsSlider((UISlider *)view);
+                if ([view isKindOfClass:UISegmentedControl.class])
+                    LGInstallSettingsSegmentGlass((UISegmentedControl *)view);
+                if (prefsCellClass && [view isKindOfClass:prefsCellClass])
+                    LGUpdateSettingsCell((UITableViewCell *)view);
+                if ([view isKindOfClass:UINavigationBar.class]) {
+                    LGHideSettingsNavigationBarBackground((UINavigationBar *)view);
+                    LGUpdateSettingsBackButton((UINavigationBar *)view);
+                }
+                if (wrapperClass && [view isKindOfClass:wrapperClass])
+                    LGUpdateSettingsTopFade(view);
+                [stack addObjectsFromArray:view.subviews];
+            }
+        }
+    });
 }
 
 %group LiquidAssGlobalControls
@@ -1483,8 +1699,20 @@ static void LGSettingsSuppressModernSwitchElementIfNeeded(UIView *element) {
 %hook PSSliderTableCell
 - (void)layoutSubviews {
     %orig;
-    if (gLGSettingsControlsEnabled)
+    NSNumber *originalRadius =
+        objc_getAssociatedObject(self, kLGSettingsSliderCellRadiusKey);
+    if (gLGSettingsControlsEnabled) {
+        if (!originalRadius) {
+            objc_setAssociatedObject(self, kLGSettingsSliderCellRadiusKey,
+                                     @(((UIView *)self).layer.cornerRadius),
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
         ((UIView *)self).layer.cornerRadius = 24.5;
+    } else if (originalRadius) {
+        ((UIView *)self).layer.cornerRadius = originalRadius.doubleValue;
+        objc_setAssociatedObject(self, kLGSettingsSliderCellRadiusKey, nil,
+                                 OBJC_ASSOCIATION_ASSIGN);
+    }
 }
 %end
 
@@ -1510,6 +1738,7 @@ static void LGSettingsSuppressModernSwitchElementIfNeeded(UIView *element) {
 
     lgObservePreferenceReload(^{
         LGRefreshGlobalControlEnablement();
+        LGReconcileGlobalControls();
         LGLog(@"global controls reload bundle=%s enabled=%d",
                    bundleIdentifier.UTF8String, gLGSettingsControlsEnabled);
     });

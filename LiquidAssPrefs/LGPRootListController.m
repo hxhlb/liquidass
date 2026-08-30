@@ -64,14 +64,12 @@ static NSString *LGFormatRuntimeCacheUsage(unsigned long long bytes) {
     self.title = LGPrefsAppName();
     self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
     if ([self respondsToSelector:@selector(table)] && self.table) self.table.hidden = YES;
-    self.navigationItem.rightBarButtonItem = LGMakeCircularMenuItem(self, @selector(handleApplyPressed),
-                                                                      @selector(handleResetPressed),
-                                                                      LGLocalized(@"prefs.button.reset"));
+    self.navigationItem.rightBarButtonItem = LGMakeCircularMenuItem(
+        self, @selector(handleResetPressed), LGLocalized(@"prefs.button.reset"));
     LGRefreshCircularBackItem(self.navigationItem.rightBarButtonItem);
     [self applyNavigationBarStyle];
     LGInstallScrollableStack(self, 32.0, 14.0, &_lg_scrollView, &_lg_stackView);
     self.lg_scrollView.delegate = self;
-    LGInstallBottomRespringBar(self, &_lg_respringBar);
     [self reloadRootLocalizedContent];
     LGObservePrefsNotifications(self);
     [[NSNotificationCenter defaultCenter] addObserver:self
@@ -153,6 +151,11 @@ static NSString *LGFormatRuntimeCacheUsage(unsigned long long bytes) {
 - (void)handleRespringStateChanged:(NSNotification *)notification {
     (void)notification;
     [self updateRespringBarAnimated:YES];
+}
+
+- (void)handleLiveApplied:(NSNotification *)notification {
+    (void)notification;
+    LGShowLiveAppliedToast(self);
 }
 
 - (void)handleLanguageChanged:(NSNotification *)notification {
@@ -520,10 +523,6 @@ static NSString *LGFormatRuntimeCacheUsage(unsigned long long bytes) {
 
 - (void)handleResetPressed {
     LGPresentResetConfirmation(self);
-}
-
-- (void)handleApplyPressed {
-    LGForceSynchronizePreferences();
 }
 
 - (void)handleRespringPressed {

@@ -72,12 +72,13 @@
 "prefs.reset_confirm.surface_body_format" = "這將會把所有 %@ 重置為預設值。是否繼續？";
 
 "prefs.respring_confirm.title" = "確認重新啟動主畫面";
-"prefs.respring_confirm.body" = "是否現在重新啟動主畫面？執行後，正在運作的背景 App 或程序可能會關閉。";
+"prefs.respring_confirm.body" = "此操作將重新啟動 backboardd 與 SpringBoard，是否繼續？";
 
 "prefs.import_prefs.error_invalid" = "所選的檔案不是有效的 LiquidAss 設定資料。";
 "prefs.import_prefs.error_empty" = "匯入的設定資料是空的。";
 "prefs.import_prefs.error_read" = "無法讀取所選的設定檔案。";
-"prefs.import_prefs.success" = "設定已匯入。部分變更可能仍需重新啟動主畫面才能生效。";
+"prefs.import_prefs.success" = "偏好設定已匯入並即時套用。";
+"prefs.live_applied.toast" = "設定已即時套用。如遇顯示異常，請嘗試重新啟動主畫面。";
 
 "prefs.export_prefs.error" = "無法建立可分享的設定匯出檔案。";
 
@@ -112,7 +113,7 @@
 "prefs.surface.app_library.subtitle" = "App 資料庫相關介面的玻璃控制項。";
 
 "prefs.misc.respring.title" = "重新啟動主畫面";
-"prefs.misc.respring.subtitle" = "在 iOS 16 及以上系統中，建議每次更改後執行一次重新啟動主畫面，因為即時更新可能會出問題";
+"prefs.misc.respring.subtitle" = "重新啟動 SpringBoard 與相關渲染服務。";
 "prefs.misc.about.title" = "更多選項";
 "prefs.misc.about.subtitle" = "語言、關於、版本資訊、贊助等";
 "prefs.misc.prefs_settings.title" = "關於";
@@ -124,6 +125,16 @@
 "prefs.misc.rwb_third_party.subtitle" = "輸入用於 RWB 允許列表的小工具 Bundle ID。";
 "prefs.misc.rwb_third_party.editor_body" = "每行輸入一個 Bundle ID。";
 "prefs.misc.rwb_third_party.placeholder" = "com.example.widget\ncom.example.anotherwidget";
+"prefs.rwb.section.title" = "移除小工具背景";
+"prefs.rwb.section.subtitle" = "控制小工具背景移除及相關相容行為。";
+"prefs.rwb.enabled.title" = "移除小工具背景";
+"prefs.rwb.enabled.subtitle" = "移除 RWB 允許列表中小工具的背景。";
+"prefs.rwb.force_dark.title" = "強制深色外觀";
+"prefs.rwb.force_dark.subtitle" = "使用深色外觀渲染由 RWB 處理的小工具。";
+"prefs.rwb.system_widgets.title" = "包含系統小工具";
+"prefs.rwb.system_widgets.subtitle" = "允許 RWB 處理允許列表中的 Apple 系統小工具。";
+"prefs.rwb.material_view.title" = "隱藏堆疊材質";
+"prefs.rwb.material_view.subtitle" = "同時隱藏支援的小工具堆疊材質背景。實驗性功能。";
 "prefs.misc.language.title" = "語言";
 
 "prefs.control_center.fullscreen_backdrop_blur_radius.title" = "Fullscreen Blur Radius";
@@ -182,7 +193,6 @@
 "prefs.global_controls.sliders.subtitle" = "Replace standard sliders with liquid sliders.";
 "prefs.global_controls.segmented.title" = "Segmented Controls";
 "prefs.global_controls.segmented.subtitle" = "Add liquid selection behavior to segmented controls.";
-"prefs.button.more" = "More";
 
 /* TODO: Translate synced English fallback strings. */
 "prefs.app_icons_warning.title" = "Enable App Icons?";

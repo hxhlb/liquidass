@@ -69,11 +69,12 @@
 "prefs.reset_confirm.body" = "Esta acción restablecerá todas las preferencias a sus valores por defecto. ¿Deseas continuar?";
 "prefs.reset_confirm.surface_body_format" = "Esto restablecerá todos los ajustes de %@ a sus valores por defecto. ¿Deseas continuar?";
 "prefs.respring_confirm.title" = "Confirmar Respring";
-"prefs.respring_confirm.body" = "¿Deseas hacer respring ahora? Algunas apps o procesos en segundo plano podrían cerrarse.";
+"prefs.respring_confirm.body" = "Esto reiniciará backboardd y SpringBoard. ¿Deseas continuar?";
 "prefs.import_prefs.error_invalid" = "El portapapeles no contiene un blob de preferencias de LiquidAss válido.";
 "prefs.import_prefs.error_empty" = "El blob de preferencias importado está vacío.";
 "prefs.import_prefs.error_read" = "No se pudo leer el archivo de preferencias seleccionado.";
-"prefs.import_prefs.success" = "Preferencias importadas. Puede ser necesario un respring para algunos cambios.";
+"prefs.import_prefs.success" = "Preferencias importadas y aplicadas inmediatamente.";
+"prefs.live_applied.toast" = "Los ajustes se aplicaron al instante. Si algo no se ve bien, prueba a reiniciar SpringBoard.";
 "prefs.export_prefs.error" = "No se pudo generar una exportación compartible de preferencias.";
 "prefs.reopen_settings.title" = "Reabrir ajustes";
 "prefs.reopen_settings.body" = "Este cambio se aplica la próxima vez que se abra Ajustes. ¿Reabrir Ajustes ahora?";
@@ -98,7 +99,7 @@
 "prefs.surface.app_library.title" = "Biblioteca de apps";
 "prefs.surface.app_library.subtitle" = "Controles de cristal para superficies relacionadas con la Biblioteca de apps.";
 "prefs.misc.respring.title" = "Respring";
-"prefs.misc.respring.subtitle" = "Haz un respring después de cambios si estás en iOS 16 o posterior, ya que la actualización en vivo está rota.";
+"prefs.misc.respring.subtitle" = "Reinicia SpringBoard y el servicio de renderizado relacionado.";
 "prefs.misc.about.title" = "Más opciones";
 "prefs.misc.about.subtitle" = "Controles adicionales y preferencias avanzadas.";
 "prefs.misc.prefs_settings.title" = "Acerca de";
@@ -166,7 +167,6 @@
 "prefs.global_controls.segmented.subtitle" = "Add liquid selection behavior to segmented controls.";
 
 /* TODO: Translate synced English fallback strings. */
-"prefs.button.more" = "More";
 
 /* TODO: Translate synced English fallback strings. */
 "prefs.app_icons_warning.title" = "Enable App Icons?";
@@ -174,3 +174,15 @@
 "prefs.app_icons_warning.confirm" = "Enable";
 "prefs.control.fresnel_glare" = "Fresnel Glare";
 "prefs.subtitle.fresnel_glare" = "Controls the edge glare added by the glass shader.";
+
+/* TODO: Translate synced English fallback strings. */
+"prefs.rwb.section.title" = "Remove Widget Background";
+"prefs.rwb.section.subtitle" = "Control widget background removal and compatibility behavior.";
+"prefs.rwb.enabled.title" = "Remove Widget Background";
+"prefs.rwb.enabled.subtitle" = "Remove backgrounds for widgets included in the RWB allowlist.";
+"prefs.rwb.force_dark.title" = "Force Dark Appearance";
+"prefs.rwb.force_dark.subtitle" = "Render handled widgets using the dark appearance.";
+"prefs.rwb.system_widgets.title" = "Include System Widgets";
+"prefs.rwb.system_widgets.subtitle" = "Allow RWB to process Apple system widgets in the allowlist.";
+"prefs.rwb.material_view.title" = "Hide Stack Material";
+"prefs.rwb.material_view.subtitle" = "Also hide supported widget stack material backgrounds. Experimental.";

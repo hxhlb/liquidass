@@ -69,11 +69,12 @@
 "prefs.reset_confirm.body" = "Ця дія скине всі налаштування до значень за замовчуванням. Бажаєте продовжити?";
 "prefs.reset_confirm.surface_body_format" = "Це скине всі налаштування для %@ до значень за замовчуванням. Бажаєте продовжити?";
 "prefs.respring_confirm.title" = "Підтвердити респринг";
-"prefs.respring_confirm.body" = "Бажаєте виконати респринг зараз? Усі запущені фонові програми або процеси можуть закритися.";
+"prefs.respring_confirm.body" = "Це перезапустить backboardd і SpringBoard. Продовжити?";
 "prefs.import_prefs.error_invalid" = "Буфер обміну не містить коректних даних налаштувань LiquidAss.";
 "prefs.import_prefs.error_empty" = "Дані налаштувань для імпорту порожні.";
 "prefs.import_prefs.error_read" = "Не вдалося прочитати вибраний файл налаштувань.";
-"prefs.import_prefs.success" = "Налаштування успішно імпортовано. Для застосування деяких змін усе ще може знадобитися респринг.";
+"prefs.import_prefs.success" = "Налаштування імпортовано та застосовано одразу.";
+"prefs.live_applied.toast" = "Налаштування застосовано одразу. Якщо щось відображається неправильно, спробуйте перезапустити SpringBoard.";
 "prefs.export_prefs.error" = "Не вдалося створити файл експорту налаштувань.";
 "prefs.reopen_settings.title" = "Перевідкрити Параметри";
 "prefs.reopen_settings.body" = "Ця зміна набуде чинності при наступному запуску Параметрів. Перевідкрити Параметри просто зараз?";
@@ -98,7 +99,7 @@
 "prefs.surface.app_library.title" = "Бібліотека програм";
 "prefs.surface.app_library.subtitle" = "Налаштування скла для елементів Бібліотеки програм.";
 "prefs.misc.respring.title" = "Респринг";
-"prefs.misc.respring.subtitle" = "Обов'язково робіть респринг після змін на iOS 16 і новіше, оскільки оновлення наживо там не працює.";
+"prefs.misc.respring.subtitle" = "Перезапустити SpringBoard і пов’язану службу рендерингу.";
 "prefs.misc.about.title" = "Додаткові параметри";
 "prefs.misc.about.subtitle" = "Додаткові елементи керування та розширені налаштування.";
 "prefs.misc.prefs_settings.title" = "Про твік";
@@ -166,7 +167,6 @@
 "prefs.global_controls.segmented.subtitle" = "Add liquid selection behavior to segmented controls.";
 
 /* TODO: Translate synced English fallback strings. */
-"prefs.button.more" = "More";
 
 /* TODO: Translate synced English fallback strings. */
 "prefs.app_icons_warning.title" = "Enable App Icons?";
@@ -174,3 +174,15 @@
 "prefs.app_icons_warning.confirm" = "Enable";
 "prefs.control.fresnel_glare" = "Fresnel Glare";
 "prefs.subtitle.fresnel_glare" = "Controls the edge glare added by the glass shader.";
+
+/* TODO: Translate synced English fallback strings. */
+"prefs.rwb.section.title" = "Remove Widget Background";
+"prefs.rwb.section.subtitle" = "Control widget background removal and compatibility behavior.";
+"prefs.rwb.enabled.title" = "Remove Widget Background";
+"prefs.rwb.enabled.subtitle" = "Remove backgrounds for widgets included in the RWB allowlist.";
+"prefs.rwb.force_dark.title" = "Force Dark Appearance";
+"prefs.rwb.force_dark.subtitle" = "Render handled widgets using the dark appearance.";
+"prefs.rwb.system_widgets.title" = "Include System Widgets";
+"prefs.rwb.system_widgets.subtitle" = "Allow RWB to process Apple system widgets in the allowlist.";
+"prefs.rwb.material_view.title" = "Hide Stack Material";
+"prefs.rwb.material_view.subtitle" = "Also hide supported widget stack material backgrounds. Experimental.";

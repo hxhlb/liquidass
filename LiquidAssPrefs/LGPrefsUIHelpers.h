@@ -32,6 +32,7 @@ UIView *LGMakeNavCardGlyphView(NSString *symbolName, UIColor *tintColor);
 UIColor *LGSubpageCardBackgroundColor(void);
 UIView *LGMakeSectionDivider(void);
 void LGApplyNavigationBarAppearance(UINavigationItem *navigationItem);
+void LGShowLiveAppliedToast(UIViewController *controller);
 void LGInstallScrollableStack(UIViewController *controller,
                               CGFloat topInset,
                               CGFloat stackSpacing,
@@ -44,7 +45,7 @@ void LGPresentSliderValuePrompt(UIViewController *controller, UILabel *valueLabe
 void LGAnimateSliderToDefault(UISlider *slider, CGFloat targetValue, UILabel *valueLabel, NSInteger decimals);
 UIBarButtonItem *LGMakeCircularBackItem(id target, SEL action);
 void LGRefreshCircularBackItem(UIBarButtonItem *item);
-UIBarButtonItem *LGMakeCircularMenuItem(id target, SEL applyAction, SEL resetAction, NSString *resetTitle);
+UIBarButtonItem *LGMakeCircularMenuItem(id target, SEL resetAction, NSString *resetTitle);
 void LGPresentResetConfirmation(UIViewController *controller);
 void LGPresentResetConfirmationWithBody(UIViewController *controller, NSString *body, SEL resetSelector);
 void LGPresentRespringConfirmation(UIViewController *controller);

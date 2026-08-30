@@ -28,8 +28,8 @@ BOOL isExactClass(UIView *v, NSString *name) {
 BOOL lgHostEnabled(NSString *prefix) {
     if (!prefix.length) return YES;
     id global = LGGlassPreferenceValue(@"Global.Enabled");
-    if (![prefix isEqualToString:@"Global"] && [global isKindOfClass:[NSNumber class]] && ![global boolValue])
-        return NO;
+    if (![prefix isEqualToString:@"Global"] &&
+        (![global isKindOfClass:[NSNumber class]] || ![global boolValue])) return NO;
     id v = LGGlassPreferenceValue([prefix stringByAppendingString:@".Enabled"]);
 
     if (!v) {

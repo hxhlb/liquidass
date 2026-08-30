@@ -8,6 +8,7 @@
 
 NSString * const kLGPrefsUIRefreshNotification = @"LGPrefsUIRefreshNotification";
 NSString * const kLGPrefsRespringChangedNotification = @"LGPrefsRespringChangedNotification";
+NSString * const kLGPrefsLiveAppliedNotification = @"LGPrefsLiveAppliedNotification";
 NSString * const kLGLastSurfaceKey = @"LGPrefsLastSurface";
 NSString * const kLGPrefsLanguageChangedNotification = @"LGPrefsLanguageChangedNotification";
 NSString * const kLGPrefsLanguageKey = @"LGPrefsLanguage";
@@ -17,6 +18,7 @@ static dispatch_queue_t sLGPrefsWriteQueue;
 static NSString * const kLGDynamicDefaultPrefix = @"__dynamic_default.";
 static NSMutableDictionary<NSString *, id> *sLGPendingPreferences;
 static NSMutableSet<NSString *> *sLGPendingPreferenceRemovals;
+static BOOL sLGPrefsCommitScheduled;
 
 static void LGEnsurePendingPreferencesInitialized(void) {
     static dispatch_once_t onceToken;
@@ -30,6 +32,15 @@ static void LGEnsurePreferencesWriteQueueInitialized(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         sLGPrefsWriteQueue = dispatch_queue_create("dylv.liquidass.prefswrite", DISPATCH_QUEUE_SERIAL);
+    });
+}
+
+static void LGSchedulePendingPreferencesCommit(void) {
+    if (sLGPrefsCommitScheduled) return;
+    sLGPrefsCommitScheduled = YES;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        sLGPrefsCommitScheduled = NO;
+        LGForceSynchronizePreferences();
     });
 }
 
@@ -163,6 +174,10 @@ void LGObservePrefsNotifications(id target) {
                selector:@selector(handleRespringStateChanged:)
                    name:kLGPrefsRespringChangedNotification
                  object:nil];
+    [center addObserver:target
+               selector:@selector(handleLiveApplied:)
+                   name:kLGPrefsLiveAppliedNotification
+                 object:nil];
 }
 
 NSString *LGLocalized(NSString *key) {
@@ -218,11 +233,12 @@ void LGSetNeedsRespring(BOOL needsRespring) {
 }
 
 void LGForceSynchronizePreferences(void) {
-    // controls stage values until apply commits one coherent snapshot
+    // Coalesce changes made in one UI event into a single preferences update.
     LGEnsurePendingPreferencesInitialized();
 
     NSDictionary<NSString *, id> *pendingValues = [sLGPendingPreferences copy];
     NSSet<NSString *> *pendingRemovals = [sLGPendingPreferenceRemovals copy];
+    if (pendingValues.count == 0 && pendingRemovals.count == 0) return;
     LGEnsurePreferencesWriteQueueInitialized();
     dispatch_sync(sLGPrefsWriteQueue, ^{
         [pendingValues enumerateKeysAndObjectsUsingBlock:^(NSString *key, id value, BOOL *stop) {
@@ -247,8 +263,8 @@ void LGForceSynchronizePreferences(void) {
     [sLGPendingPreferences removeAllObjects];
     [sLGPendingPreferenceRemovals removeAllObjects];
 
-    LGSetRespringBarDismissed(NO);
-    LGSetNeedsRespring(YES);
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:kLGPrefsLiveAppliedNotification object:nil];
 }
 
 NSNumber *LGReadPreference(NSString *key, NSNumber *fallback) {
@@ -280,6 +296,7 @@ void LGWritePreferenceObject(NSString *key, id value) {
     sLGPendingPreferences[key] = value;
     [sLGPendingPreferenceRemovals removeObject:key];
     LGLog(@"[prefs-pending] staged %@=%@", key, value);
+    LGSchedulePendingPreferencesCommit();
 }
 
 void LGWritePreferenceAndMaybeRequireRespring(NSString *key, NSNumber *value) {
@@ -292,6 +309,7 @@ void LGRemovePreference(NSString *key) {
     [sLGPendingPreferences removeObjectForKey:key];
     [sLGPendingPreferenceRemovals addObject:key];
     LGLog(@"[prefs-pending] staged removal %@", key);
+    LGSchedulePendingPreferencesCommit();
 }
 
 NSDictionary *LGSwitchSetting(NSString *key, NSString *title, NSString *subtitle, BOOL fallback) {
@@ -749,10 +767,34 @@ NSArray<NSDictionary *> *LGWidgetItems(void) {
     return LGJoinItemGroups(@[
         LGRendererItemsForHostPrefix(@"Widgets"),
         @[
-            LGKeyedNavSetting(@"RWB.ThirdPartyBundleIDs",
+            LGSectionSetting(LGLocalized(@"prefs.rwb.section.title"),
+                             LGLocalized(@"prefs.rwb.section.subtitle")),
+            LGSettingControlledByKey(
+                LGSwitchSetting(@"RWB.Enabled",
+                                LGLocalized(@"prefs.rwb.enabled.title"),
+                                LGLocalized(@"prefs.rwb.enabled.subtitle"), YES),
+                @"Widgets.Enabled", @YES),
+            LGSettingControlledByKey(
+                LGSwitchSetting(@"RWB.ForceDarkMode",
+                                LGLocalized(@"prefs.rwb.force_dark.title"),
+                                LGLocalized(@"prefs.rwb.force_dark.subtitle"), YES),
+                @"RWB.Enabled", @YES),
+            LGSettingControlledByKey(
+                LGSwitchSetting(@"RWB.SystemWidgets.Enabled",
+                                LGLocalized(@"prefs.rwb.system_widgets.title"),
+                                LGLocalized(@"prefs.rwb.system_widgets.subtitle"), YES),
+                @"RWB.Enabled", @YES),
+            LGSettingControlledByKey(
+                LGSwitchSetting(@"RWB.MaterialView.Enabled",
+                                LGLocalized(@"prefs.rwb.material_view.title"),
+                                LGLocalized(@"prefs.rwb.material_view.subtitle"), NO),
+                @"RWB.Enabled", @YES),
+            LGSettingControlledByKey(
+                LGKeyedNavSetting(@"RWB.ThirdPartyBundleIDs",
                               LGLocalized(@"prefs.misc.rwb_third_party.title"),
                               LGLocalized(@"prefs.misc.rwb_third_party.subtitle"),
                               @"editThirdPartyAppRWB"),
+                @"RWB.Enabled", @YES),
         ],
     ]);
 }

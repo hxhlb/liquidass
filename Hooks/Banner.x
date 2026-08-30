@@ -33,6 +33,11 @@ static BOOL LGResponderChainContainsClass(UIResponder *responder, NSString *name
 }
 
 static void *kLGPlatterClassificationKey = &kLGPlatterClassificationKey;
+static void *kLGPlatterOriginalDimmingHiddenKey = &kLGPlatterOriginalDimmingHiddenKey;
+static void *kLGPlatterRequestedTextColorKey = &kLGPlatterRequestedTextColorKey;
+static void *kLGPlatterRequestedAttributedTextKey = &kLGPlatterRequestedAttributedTextKey;
+static void *kLGPlatterApplyingTextStyleKey = &kLGPlatterApplyingTextStyleKey;
+static NSHashTable<UILabel *> *sLGStyledPlatterLabels;
 
 static BOOL LGIsTopBannerPresentation(UIView *view) {
     if (!view.window) return NO;
@@ -52,8 +57,10 @@ static BOOL LGIsLightLockscreenNotificationView(UIView *view) {
 
 static UIColor *LGForcedPlatterTextColor(UIView *view) {
     if (!view || view.traitCollection.userInterfaceStyle != UIUserInterfaceStyleLight) return nil;
-    if (LGIsTopBannerPresentation(view)) return UIColor.blackColor;
-    return LGIsLightLockscreenNotificationView(view) ? UIColor.whiteColor : nil;
+    if (LGIsTopBannerPresentation(view))
+        return lgHostEnabled(@"Banner") ? UIColor.blackColor : nil;
+    return LGIsLightLockscreenNotificationView(view) && lgHostEnabled(@"Notification")
+        ? UIColor.whiteColor : nil;
 }
 
 static NSAttributedString *LGAttributedTextWithColor(NSAttributedString *text, UIColor *color) {
@@ -77,10 +84,74 @@ static void LGDisableLockscreenStackDimming(id controller) {
             id contentSizeManager = [controller valueForKey:@"contentSizeManagingView"];
             dimming = [contentSizeManager valueForKey:@"stackDimmingView"];
         }
-        if (dimming) dimming.hidden = lgHostEnabled(@"Notification");
+        if (dimming) {
+            NSNumber *original = objc_getAssociatedObject(
+                dimming, kLGPlatterOriginalDimmingHiddenKey);
+            if (lgHostEnabled(@"Notification")) {
+                if (!original) {
+                    objc_setAssociatedObject(dimming,
+                        kLGPlatterOriginalDimmingHiddenKey, @(dimming.hidden),
+                        OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                }
+                dimming.hidden = YES;
+            } else if (original) {
+                dimming.hidden = original.boolValue;
+                objc_setAssociatedObject(dimming,
+                    kLGPlatterOriginalDimmingHiddenKey, nil,
+                    OBJC_ASSOCIATION_ASSIGN);
+            }
+        }
     } @catch (__unused NSException *exception) {
 
     }
+}
+
+static void LGRestorePlatterLabel(UILabel *label) {
+    UIColor *color = objc_getAssociatedObject(label, kLGPlatterRequestedTextColorKey);
+    id attributed = objc_getAssociatedObject(label, kLGPlatterRequestedAttributedTextKey);
+    objc_setAssociatedObject(label, kLGPlatterApplyingTextStyleKey, @YES,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (attributed) label.attributedText = attributed == NSNull.null ? nil : attributed;
+    if (color) label.textColor = color;
+    objc_setAssociatedObject(label, kLGPlatterApplyingTextStyleKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(label, kLGPlatterRequestedTextColorKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(label, kLGPlatterRequestedAttributedTextKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+    [sLGStyledPlatterLabels removeObject:label];
+}
+
+static void LGApplyPlatterLabelStyle(UILabel *label) {
+    UIColor *forced = LGForcedPlatterTextColor(label);
+    if (!forced) {
+        LGRestorePlatterLabel(label);
+        return;
+    }
+    if (!sLGStyledPlatterLabels)
+        sLGStyledPlatterLabels = [NSHashTable weakObjectsHashTable];
+    [sLGStyledPlatterLabels addObject:label];
+    if (!objc_getAssociatedObject(label, kLGPlatterRequestedTextColorKey)) {
+        objc_setAssociatedObject(label, kLGPlatterRequestedTextColorKey,
+                                 label.textColor, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (!objc_getAssociatedObject(label, kLGPlatterRequestedAttributedTextKey)) {
+        objc_setAssociatedObject(label, kLGPlatterRequestedAttributedTextKey,
+                                 label.attributedText ?: NSNull.null,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    objc_setAssociatedObject(label, kLGPlatterApplyingTextStyleKey, @YES,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (label.attributedText.length)
+        label.attributedText = LGAttributedTextWithColor(label.attributedText, forced);
+    label.textColor = forced;
+    objc_setAssociatedObject(label, kLGPlatterApplyingTextStyleKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+}
+
+static void LGReconcilePlatterLabels(void) {
+    for (UILabel *label in sLGStyledPlatterLabels.allObjects)
+        LGApplyPlatterLabelStyle(label);
 }
 
 static CGFloat LGActionButtonRadius(UIView *material) {
@@ -135,29 +206,51 @@ static void LGUpdatePlatterGlass(UIView *material) {
 
 %hook UILabel
 - (void)setTextColor:(UIColor *)color {
+    if ([objc_getAssociatedObject(self, kLGPlatterApplyingTextStyleKey) boolValue]) {
+        %orig(color);
+        return;
+    }
     UIColor *forced = LGForcedPlatterTextColor((UIView *)self);
-    if (forced) color = forced;
+    if (forced) {
+        objc_setAssociatedObject(self, kLGPlatterRequestedTextColorKey,
+                                 color, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        if (!sLGStyledPlatterLabels)
+            sLGStyledPlatterLabels = [NSHashTable weakObjectsHashTable];
+        [sLGStyledPlatterLabels addObject:self];
+        color = forced;
+    }
     %orig(color);
 }
 - (void)setAttributedText:(NSAttributedString *)text {
-    text = LGAttributedTextWithColor(text, LGForcedPlatterTextColor((UIView *)self));
+    if ([objc_getAssociatedObject(self, kLGPlatterApplyingTextStyleKey) boolValue]) {
+        %orig(text);
+        return;
+    }
+    UIColor *forced = LGForcedPlatterTextColor((UIView *)self);
+    if (forced) {
+        objc_setAssociatedObject(self, kLGPlatterRequestedAttributedTextKey,
+                                 text ?: NSNull.null,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        if (!sLGStyledPlatterLabels)
+            sLGStyledPlatterLabels = [NSHashTable weakObjectsHashTable];
+        [sLGStyledPlatterLabels addObject:self];
+        text = LGAttributedTextWithColor(text, forced);
+    }
     %orig(text);
 }
 - (void)didMoveToWindow {
     %orig;
-    UIColor *forced = LGForcedPlatterTextColor((UIView *)self);
-    if (!forced) return;
-    if (self.attributedText.length) self.attributedText = LGAttributedTextWithColor(self.attributedText, forced);
-    self.textColor = forced;
+    LGApplyPlatterLabelStyle(self);
 }
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     %orig(previousTraitCollection);
-    UIColor *forced = LGForcedPlatterTextColor((UIView *)self);
-    if (!forced) return;
-    if (self.attributedText.length) self.attributedText = LGAttributedTextWithColor(self.attributedText, forced);
-    self.textColor = forced;
+    LGApplyPlatterLabelStyle(self);
 }
 %end
+
+%ctor {
+    lgObservePreferenceReload(^{ LGReconcilePlatterLabels(); });
+}
 
 %hook NCNotificationShortLookViewController
 - (void)viewDidLoad {

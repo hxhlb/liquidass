@@ -854,11 +854,14 @@ static NSString *lgPrefsPath(void) {
     static NSString *cached = nil;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        cached = jbroot(@"/var/mobile/Library/Preferences/dylv.liquidassprefs.plist");
+        // Mobile preferences are shared data, not part of the jailbreak root.
+        cached = @"/var/mobile/Library/Preferences/dylv.liquidassprefs.plist";
     });
     return cached;
 }
 static NSString * const kLGPrefsReloadNote = @"dylv.liquidassprefs/Reload";
+static CFStringRef const kLGRestartBackboarddNote =
+    CFSTR("dylv.liquidassprefs/Respring");
 static CFStringRef const kLGParametersReloadedNote =
     CFSTR("dylv.liquidglass/ParametersReloaded");
 
@@ -953,6 +956,18 @@ static void lgPrefsReloadCallback(CFNotificationCenterRef c, void *o, CFStringRe
     CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
         kLGParametersReloadedNote, NULL, NULL, true);
     lglog("prefs parameters ready notification posted");
+}
+
+static void lgRestartBackboarddCallback(CFNotificationCenterRef center, void *observer,
+                                        CFStringRef name, const void *object,
+                                        CFDictionaryRef userInfo) {
+    (void)center;
+    (void)observer;
+    (void)name;
+    (void)object;
+    (void)userInfo;
+    lglog("restart requested; exiting backboardd");
+    _exit(0);
 }
 
 static void lgStartPrefsObserver(void) {
@@ -1623,6 +1638,10 @@ static bool registerCustomFilter(void) {
 __attribute__((constructor))
 static void tweakInit(void) {
     @autoreleasepool {
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+                                    NULL, lgRestartBackboarddCallback,
+                                    kLGRestartBackboarddNote, NULL,
+                                    CFNotificationSuspensionBehaviorDeliverImmediately);
 #if LIQUIDASS_DEBUG
     { FILE *lf = fopen(LG_LOG_PATH, "w"); if (lf) fclose(lf); }
 #endif

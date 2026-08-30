@@ -163,14 +163,12 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
     [self configureCustomBackButton];
-    self.navigationItem.rightBarButtonItem = LGMakeCircularMenuItem(self, @selector(handleApplyPressed),
-                                                                      @selector(handleResetPressed),
-                                                                      LGLocalized(@"prefs.button.reset"));
+    self.navigationItem.rightBarButtonItem = LGMakeCircularMenuItem(
+        self, @selector(handleResetPressed), LGLocalized(@"prefs.button.reset"));
     LGRefreshCircularBackItem(self.navigationItem.rightBarButtonItem);
     [self applyNavigationBarStyle];
     LGInstallScrollableStack(self, 23.25, 12.0, &_scrollView, &_contentStack);
     _scrollView.delegate = self;
-    LGInstallBottomRespringBar(self, &_respringBar);
     _scrollTopButton = [self makeScrollTopButton];
     [self.view addSubview:_scrollTopButton];
     UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
@@ -239,10 +237,6 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
 
 - (void)handleResetPressed {
     LGPresentResetConfirmationWithBody(self, [self resetConfirmationBodyText], @selector(performAnimatedSurfacePreferenceReset));
-}
-
-- (void)handleApplyPressed {
-    LGForceSynchronizePreferences();
 }
 
 - (void)performAnimatedPreferenceReset {
@@ -354,6 +348,11 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
 - (void)handleRespringStateChanged:(NSNotification *)notification {
     (void)notification;
     [self updateRespringBarAnimated:YES];
+}
+
+- (void)handleLiveApplied:(NSNotification *)notification {
+    (void)notification;
+    LGShowLiveAppliedToast(self);
 }
 
 - (void)handleLanguageChanged:(NSNotification *)notification {

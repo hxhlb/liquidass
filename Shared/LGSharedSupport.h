@@ -61,6 +61,7 @@ BOOL LG_prefBool(NSString *key, BOOL fallback);
 CGFloat LG_prefFloat(NSString *key, CGFloat fallback);
 NSInteger LG_prefInteger(NSString *key, NSInteger fallback);
 NSString *LG_prefString(NSString *key, NSString *fallback);
+id LGPreferenceValue(NSString *key);
 BOOL LGHasExplicitPreferenceValue(NSString *key);
 BOOL LG_globalEnabled(void);
 void LGReloadPreferences(void);

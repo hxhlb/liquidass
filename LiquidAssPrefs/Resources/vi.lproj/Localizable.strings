@@ -69,11 +69,12 @@
 "prefs.reset_confirm.body" = "Thao tác này sẽ đặt lại toàn bộ tuỳ chọn về mặc định. Bạn có muốn tiếp tục không?";
 "prefs.reset_confirm.surface_body_format" = "Thao tác này sẽ đặt lại toàn bộ %@ về mặc định. Bạn có muốn tiếp tục không?";
 "prefs.respring_confirm.title" = "Xác nhận khởi động lại giao diện";
-"prefs.respring_confirm.body" = "Bạn có muốn respring ngay bây giờ không? Nếu làm vậy, các ứng dụng hoặc tiến trình nền đang chạy có thể bị đóng.";
+"prefs.respring_confirm.body" = "Thao tác này sẽ khởi động lại backboardd và SpringBoard. Tiếp tục?";
 "prefs.import_prefs.error_invalid" = "Tệp tuỳ chọn đã chọn không phải là gói LiquidAss hợp lệ.";
 "prefs.import_prefs.error_empty" = "Gói tuỳ chọn được nhập đang rỗng.";
 "prefs.import_prefs.error_read" = "Không thể đọc tệp tuỳ chọn đã chọn.";
-"prefs.import_prefs.success" = "Đã nhập tuỳ chọn. Vẫn có thể cần respring để áp dụng một số thay đổi.";
+"prefs.import_prefs.success" = "Đã nhập và áp dụng tuỳ chọn ngay lập tức.";
+"prefs.live_applied.toast" = "Cài đặt đã được áp dụng ngay. Nếu hiển thị bất thường, hãy thử khởi động lại SpringBoard.";
 "prefs.export_prefs.error" = "Không thể tạo gói xuất tuỳ chọn để chia sẻ.";
 "prefs.reopen_settings.title" = "Mở lại Cài đặt";
 "prefs.reopen_settings.body" = "Thay đổi này sẽ chỉ áp dụng khi Cài đặt khởi động lại. Mở lại Cài đặt ngay bây giờ?";
@@ -97,7 +98,7 @@
 "prefs.surface.app_library.title" = "App Library";
 "prefs.surface.app_library.subtitle" = "Các tuỳ chỉnh kính cho những bề mặt thuộc App Library.";
 "prefs.misc.respring.title" = "Respring";
-"prefs.misc.respring.subtitle" = "Hãy respring sau khi thay đổi nếu bạn đang ở iOS 16 trở lên vì cập nhật trực tiếp vẫn bị lỗi.";
+"prefs.misc.respring.subtitle" = "Khởi động lại SpringBoard và dịch vụ kết xuất liên quan.";
 "prefs.misc.about.title" = "Tùy chọn khác";
 "prefs.misc.about.subtitle" = "Điều khiển bổ sung và tùy chọn nâng cao.";
 "prefs.misc.prefs_settings.title" = "Giới thiệu";
@@ -166,7 +167,6 @@
 "prefs.global_controls.segmented.subtitle" = "Add liquid selection behavior to segmented controls.";
 
 /* TODO: Translate synced English fallback strings. */
-"prefs.button.more" = "More";
 
 /* TODO: Translate synced English fallback strings. */
 "prefs.app_icons_warning.title" = "Enable App Icons?";
@@ -174,3 +174,15 @@
 "prefs.app_icons_warning.confirm" = "Enable";
 "prefs.control.fresnel_glare" = "Fresnel Glare";
 "prefs.subtitle.fresnel_glare" = "Controls the edge glare added by the glass shader.";
+
+/* TODO: Translate synced English fallback strings. */
+"prefs.rwb.section.title" = "Remove Widget Background";
+"prefs.rwb.section.subtitle" = "Control widget background removal and compatibility behavior.";
+"prefs.rwb.enabled.title" = "Remove Widget Background";
+"prefs.rwb.enabled.subtitle" = "Remove backgrounds for widgets included in the RWB allowlist.";
+"prefs.rwb.force_dark.title" = "Force Dark Appearance";
+"prefs.rwb.force_dark.subtitle" = "Render handled widgets using the dark appearance.";
+"prefs.rwb.system_widgets.title" = "Include System Widgets";
+"prefs.rwb.system_widgets.subtitle" = "Allow RWB to process Apple system widgets in the allowlist.";
+"prefs.rwb.material_view.title" = "Hide Stack Material";
+"prefs.rwb.material_view.subtitle" = "Also hide supported widget stack material backgrounds. Experimental.";

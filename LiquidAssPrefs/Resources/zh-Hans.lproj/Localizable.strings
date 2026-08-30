@@ -69,11 +69,12 @@
 "prefs.reset_confirm.body" = "此操作会将所有偏好设置重置为默认值。确定要继续吗？";
 "prefs.reset_confirm.surface_body_format" = "这将把 %@ 的所有设置重置为默认值。确定要继续吗？";
 "prefs.respring_confirm.title" = "确认重启桌面";
-"prefs.respring_confirm.body" = "现在要重启桌面吗？某些应用或后台进程可能会被关闭。";
+"prefs.respring_confirm.body" = "此操作将重新启动 backboardd 与 SpringBoard，是否继续？";
 "prefs.import_prefs.error_invalid" = "剪贴板中不包含有效的 LiquidAss 偏好设置数据块。";
 "prefs.import_prefs.error_empty" = "导入的偏好设置数据块为空。";
 "prefs.import_prefs.error_read" = "无法读取选中的偏好设置文件。";
-"prefs.import_prefs.success" = "偏好设置已导入。某些更改可能需要重启 SpringBoard 才能生效。";
+"prefs.import_prefs.success" = "偏好设置已导入并实时应用。";
+"prefs.live_applied.toast" = "设置已实时应用。如遇显示异常，请尝试重启桌面。";
 "prefs.export_prefs.error" = "无法生成可共享的偏好设置导出文件。";
 "prefs.reopen_settings.title" = "重新打开设置";
 "prefs.reopen_settings.body" = "此更改将在下次打开“设置”时生效。现在重新打开“设置”吗？";
@@ -98,7 +99,7 @@
 "prefs.surface.app_library.title" = "App 资源库";
 "prefs.surface.app_library.subtitle" = "与 App 资源库表面相关的玻璃控制项。";
 "prefs.misc.respring.title" = "重启桌面";
-"prefs.misc.respring.subtitle" = "如果你使用 iOS 16 或更高版本，请在更改后重启 SpringBoard，因为实时更新功能已损坏。";
+"prefs.misc.respring.subtitle" = "重新启动 SpringBoard 与相关渲染服务。";
 "prefs.misc.about.title" = "更多选项";
 "prefs.misc.about.subtitle" = "附加控制项和高级偏好设置。";
 "prefs.misc.prefs_settings.title" = "关于";
@@ -109,6 +110,16 @@
 "prefs.misc.rwb_third_party.subtitle" = "输入小组件的 bundle ID 以加入 RWB 白名单。";
 "prefs.misc.rwb_third_party.editor_body" = "每行输入一个 bundle ID。";
 "prefs.misc.rwb_third_party.placeholder" = "com.example.widget\ncom.example.anotherwidget";
+"prefs.rwb.section.title" = "移除小组件背景";
+"prefs.rwb.section.subtitle" = "控制小组件背景移除及相关兼容行为。";
+"prefs.rwb.enabled.title" = "移除小组件背景";
+"prefs.rwb.enabled.subtitle" = "移除 RWB 白名单中小组件的背景。";
+"prefs.rwb.force_dark.title" = "强制深色外观";
+"prefs.rwb.force_dark.subtitle" = "使用深色外观渲染由 RWB 处理的小组件。";
+"prefs.rwb.system_widgets.title" = "包含系统小组件";
+"prefs.rwb.system_widgets.subtitle" = "允许 RWB 处理白名单中的 Apple 系统小组件。";
+"prefs.rwb.material_view.title" = "隐藏堆叠材质";
+"prefs.rwb.material_view.subtitle" = "同时隐藏受支持的小组件堆叠材质背景。实验性功能。";
 "prefs.misc.language.title" = "语言";
 "prefs.control_center.fullscreen_backdrop_blur_radius.title" = "全屏模糊半径";
 "prefs.control_center.fullscreen_backdrop_blur_radius.subtitle" = "限制控制中心背景材质的模糊程度。数值越低，模糊越轻。";
@@ -166,7 +177,6 @@
 "prefs.global_controls.segmented.subtitle" = "为分段控件添加液态选择行为。";
 
 /* TODO: Translate synced English fallback strings. */
-"prefs.button.more" = "更多选项";
 
 /* TODO: Translate synced English fallback strings. */
 "prefs.app_icons_warning.title" = "启用应用图标？";

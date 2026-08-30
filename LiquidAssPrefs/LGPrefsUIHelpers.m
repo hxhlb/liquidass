@@ -26,6 +26,9 @@ static NSURL *LGTemporaryPreferencesExportURL(void) {
     return [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:filename]];
 }
 
+static void *kLGLiveAppliedToastKey = &kLGLiveAppliedToastKey;
+static void *kLGLiveAppliedToastGenerationKey = &kLGLiveAppliedToastGenerationKey;
+
 @interface LGSliderResetAnimator : NSObject
 @property (nonatomic, weak) UISlider *slider;
 @property (nonatomic, weak) UILabel *valueLabel;
@@ -193,13 +196,88 @@ void LGApplyNavigationBarAppearance(UINavigationItem *navigationItem) {
     }
 }
 
+void LGShowLiveAppliedToast(UIViewController *controller) {
+    if (!controller.view.window) return;
+    if (controller.navigationController &&
+        controller.navigationController.topViewController != controller) return;
+
+    UIVisualEffectView *toast = objc_getAssociatedObject(controller, kLGLiveAppliedToastKey);
+    UILabel *label = nil;
+    if (!toast) {
+        toast = [[UIVisualEffectView alloc]
+            initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterial]];
+        toast.translatesAutoresizingMaskIntoConstraints = NO;
+        toast.userInteractionEnabled = NO;
+        toast.layer.cornerRadius = 16.0;
+        toast.layer.cornerCurve = kCACornerCurveContinuous;
+        toast.layer.masksToBounds = YES;
+        toast.alpha = 0.0;
+        toast.transform = CGAffineTransformMakeTranslation(0.0, 8.0);
+
+        label = [[UILabel alloc] initWithFrame:CGRectZero];
+        label.tag = 1701;
+        label.translatesAutoresizingMaskIntoConstraints = NO;
+        label.numberOfLines = 0;
+        label.textAlignment = NSTextAlignmentCenter;
+        label.textColor = UIColor.labelColor;
+        label.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightSemibold];
+        [toast.contentView addSubview:label];
+        [controller.view addSubview:toast];
+
+        UILayoutGuide *guide = controller.view.safeAreaLayoutGuide;
+        [NSLayoutConstraint activateConstraints:@[
+            [toast.centerXAnchor constraintEqualToAnchor:guide.centerXAnchor],
+            [toast.leadingAnchor constraintGreaterThanOrEqualToAnchor:guide.leadingAnchor constant:20.0],
+            [toast.trailingAnchor constraintLessThanOrEqualToAnchor:guide.trailingAnchor constant:-20.0],
+            [toast.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor constant:-18.0],
+            [label.topAnchor constraintEqualToAnchor:toast.contentView.topAnchor constant:10.0],
+            [label.leadingAnchor constraintEqualToAnchor:toast.contentView.leadingAnchor constant:16.0],
+            [label.trailingAnchor constraintEqualToAnchor:toast.contentView.trailingAnchor constant:-16.0],
+            [label.bottomAnchor constraintEqualToAnchor:toast.contentView.bottomAnchor constant:-10.0],
+        ]];
+        objc_setAssociatedObject(controller, kLGLiveAppliedToastKey, toast,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    } else {
+        label = (UILabel *)[toast.contentView viewWithTag:1701];
+    }
+
+    label.text = LGLocalized(@"prefs.live_applied.toast");
+    NSUInteger generation =
+        [objc_getAssociatedObject(controller, kLGLiveAppliedToastGenerationKey) unsignedIntegerValue] + 1;
+    objc_setAssociatedObject(controller, kLGLiveAppliedToastGenerationKey, @(generation),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [controller.view bringSubviewToFront:toast];
+    [UIView animateWithDuration:0.18 animations:^{
+        toast.alpha = 1.0;
+        toast.transform = CGAffineTransformIdentity;
+    }];
+
+    __weak UIViewController *weakController = controller;
+    __weak UIVisualEffectView *weakToast = toast;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.4 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        UIViewController *strongController = weakController;
+        UIVisualEffectView *strongToast = weakToast;
+        if (!strongController || !strongToast) return;
+        NSUInteger currentGeneration =
+            [objc_getAssociatedObject(strongController, kLGLiveAppliedToastGenerationKey)
+                unsignedIntegerValue];
+        if (currentGeneration != generation) return;
+        [UIView animateWithDuration:0.2 animations:^{
+            strongToast.alpha = 0.0;
+            strongToast.transform = CGAffineTransformMakeTranslation(0.0, 8.0);
+        }];
+    });
+}
+
 void LGInstallScrollableStack(UIViewController *controller,
                               CGFloat topInset,
                               CGFloat stackSpacing,
                               UIScrollView *__strong *scrollViewOut,
                               UIStackView *__strong *stackViewOut) {
-    UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:controller.view.bounds];
-    scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:CGRectZero];
+    scrollView.translatesAutoresizingMaskIntoConstraints = NO;
+    scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
     [controller.view addSubview:scrollView];
 
     UIStackView *stackView = [[UIStackView alloc] initWithFrame:CGRectZero];
@@ -208,7 +286,12 @@ void LGInstallScrollableStack(UIViewController *controller,
     stackView.translatesAutoresizingMaskIntoConstraints = NO;
     [scrollView addSubview:stackView];
 
+    UILayoutGuide *safeArea = controller.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
+        [scrollView.topAnchor constraintEqualToAnchor:safeArea.topAnchor],
+        [scrollView.leadingAnchor constraintEqualToAnchor:controller.view.leadingAnchor],
+        [scrollView.trailingAnchor constraintEqualToAnchor:controller.view.trailingAnchor],
+        [scrollView.bottomAnchor constraintEqualToAnchor:controller.view.bottomAnchor],
         [stackView.topAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.topAnchor constant:topInset],
         [stackView.leadingAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.leadingAnchor constant:16.0],
         [stackView.trailingAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.trailingAnchor constant:-16.0],
@@ -411,33 +494,11 @@ UIBarButtonItem *LGMakeCircularBackItem(id target, SEL action) {
     return [[UIBarButtonItem alloc] initWithCustomView:button];
 }
 
-UIBarButtonItem *LGMakeCircularMenuItem(id target, SEL applyAction, SEL resetAction, NSString *resetTitle) {
-    __weak id weakTarget = target;
-    UIAction *apply = [UIAction actionWithTitle:LGLocalized(@"prefs.button.apply")
-                                           image:[UIImage systemImageNamed:@"checkmark"]
-                                      identifier:nil
-                                         handler:^(__kindof UIAction *action) {
-        (void)action;
-        id strongTarget = weakTarget;
-        if (strongTarget && [strongTarget respondsToSelector:applyAction]) {
-            ((void (*)(id, SEL))objc_msgSend)(strongTarget, applyAction);
-        }
-    }];
-    UIAction *reset = [UIAction actionWithTitle:(resetTitle.length ? resetTitle : LGLocalized(@"prefs.button.reset"))
-                                           image:[UIImage systemImageNamed:@"arrow.counterclockwise"]
-                                      identifier:nil
-                                         handler:^(__kindof UIAction *action) {
-        (void)action;
-        id strongTarget = weakTarget;
-        if (strongTarget && [strongTarget respondsToSelector:resetAction]) {
-            ((void (*)(id, SEL))objc_msgSend)(strongTarget, resetAction);
-        }
-    }];
-    UIMenu *menu = [UIMenu menuWithTitle:@"" children:@[ apply, reset ]];
+UIBarButtonItem *LGMakeCircularMenuItem(id target, SEL resetAction, NSString *resetTitle) {
     LGLiveGlassBarButton *button = [[LGLiveGlassBarButton alloc]
-        initWithTarget:nil action:nil symbolName:@"line.3.horizontal"];
-    [button setPrimaryMenu:menu];
-    button.accessibilityLabel = LGLocalized(@"prefs.button.more");
+        initWithTarget:target action:resetAction symbolName:@"arrow.counterclockwise"];
+    button.accessibilityLabel = resetTitle.length
+        ? resetTitle : LGLocalized(@"prefs.button.reset");
     UIBarButtonItem *item = [[UIBarButtonItem alloc] initWithCustomView:button];
     item.accessibilityLabel = button.accessibilityLabel;
     return item;

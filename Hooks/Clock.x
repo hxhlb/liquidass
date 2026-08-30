@@ -16,6 +16,8 @@ extern NSString *LG_prefString(NSString *key, NSString *fallback);
 #define LG_FLOAT_PREF_FUNC(fn, key, def)        static CGFloat fn(void) { return LG_prefFloat(@key, (CGFloat)(def)); }
 #define LG_BOOL_PREF_FUNC(fn, key, def)         static BOOL fn(void) { return LG_prefBool(@key, (def)); }
 
+static BOOL LGClockEnabled(void);
+
 static void LGClockLog(NSString *fmt, ...) NS_FORMAT_FUNCTION(1,2);
 static void LGClockLog(NSString *fmt, ...) {
     va_list ap; va_start(ap, fmt);
@@ -236,13 +238,18 @@ static void LGScheduleClockRefreshForLegacyRevealHint(UIView *view);
 - (void)refreshForDisplayLink;
 @end
 
-LG_BOOL_PREF_FUNC(LGClockVariableFontEnabled, "Clock.VariableFont.Enabled", YES)
+static BOOL LGClockVariableFontEnabled(void) {
+    return LGClockEnabled() && LG_prefBool(@"Clock.VariableFont.Enabled", YES);
+}
 LG_FLOAT_PREF_FUNC(LGClockVariableFontSizeScale, "Clock.VariableFont.SizeScale", 1.4)
 LG_FLOAT_PREF_FUNC(LGClockVariableFontWeight, "Clock.VariableFont.Weight", 750.0)
 LG_FLOAT_PREF_FUNC(LGClockVariableFontWidth, "Clock.VariableFont.Width", 100.0)
 LG_FLOAT_PREF_FUNC(LGClockVariableFontHeight, "Clock.VariableFont.Height", 350.0)
 LG_FLOAT_PREF_FUNC(LGClockVariableFontSoftness, "Clock.VariableFont.Softness", 56.0)
-LG_BOOL_PREF_FUNC(LGClockDateFormatEnabled, "Lockscreen.Clock.DateFormat.Enabled", YES)
+static BOOL LGClockDateFormatEnabled(void) {
+    return LGClockEnabled() &&
+           LG_prefBool(@"Lockscreen.Clock.DateFormat.Enabled", YES);
+}
 
 static BOOL LGClockViewIsVisiblyPresent(UIView *view);
 static BOOL LGClockHasBlockingPresentation(UIView *host);
