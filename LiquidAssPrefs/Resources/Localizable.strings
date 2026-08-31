@@ -178,3 +178,7 @@
 "prefs.section.keyboard_geometry.subtitle" = "Shape and spacing for the keyboard glass.";
 "prefs.control.keyboard_overhang" = "Overhang";
 "prefs.subtitle.keyboard_overhang" = "Extra height reserved above the keyboard when the prediction bar is hidden.";
+"prefs.section.app_icons_ex.title" = "Icon Highlights";
+"prefs.surface.app_icons_ex.subtitle" = "Adds subtle, adaptive highlights to Home Screen app icons.";
+"prefs.control.highlight_intensity" = "Highlight Intensity";
+"prefs.subtitle.highlight_intensity" = "Controls the strength of the icon edge highlight.";

@@ -186,3 +186,7 @@
 "prefs.rwb.system_widgets.subtitle" = "Allow RWB to process Apple system widgets in the allowlist.";
 "prefs.rwb.material_view.title" = "Hide Stack Material";
 "prefs.rwb.material_view.subtitle" = "Also hide supported widget stack material backgrounds. Experimental.";
+"prefs.section.app_icons_ex.title" = "Reflejos de iconos";
+"prefs.surface.app_icons_ex.subtitle" = "Añade reflejos sutiles y adaptativos a los iconos de la pantalla de inicio.";
+"prefs.control.highlight_intensity" = "Intensidad del reflejo";
+"prefs.subtitle.highlight_intensity" = "Controla la intensidad del reflejo en el borde del icono.";

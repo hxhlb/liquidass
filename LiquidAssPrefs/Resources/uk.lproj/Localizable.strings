@@ -186,3 +186,7 @@
 "prefs.rwb.system_widgets.subtitle" = "Allow RWB to process Apple system widgets in the allowlist.";
 "prefs.rwb.material_view.title" = "Hide Stack Material";
 "prefs.rwb.material_view.subtitle" = "Also hide supported widget stack material backgrounds. Experimental.";
+"prefs.section.app_icons_ex.title" = "Відблиски іконок";
+"prefs.surface.app_icons_ex.subtitle" = "Додає делікатні адаптивні відблиски до іконок на початковому екрані.";
+"prefs.control.highlight_intensity" = "Інтенсивність відблиску";
+"prefs.subtitle.highlight_intensity" = "Керує яскравістю відблиску по краях іконки.";

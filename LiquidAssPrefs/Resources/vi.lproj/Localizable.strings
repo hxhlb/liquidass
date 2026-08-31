@@ -186,3 +186,7 @@
 "prefs.rwb.system_widgets.subtitle" = "Allow RWB to process Apple system widgets in the allowlist.";
 "prefs.rwb.material_view.title" = "Hide Stack Material";
 "prefs.rwb.material_view.subtitle" = "Also hide supported widget stack material backgrounds. Experimental.";
+"prefs.section.app_icons_ex.title" = "Điểm sáng biểu tượng";
+"prefs.surface.app_icons_ex.subtitle" = "Thêm điểm sáng tinh tế, thích ứng cho biểu tượng trên Màn hình chính.";
+"prefs.control.highlight_intensity" = "Cường độ vùng sáng";
+"prefs.subtitle.highlight_intensity" = "Điều chỉnh độ mạnh của vùng sáng ở viền biểu tượng.";

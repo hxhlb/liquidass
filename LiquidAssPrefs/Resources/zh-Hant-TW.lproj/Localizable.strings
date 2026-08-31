@@ -200,3 +200,7 @@
 "prefs.app_icons_warning.confirm" = "Enable";
 "prefs.control.fresnel_glare" = "Fresnel Glare";
 "prefs.subtitle.fresnel_glare" = "Controls the edge glare added by the glass shader.";
+"prefs.section.app_icons_ex.title" = "圖示高光";
+"prefs.surface.app_icons_ex.subtitle" = "為主畫面 App 圖示加入細緻的自適應高光。";
+"prefs.control.highlight_intensity" = "高光強度";
+"prefs.subtitle.highlight_intensity" = "控制 App 圖示邊緣高光的強弱。";

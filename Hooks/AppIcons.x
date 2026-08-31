@@ -10,13 +10,17 @@ static void *kLGAppIconGlassKey = &kLGAppIconGlassKey;
 
 static BOOL LGIsAppIconImageView(UIView *view) {
     if (!view || !isExactClass(view, @"SBIconImageView")) return NO;
-    if (fabs(CGRectGetWidth(view.bounds) - 60.0) > 0.5 ||
-        fabs(CGRectGetHeight(view.bounds) - 60.0) > 0.5) return NO;
+    CGSize size = view.bounds.size;
+    if (!isfinite(size.width) || !isfinite(size.height) ||
+        size.width <= 1.0 || size.height <= 1.0 ||
+        fabs(size.width - size.height) > 1.0) return NO;
 
     UIView *parent = view.superview;
     UIView *grandparent = parent.superview;
-    Class iconViewClass = NSClassFromString(@"SBIconView");
-    return iconViewClass && grandparent && [grandparent isKindOfClass:iconViewClass];
+    // App Library pods subclass SBIconView and already have their own upstream
+    // surface treatment. Exact classes keep this path on Home Screen and Dock.
+    return isExactClass(parent, @"SBFTouchPassThroughView") &&
+           isExactClass(grandparent, @"SBIconView");
 }
 
 static void LGRemoveAppIconGlass(UIView *iconView) {
@@ -46,8 +50,9 @@ static void LGInstallAppIconGlass(UIView *iconView) {
     }
 
     if (glass.superview != parent) [glass removeFromSuperview];
-    // the source icon stays visible above its glass underlay
-    [parent insertSubview:glass belowSubview:iconView];
+    // The live backdrop must sit above the opaque icon image so it can sample
+    // and refract the icon itself. As an underlay it renders but is invisible.
+    [parent insertSubview:glass aboveSubview:iconView];
     glass.frame = iconView.frame;
 
     CGFloat folderRadius = LGFolderIconCornerRadiusFallback();

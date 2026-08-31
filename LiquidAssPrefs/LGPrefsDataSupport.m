@@ -641,6 +641,19 @@ NSArray<NSDictionary *> *LGAppIconItems(void) {
     ]);
 }
 
+NSArray<NSDictionary *> *LGAppIconExItems(void) {
+    return @[
+        LGGlassEnabledSetting(@"AppIconsEx.Enabled", NO),
+        LGSliderSetting(@"AppIconsEx.Intensity",
+                        LGLocalized(@"prefs.control.highlight_intensity"),
+                        LGLocalized(@"prefs.subtitle.highlight_intensity"),
+                        0.65, 0.0, 1.0, 2),
+        LGSwitchSetting(@"AppIconsEx.Motion.Enabled",
+                        LGLocalized(@"prefs.control.motion_highlights"),
+                        LGLocalized(@"prefs.subtitle.motion_highlights"), NO),
+    ];
+}
+
 NSArray<NSDictionary *> *LGSearchPillItems(void) {
     return LGRendererItemsForHostPrefix(@"SearchPill");
 }
@@ -805,6 +818,8 @@ NSArray<NSDictionary *> *LGHomescreenItems(void) {
     [rendererItems addObjectsFromArray:LGDockItems()];
     [rendererItems addObjectsFromArray:LGFolderItems()];
     [rendererItems addObjectsFromArray:LGAppIconItems()];
+    [rendererItems addObject:LGSectionSetting(LGLocalized(@"prefs.section.app_icons_ex.title"), nil)];
+    [rendererItems addObjectsFromArray:LGAppIconExItems()];
     [rendererItems addObject:LGSectionSetting(LGLocalized(@"prefs.section.context_menu.title"), nil)];
     [rendererItems addObjectsFromArray:LGContextMenuItems()];
     [rendererItems addObject:LGSectionSetting(LGLocalized(@"prefs.section.alerts.title"), nil)];

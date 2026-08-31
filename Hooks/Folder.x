@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import <QuartzCore/QuartzCore.h>
 #import <math.h>
 #import "../Shared/LGLiveBackdropView.h"
 #import "../Shared/LGGlassKit.h"
@@ -26,6 +27,8 @@ static BOOL isOpenFolderMaterial(UIView *mat) {
 static NSHashTable<UIView *> *sFolderIconGlasses;
 static NSHashTable<UIView *> *sFolderIconMaterials;
 static NSHashTable<UIView *> *sOpenFolderMaterials;
+
+static void refreshOpenFolderHierarchy(UIView *root, BOOL forceFilterRefresh);
 
 CGFloat LGFolderIconCornerRadiusFallback(void) {
     // app icon glass borrows this when its image view exposes no radius
@@ -81,16 +84,67 @@ static void injectFolderIcon(UIView *mat) {
 }
 
 static void injectOpenFolder(UIView *mat) {
-    if (!LGInstallRegisteredGlassInMaterial(mat, kGlassKey, @"OpenFolder",
-                                            UIEdgeInsetsZero, -1.0, nil)) {
+    LGLiveBackdropView *glass = LGInstallRegisteredGlassInMaterial(
+        mat, kGlassKey, @"OpenFolder", UIEdgeInsetsZero, -1.0, nil);
+    if (!glass) {
         [sOpenFolderMaterials removeObject:mat];
         if (!anyOpenFolderActive()) fadeInFolderIconGlasses();
         return;
     }
+
+    UIView *parent = mat.superview;
+    if (parent && glass.superview == parent) {
+        NSUInteger materialIndex = [parent.subviews indexOfObjectIdenticalTo:mat];
+        NSUInteger glassIndex = [parent.subviews indexOfObjectIdenticalTo:glass];
+        if (materialIndex != NSNotFound &&
+            (glassIndex == NSNotFound || glassIndex <= materialIndex)) {
+            [parent insertSubview:glass aboveSubview:mat];
+        }
+    }
+    [glass applyFilters];
+    [glass.layer setNeedsDisplay];
+
     if (!sOpenFolderMaterials) sOpenFolderMaterials = [NSHashTable weakObjectsHashTable];
     if (![sOpenFolderMaterials containsObject:mat]) {
         [sOpenFolderMaterials addObject:mat];
         hideFolderIconGlasses();
+    }
+}
+
+static void refreshOpenFolderHierarchy(UIView *root, BOOL forceFilterRefresh) {
+    if (!root.window) return;
+
+    NSMutableArray<UIView *> *pending = [NSMutableArray arrayWithObject:root];
+    while (pending.count) {
+        UIView *view = pending.lastObject;
+        [pending removeLastObject];
+        if (view.subviews.count) [pending addObjectsFromArray:view.subviews];
+        if (!isExactClass(view, @"MTMaterialView") || !isOpenFolderMaterial(view)) continue;
+
+        injectOpenFolder(view);
+        if (!forceFilterRefresh) continue;
+
+        LGLiveBackdropView *glass = objc_getAssociatedObject(view, kGlassKey);
+        if (!glass) continue;
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        glass.layer.filters = nil;
+        [glass applyFilters];
+        [glass.layer setNeedsDisplay];
+        [CATransaction commit];
+    }
+}
+
+static void scheduleOpenFolderRefreshes(UIView *background) {
+    __weak UIView *weakBackground = background;
+    for (NSNumber *delay in @[@0.0, @0.16, @0.38, @0.72]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                     (int64_t)(delay.doubleValue * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            UIView *strongBackground = weakBackground;
+            if (!strongBackground.window) return;
+            refreshOpenFolderHierarchy(strongBackground, delay.doubleValue > 0.0);
+        });
     }
 }
 
@@ -116,4 +170,19 @@ static void injectOpenFolder(UIView *mat) {
     if (isFolderIconMaterial(self_))      injectFolderIcon(self_);
     else if (isOpenFolderMaterial(self_)) injectOpenFolder(self_);
 }
+%end
+
+%hook SBFolderBackgroundView
+
+- (void)didMoveToWindow {
+    %orig;
+    UIView *self_ = (UIView *)self;
+    if (self_.window) scheduleOpenFolderRefreshes(self_);
+}
+
+- (void)layoutSubviews {
+    %orig;
+    refreshOpenFolderHierarchy((UIView *)self, NO);
+}
+
 %end

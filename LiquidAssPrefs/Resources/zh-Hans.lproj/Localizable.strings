@@ -184,3 +184,7 @@
 "prefs.app_icons_warning.confirm" = "启用";
 "prefs.control.fresnel_glare" = "菲涅尔眩光";
 "prefs.subtitle.fresnel_glare" = "控制玻璃着色器添加的边缘眩光。";
+"prefs.section.app_icons_ex.title" = "图标高光";
+"prefs.surface.app_icons_ex.subtitle" = "为主屏幕应用图标添加细腻的自适应高光。";
+"prefs.control.highlight_intensity" = "高光强度";
+"prefs.subtitle.highlight_intensity" = "控制应用图标边缘高光的强弱。";
