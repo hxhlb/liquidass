@@ -704,35 +704,23 @@ static void LGProcessIOS26FolderMiniLayer(CALayer *layer, NSInteger depth) {
     }
 }
 
-static NSArray<CALayer *> *LGIOS26FolderMiniLayersForElement(id element) {
-    SEL gridLayerSelector = NSSelectorFromString(@"gridLayer");
-    if (![element respondsToSelector:gridLayerSelector]) return @[];
-    CALayer *gridLayer = ((id (*)(id, SEL))objc_msgSend)(element, gridLayerSelector);
-    return [gridLayer.sublayers isKindOfClass:NSArray.class]
-        ? gridLayer.sublayers : @[];
-}
-
-static NSArray<CALayer *> *LGIOS26AllFolderMiniLayers(UIView *folderView) {
-    SEL pageElementsSelector = NSSelectorFromString(@"pageElements");
-    if (![folderView respondsToSelector:pageElementsSelector]) return @[];
-    id pageElements = ((id (*)(id, SEL))objc_msgSend)(folderView, pageElementsSelector);
-    if (![pageElements isKindOfClass:NSArray.class]) return @[];
-    NSMutableArray<CALayer *> *layers = [NSMutableArray array];
-    for (id element in (NSArray *)pageElements) {
-        [layers addObjectsFromArray:LGIOS26FolderMiniLayersForElement(element)];
-    }
-    return layers;
-}
-
 static void LGRestoreIOS26FolderView(UIView *folderView) {
-    for (CALayer *layer in LGIOS26AllFolderMiniLayers(folderView)) {
-        LGRestoreIOS26FolderMiniLayer(layer, 0);
-    }
+    LGRestoreIOS26FolderMiniLayer(folderView.layer, 0);
 }
 
 static void LGTrackIOS26FolderView(UIView *folderView) {
     if (!sLGIOS26FolderViews) sLGIOS26FolderViews = [NSHashTable weakObjectsHashTable];
     if (folderView) [sLGIOS26FolderViews addObject:folderView];
+}
+
+static void LGRefreshIOS26FolderPresentation(UIView *folderView) {
+    if (!folderView.layer) return;
+    LGTrackIOS26FolderView(folderView);
+    if (!LGIOS26Enabled()) {
+        LGRestoreIOS26FolderView(folderView);
+        return;
+    }
+    LGProcessIOS26FolderMiniLayer(folderView.layer, 0);
 }
 
 static void LGApplyIOS26LibraryGridAppearance(UIView *view) {
@@ -1182,19 +1170,20 @@ static void LGScheduleIOS26AppearanceRefresh(void) {
 
 - (void)fulfillGridImageForPageElement:(id)element {
     %orig;
-    LGTrackIOS26FolderView((UIView *)self);
+    LGRefreshIOS26FolderPresentation((UIView *)self);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        LGRefreshIOS26FolderPresentation((UIView *)self);
+    });
 }
 
 - (void)fulfillGridLayerForPageElement:(id)element {
     %orig;
-    LGTrackIOS26FolderView((UIView *)self);
-    if (!LGIOS26Enabled()) {
-        LGRestoreIOS26FolderView((UIView *)self);
-        return;
-    }
-    for (CALayer *layer in LGIOS26FolderMiniLayersForElement(element)) {
-        LGProcessIOS26FolderMiniLayer(layer, 0);
-    }
+    LGRefreshIOS26FolderPresentation((UIView *)self);
+}
+
+- (void)layoutSubviews {
+    %orig;
+    LGRefreshIOS26FolderPresentation((UIView *)self);
 }
 
 - (void)prepareForReuse {
