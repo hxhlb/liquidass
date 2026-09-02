@@ -190,3 +190,17 @@
 "prefs.surface.app_icons_ex.subtitle" = "Добавляет тонкие адаптивные блики на значки экрана «Домой».";
 "prefs.control.highlight_intensity" = "Интенсивность блика";
 "prefs.subtitle.highlight_intensity" = "Управляет яркостью блика по краям иконки.";
+"prefs.section.ios26_icons.title" = "Иконки iOS 26";
+"prefs.surface.ios26_icons.subtitle" = "Воссоздаёт прозрачные и цветные иконки. Несовместимо с Иконками приложений и Бликами значков.";
+"prefs.control.icon_mode" = "Режим иконок";
+"prefs.subtitle.icon_mode" = "Выберите стиль прозрачного отображения иконок.";
+"prefs.control.icon_algorithm" = "Алгоритм отрисовки";
+"prefs.subtitle.icon_algorithm" = "Apple Mitigated повторяет обработку старых иконок в iOS 27. Старый алгоритм возвращает прежнее отделение фона.";
+"prefs.option.apple_mitigated" = "Apple Mitigated";
+"prefs.option.legacy_algorithm" = "Старый алгоритм";
+"prefs.option.clear" = "Прозрачный";
+"prefs.option.tinted" = "Тонированный";
+"prefs.control.tint_hue" = "Оттенок";
+"prefs.subtitle.tint_hue" = "Выберите общий цвет прозрачного стекла значков.";
+"prefs.control.tint_intensity" = "Интенсивность оттенка";
+"prefs.subtitle.tint_intensity" = "Настройте силу окрашивания прозрачного стекла.";

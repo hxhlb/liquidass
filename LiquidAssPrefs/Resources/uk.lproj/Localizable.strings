@@ -190,3 +190,17 @@
 "prefs.surface.app_icons_ex.subtitle" = "Додає делікатні адаптивні відблиски до іконок на початковому екрані.";
 "prefs.control.highlight_intensity" = "Інтенсивність відблиску";
 "prefs.subtitle.highlight_intensity" = "Керує яскравістю відблиску по краях іконки.";
+"prefs.section.ios26_icons.title" = "Іконки iOS 26";
+"prefs.surface.ios26_icons.subtitle" = "Відтворює прозорі та кольорові іконки. Несумісно з Іконками програм і Відблисками іконок.";
+"prefs.control.icon_mode" = "Режим іконок";
+"prefs.subtitle.icon_mode" = "Виберіть стиль прозорого відображення іконок.";
+"prefs.control.icon_algorithm" = "Алгоритм промальовування";
+"prefs.subtitle.icon_algorithm" = "Apple Mitigated відтворює обробку старих іконок в iOS 27. Старий алгоритм повертає попереднє відокремлення фону.";
+"prefs.option.apple_mitigated" = "Apple Mitigated";
+"prefs.option.legacy_algorithm" = "Старий алгоритм";
+"prefs.option.clear" = "Прозорий";
+"prefs.option.tinted" = "Тонований";
+"prefs.control.tint_hue" = "Відтінок";
+"prefs.subtitle.tint_hue" = "Виберіть спільний колір прозорого скла іконок.";
+"prefs.control.tint_intensity" = "Інтенсивність відтінку";
+"prefs.subtitle.tint_intensity" = "Налаштуйте силу забарвлення прозорого скла.";

@@ -54,6 +54,7 @@ NSArray<NSDictionary *> *LGRendererItemsForHostPrefix(NSString *prefix);
 NSArray<NSDictionary *> *LGFolderItems(void);
 NSArray<NSDictionary *> *LGAppIconItems(void);
 NSArray<NSDictionary *> *LGAppIconExItems(void);
+NSArray<NSDictionary *> *LGIOS26IconItems(void);
 NSArray<NSDictionary *> *LGSearchPillItems(void);
 NSArray<NSDictionary *> *LGContextMenuItems(void);
 NSArray<NSDictionary *> *LGControlCenterItems(void);

@@ -7,6 +7,12 @@
 static const CGFloat kWidgetCornerRadius = 20.2;
 static void *kWidgetGlassKey = &kWidgetGlassKey;
 static void *kWidgetContainerStateKey = &kWidgetContainerStateKey;
+static void *kLegacyWidgetHostKey = &kLegacyWidgetHostKey;
+
+static BOOL widgetUsesLegacyDirectGlass(void) {
+    NSInteger majorVersion = NSProcessInfo.processInfo.operatingSystemVersion.majorVersion;
+    return majorVersion == 15 || majorVersion == 16;
+}
 
 @interface CHSWidget : NSObject
 @property (nonatomic, copy, readonly) NSString *extensionBundleIdentifier;
@@ -18,6 +24,19 @@ static void *kWidgetContainerStateKey = &kWidgetContainerStateKey;
 
 @interface CHUISAvocadoHostViewController : UIViewController
 @property (nonatomic, copy) CHSWidget *widget;
+- (NSInteger)_expectedBackgroundViewMode;
+- (void)setBackgroundViewMode:(NSInteger)mode;
+@end
+
+@interface SBHWidgetWrapperView : UIView
+@property (nonatomic, readonly) UIView *containerView;
+@property (nonatomic, readonly) UIView *contentView;
+@property (nonatomic, readonly) UIView *shadowedWidgetView;
+@end
+
+@interface SBHWidgetWrapperBackgroundView : UIView
+@property (nonatomic, readonly) UIView *underlyingBackgroundView;
+@property (nonatomic, readonly) UIView *widgetBackgroundView;
 @end
 
 static UIViewController *widgetNearestStackController(UIView *view) {
@@ -52,6 +71,7 @@ static UIView *widgetFindDescendantNamed(UIView *view, NSString *name) {
 }
 
 static BOOL isWidgetGlassHostContainer(UIView *view) {
+    if (widgetUsesLegacyDirectGlass()) return NO;
     // widget internals vary so use the nearest stable container
     if (!isExactClass(view, @"UIView")) return NO;
     if (view.bounds.size.width < 120.0 || view.bounds.size.height < 120.0) return NO;
@@ -75,6 +95,7 @@ static UIView *widgetAncestorContainerHost(UIView *view) {
 }
 
 static BOOL isWidgetStackBackgroundMaterial(UIView *mat) {
+    if (widgetUsesLegacyDirectGlass()) return NO;
     // stack backgrounds stay stock so child widgets keep separate lenses
     if (!isExactClass(mat, @"MTMaterialView")) return NO;
     UIView *parent = mat.superview;
@@ -132,6 +153,75 @@ static void injectWidgetGlass(UIView *container) {
     lgTrackGlass(glass, @"Widgets", nil);
 }
 
+static void removeLegacyWidgetGlass(SBHWidgetWrapperView *wrapper) {
+    UIView *host = objc_getAssociatedObject(wrapper, kLegacyWidgetHostKey);
+    LGLiveBackdropView *glass = host
+        ? objc_getAssociatedObject(host, kWidgetGlassKey) : nil;
+    [glass removeFromSuperview];
+    if (host) objc_setAssociatedObject(host, kWidgetGlassKey, nil,
+                                       OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(wrapper, kLegacyWidgetHostKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+}
+
+static UIView *legacyWidgetHost(SBHWidgetWrapperView *wrapper) {
+    UIView *host = nil;
+    if ([wrapper respondsToSelector:@selector(containerView)])
+        host = wrapper.containerView;
+    if (!host && [wrapper respondsToSelector:@selector(shadowedWidgetView)])
+        host = wrapper.shadowedWidgetView;
+    return host;
+}
+
+static void updateLegacyWidgetWrapper(SBHWidgetWrapperView *wrapper) {
+    UIView *host = legacyWidgetHost(wrapper);
+    UIView *previousHost = objc_getAssociatedObject(wrapper, kLegacyWidgetHostKey);
+    if (previousHost && previousHost != host) removeLegacyWidgetGlass(wrapper);
+    if (!widgetUsesLegacyDirectGlass() || !lgHostEnabled(@"Widgets") ||
+        !wrapper.window || !host || CGRectIsEmpty(host.bounds) ||
+        host.bounds.size.width < 100.0 || host.bounds.size.height < 100.0) {
+        removeLegacyWidgetGlass(wrapper);
+        return;
+    }
+
+    LGLiveBackdropView *glass = objc_getAssociatedObject(host, kWidgetGlassKey);
+    if (!glass) {
+        glass = LGCreateRegisteredGlass(host.bounds, nil, @"Widgets");
+        if (!glass) return;
+        glass.autoresizingMask = UIViewAutoresizingFlexibleWidth |
+                                UIViewAutoresizingFlexibleHeight;
+        objc_setAssociatedObject(host, kWidgetGlassKey, glass,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        lgTrackGlass(glass, @"Widgets", nil);
+    }
+    if (glass.superview != host) [host insertSubview:glass atIndex:0];
+    else if (host.subviews.firstObject != glass) [host sendSubviewToBack:glass];
+    glass.frame = host.bounds;
+    glass.layer.cornerRadius = kWidgetCornerRadius;
+    glass.layer.cornerCurve = kCACornerCurveContinuous;
+    glass.layer.masksToBounds = YES;
+    [glass applyFilters];
+    objc_setAssociatedObject(wrapper, kLegacyWidgetHostKey, host,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static void updateLegacyWidgetBackground(SBHWidgetWrapperBackgroundView *background) {
+    UIView *underlying = [background respondsToSelector:
+        @selector(underlyingBackgroundView)] ? background.underlyingBackgroundView : nil;
+    UIView *widget = [background respondsToSelector:
+        @selector(widgetBackgroundView)] ? background.widgetBackgroundView : nil;
+    BOOL suppress = widgetUsesLegacyDirectGlass() &&
+                    lgHostEnabled(@"Widgets") && background.window;
+    if (underlying) {
+        if (suppress) lgSuppressStock(underlying, @"Widgets", YES);
+        else underlying.hidden = NO;
+    }
+    if (widget) {
+        if (suppress) lgSuppressStock(widget, @"Widgets", YES);
+        else widget.hidden = NO;
+    }
+}
+
 #pragma mark - hooks
 
 %hook MTMaterialView
@@ -159,8 +249,20 @@ static void injectWidgetGlass(UIView *container) {
 
 %hook CHUISAvocadoHostViewController
 - (void)_updateBackgroundMaterialAndColor {
+    if (widgetUsesLegacyDirectGlass() && lgHostEnabled(@"Widgets")) {
+        [self setBackgroundViewMode:0];
+        return;
+    }
     if (lgHostEnabled(@"Widgets") && self.widget.extensionBundleIdentifier.length) return;
     %orig;
+}
+- (NSInteger)_expectedBackgroundViewMode {
+    if (widgetUsesLegacyDirectGlass() && lgHostEnabled(@"Widgets")) return 0;
+    return %orig;
+}
+- (void)setBackgroundViewMode:(NSInteger)mode {
+    if (widgetUsesLegacyDirectGlass() && lgHostEnabled(@"Widgets")) mode = 0;
+    %orig(mode);
 }
 - (id)screenshotManager {
     if (lgHostEnabled(@"Widgets") && self.widget.extensionBundleIdentifier.length) return nil;
@@ -202,3 +304,60 @@ static void injectWidgetGlass(UIView *container) {
     if (host) injectWidgetGlass(host);
 }
 %end
+
+%group LGLegacyWidgetWrapperLifecycle
+
+%hook SBHWidgetWrapperView
+
+- (void)didMoveToWindow {
+    %orig;
+    updateLegacyWidgetWrapper(self);
+}
+
+- (void)layoutSubviews {
+    %orig;
+    updateLegacyWidgetWrapper(self);
+}
+
+- (void)setContentView:(UIView *)contentView {
+    %orig;
+    updateLegacyWidgetWrapper(self);
+}
+
+%end
+
+
+%end
+
+
+%group LGLegacyWidgetBackgroundLifecycle
+
+%hook SBHWidgetWrapperBackgroundView
+
+- (void)didMoveToWindow {
+    %orig;
+    updateLegacyWidgetBackground(self);
+}
+
+- (void)layoutSubviews {
+    %orig;
+    updateLegacyWidgetBackground(self);
+}
+
+%end
+
+
+%end
+
+
+%ctor {
+    %init;
+    if (widgetUsesLegacyDirectGlass() &&
+        NSClassFromString(@"SBHWidgetWrapperView")) {
+        %init(LGLegacyWidgetWrapperLifecycle);
+    }
+    if (widgetUsesLegacyDirectGlass() &&
+        NSClassFromString(@"SBHWidgetWrapperBackgroundView")) {
+        %init(LGLegacyWidgetBackgroundLifecycle);
+    }
+}

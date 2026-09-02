@@ -184,3 +184,17 @@
 "prefs.surface.app_icons_ex.subtitle" = "Dodaje subtelne, adaptacyjne refleksy do ikon na ekranie początkowym.";
 "prefs.control.highlight_intensity" = "Intensywność podświetlenia";
 "prefs.subtitle.highlight_intensity" = "Steruje siłą podświetlenia krawędzi ikony.";
+"prefs.section.ios26_icons.title" = "Ikony iOS 26";
+"prefs.surface.ios26_icons.subtitle" = "Odtwarza przezroczyste i kolorowe ikony. Funkcja wyklucza Ikony aplikacji i Podświetlenia ikon.";
+"prefs.control.icon_mode" = "Tryb ikon";
+"prefs.subtitle.icon_mode" = "Wybierz styl przezroczystego renderowania ikon.";
+"prefs.control.icon_algorithm" = "Algorytm renderowania";
+"prefs.subtitle.icon_algorithm" = "Tryb Apple Mitigated odtwarza obsługę starszych ikon z iOS 27. Starszy algorytm przywraca poprzednie oddzielanie tła.";
+"prefs.option.apple_mitigated" = "Apple Mitigated";
+"prefs.option.legacy_algorithm" = "Starszy algorytm";
+"prefs.option.clear" = "Przezroczysty";
+"prefs.option.tinted" = "Barwiony";
+"prefs.control.tint_hue" = "Odcień barwy";
+"prefs.subtitle.tint_hue" = "Wybierz wspólny kolor przezroczystego szkła ikon.";
+"prefs.control.tint_intensity" = "Intensywność barwy";
+"prefs.subtitle.tint_intensity" = "Określ siłę zabarwienia przezroczystego szkła.";

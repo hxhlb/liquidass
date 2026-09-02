@@ -30,6 +30,9 @@ BOOL lgHostEnabled(NSString *prefix) {
     id global = LGGlassPreferenceValue(@"Global.Enabled");
     if (![prefix isEqualToString:@"Global"] &&
         (![global isKindOfClass:[NSNumber class]] || ![global boolValue])) return NO;
+    if (([prefix isEqualToString:@"AppIcons"] ||
+         [prefix isEqualToString:@"AppIconsEx"]) &&
+        [LGGlassPreferenceValue(@"IOS26Icons.Enabled") boolValue]) return NO;
     id v = LGGlassPreferenceValue([prefix stringByAppendingString:@".Enabled"]);
 
     if (!v) {
@@ -253,8 +256,16 @@ __attribute__((constructor)) static void lgGlassInitEnableObserver(void) {
     %orig(hidden);
 }
 
-- (void)setFrame:(CGRect)frame   { %orig(frame);  LGResyncGlassGeometry((UIView *)self, kGlassKey); }
-- (void)setBounds:(CGRect)bounds { %orig(bounds); LGResyncGlassGeometry((UIView *)self, kGlassKey); }
+- (void)setFrame:(CGRect)frame {
+    %orig(frame);
+    lgRouteMaterialHost((UIView *)self);
+    LGResyncGlassGeometry((UIView *)self, kGlassKey);
+}
+- (void)setBounds:(CGRect)bounds {
+    %orig(bounds);
+    lgRouteMaterialHost((UIView *)self);
+    LGResyncGlassGeometry((UIView *)self, kGlassKey);
+}
 - (void)setCenter:(CGPoint)center{ %orig(center); LGResyncGlassGeometry((UIView *)self, kGlassKey); }
 
 %end

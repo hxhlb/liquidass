@@ -49,8 +49,8 @@
 "prefs.section.control_center_fullscreen.title" = "全屏背景";
 "prefs.section.search_pill.title" = "搜索栏";
 "prefs.section.widgets.title" = "小组件";
-"prefs.section.category_pods.title" = "分类 Pod";
-"prefs.section.search_field.title" = "搜索字段";
+"prefs.section.category_pods.title" = "分类卡片";
+"prefs.section.search_field.title" = "搜索栏";
 "prefs.section.main.title" = "主要控制项";
 "prefs.section.misc.title" = "杂项";
 "prefs.section.motion_highlights.title" = "运动高光";
@@ -139,7 +139,6 @@
 "prefs.control.keyboard_overhang" = "悬伸量";
 "prefs.subtitle.keyboard_overhang" = "当预测栏隐藏时，键盘上方预留的额外高度。";
 
-/* TODO: Translate synced English fallback strings. */
 "prefs.control.bezel_ratio" = "边框比例";
 "prefs.control.light_tint_color" = "浅色模式色调";
 "prefs.control.dark_tint_color" = "深色模式色调";
@@ -149,7 +148,7 @@
 "prefs.section.alerts.title" = "警报";
 "prefs.section.spotlight.title" = "Spotlight 搜索栏";
 "prefs.surface.surfaces.title" = "表面";
-"prefs.surface.surfaces.subtitle" = "浏览并调整每块液态玻璃的表面。";
+"prefs.surface.surfaces.subtitle" = "浏览并调整所有液态玻璃表面。";
 "prefs.surface.group.home.title" = "主屏幕";
 "prefs.surface.group.home.subtitle" = "主屏幕和控制中心周围显示的表面。";
 "prefs.surface.group.lock.title" = "锁屏";
@@ -176,9 +175,6 @@
 "prefs.global_controls.segmented.title" = "分段控件";
 "prefs.global_controls.segmented.subtitle" = "为分段控件添加液态选择行为。";
 
-/* TODO: Translate synced English fallback strings. */
-
-/* TODO: Translate synced English fallback strings. */
 "prefs.app_icons_warning.title" = "启用应用图标？";
 "prefs.app_icons_warning.body" = "请注意，启用应用图标会非常卡顿。如果你开启了此表面，请不要抱怨卡顿问题，谢谢。";
 "prefs.app_icons_warning.confirm" = "启用";
@@ -188,3 +184,17 @@
 "prefs.surface.app_icons_ex.subtitle" = "为主屏幕应用图标添加细腻的自适应高光。";
 "prefs.control.highlight_intensity" = "高光强度";
 "prefs.subtitle.highlight_intensity" = "控制应用图标边缘高光的强弱。";
+"prefs.section.ios26_icons.title" = "iOS 26 图标";
+"prefs.surface.ios26_icons.subtitle" = "复刻透明与彩色图标效果；与“应用图标”和“图标高光”互斥。";
+"prefs.control.icon_mode" = "图标模式";
+"prefs.subtitle.icon_mode" = "选择图标的透明玻璃渲染样式。";
+"prefs.control.icon_algorithm" = "渲染算法";
+"prefs.subtitle.icon_algorithm" = "Apple 缓和算法模拟 iOS 27 对旧版图标的适配；旧版算法保留原有背景分离效果。";
+"prefs.option.apple_mitigated" = "Apple 缓和算法";
+"prefs.option.legacy_algorithm" = "旧版算法";
+"prefs.option.clear" = "透明";
+"prefs.option.tinted" = "着色";
+"prefs.control.tint_hue" = "着色色相";
+"prefs.subtitle.tint_hue" = "选择所有透明图标玻璃使用的统一颜色。";
+"prefs.control.tint_intensity" = "着色强度";
+"prefs.subtitle.tint_intensity" = "控制颜色对透明玻璃的着色程度。";

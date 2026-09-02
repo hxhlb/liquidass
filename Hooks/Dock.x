@@ -10,6 +10,16 @@ typedef NS_ENUM(NSInteger, LGDockMode) {
 };
 
 static const void *kDockHomeButtonBorderKey = &kDockHomeButtonBorderKey;
+static const void *kIOS15DockGlassKey = &kIOS15DockGlassKey;
+static const void *kIOS15DockBackgroundKey = &kIOS15DockBackgroundKey;
+
+@interface SBDockView : UIView
+@property (nonatomic, readonly) UIView *backgroundView;
+@end
+
+static BOOL dockUsesIOS15DirectGlass(void) {
+    return NSProcessInfo.processInfo.operatingSystemVersion.majorVersion == 15;
+}
 
 static BOOL dockInsideCategoryStackBackground(UIView *view) {
     for (UIView *ancestor = view; ancestor; ancestor = ancestor.superview) {
@@ -31,6 +41,7 @@ static LGDockMode dockModeForMaterial(UIView *material) {
         size.width >= size.height * 2.0) {
         return LGDockModeFloating;
     }
+    if (dockUsesIOS15DirectGlass()) return LGDockModeNone;
     if (hasAncestorOfClassName(material, @"SBDockView")) {
         return LGDockModeRegular;
     }
@@ -84,6 +95,84 @@ static void configureDockGlass(UIView *material, LGLiveBackdropView *glass) {
     dockUpdateHomeButtonBorder(glass, homeButtonDock);
 }
 
+static void removeIOS15DockGlass(UIView *dockView) {
+    LGLiveBackdropView *glass = objc_getAssociatedObject(dockView,
+                                                          kIOS15DockGlassKey);
+    [glass removeFromSuperview];
+    UIView *background = objc_getAssociatedObject(dockView,
+                                                    kIOS15DockBackgroundKey);
+    background.hidden = NO;
+    objc_setAssociatedObject(dockView, kIOS15DockGlassKey,
+                             nil, OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(dockView, kIOS15DockBackgroundKey,
+                             nil, OBJC_ASSOCIATION_ASSIGN);
+}
+
+static void installIOS15DockGlass(UIView *dockView) {
+    if (!dockUsesIOS15DirectGlass() || !dockView.window ||
+        !lgHostEnabled(@"Dock")) {
+        removeIOS15DockGlass(dockView);
+        return;
+    }
+    UIView *background = [dockView respondsToSelector:@selector(backgroundView)]
+        ? [(id)dockView backgroundView] : nil;
+    UIView *parent = background.superview;
+    if (!background || !parent || CGRectIsEmpty(background.bounds)) return;
+
+    UIView *previousBackground = objc_getAssociatedObject(dockView,
+                                                           kIOS15DockBackgroundKey);
+    if (previousBackground && previousBackground != background) {
+        previousBackground.hidden = NO;
+    }
+    LGLiveBackdropView *glass = objc_getAssociatedObject(dockView,
+                                                          kIOS15DockGlassKey);
+    if (!glass) {
+        glass = LGCreateRegisteredGlass(background.frame, nil, @"Dock");
+        if (!glass) return;
+        objc_setAssociatedObject(dockView, kIOS15DockGlassKey,
+                                 glass, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        lgTrackGlass(glass, @"Dock", nil);
+    }
+    if (glass.superview != parent) {
+        [glass removeFromSuperview];
+        [parent insertSubview:glass aboveSubview:background];
+    }
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    glass.frame = background.frame;
+    glass.layer.cornerRadius = background.layer.cornerRadius;
+    if (@available(iOS 13.0, *)) {
+        glass.layer.cornerCurve = background.layer.cornerCurve;
+    }
+    glass.layer.masksToBounds = YES;
+    [CATransaction commit];
+
+    BOOL homeButtonDock = !dockIsFullScreenPhone(dockView);
+    glass.lgSpecularEnabledOverride = homeButtonDock ? @NO : nil;
+    dockUpdateHomeButtonBorder(glass, homeButtonDock);
+    objc_setAssociatedObject(dockView, kIOS15DockBackgroundKey,
+                             background, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    lgSuppressStock(background, @"Dock", YES);
+}
+
+%group LGIOS15DirectDockLifecycle
+
+%hook SBDockView
+
+- (void)didMoveToWindow {
+    %orig;
+    installIOS15DockGlass(self);
+}
+
+- (void)layoutSubviews {
+    %orig;
+    installIOS15DockGlass(self);
+}
+
+%end
+
+%end
+
 %ctor {
     LGRegisterMaterialHost(@"Dock", 80, ^BOOL(UIView *material) {
         return dockModeForMaterial(material) != LGDockModeNone;
@@ -93,4 +182,7 @@ static void configureDockGlass(UIView *material, LGLiveBackdropView *glass) {
     }, nil, ^(UIView *material, LGLiveBackdropView *glass) {
         configureDockGlass(material, glass);
     });
+    if (dockUsesIOS15DirectGlass() && NSClassFromString(@"SBDockView")) {
+        %init(LGIOS15DirectDockLifecycle);
+    }
 }

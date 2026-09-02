@@ -190,3 +190,17 @@
 "prefs.surface.app_icons_ex.subtitle" = "Thêm điểm sáng tinh tế, thích ứng cho biểu tượng trên Màn hình chính.";
 "prefs.control.highlight_intensity" = "Cường độ vùng sáng";
 "prefs.subtitle.highlight_intensity" = "Điều chỉnh độ mạnh của vùng sáng ở viền biểu tượng.";
+"prefs.section.ios26_icons.title" = "Biểu tượng iOS 26";
+"prefs.surface.ios26_icons.subtitle" = "Tái tạo biểu tượng trong suốt và có màu. Không thể dùng cùng Biểu tượng ứng dụng hoặc Điểm sáng biểu tượng.";
+"prefs.control.icon_mode" = "Chế độ biểu tượng";
+"prefs.subtitle.icon_mode" = "Chọn kiểu hiển thị biểu tượng trong suốt.";
+"prefs.control.icon_algorithm" = "Thuật toán kết xuất";
+"prefs.subtitle.icon_algorithm" = "Apple Mitigated mô phỏng cách iOS 27 xử lý biểu tượng cũ. Thuật toán cũ khôi phục phương pháp tách nền trước đây.";
+"prefs.option.apple_mitigated" = "Apple Mitigated";
+"prefs.option.legacy_algorithm" = "Thuật toán cũ";
+"prefs.option.clear" = "Trong suốt";
+"prefs.option.tinted" = "Nhuộm màu";
+"prefs.control.tint_hue" = "Sắc độ";
+"prefs.subtitle.tint_hue" = "Chọn màu chung cho lớp kính biểu tượng trong suốt.";
+"prefs.control.tint_intensity" = "Cường độ màu";
+"prefs.subtitle.tint_intensity" = "Điều chỉnh mức độ nhuộm màu của lớp kính trong suốt.";

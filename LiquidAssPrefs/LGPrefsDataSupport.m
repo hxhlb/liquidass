@@ -654,6 +654,45 @@ NSArray<NSDictionary *> *LGAppIconExItems(void) {
     ];
 }
 
+NSArray<NSDictionary *> *LGIOS26IconItems(void) {
+    NSDictionary *algorithm = LGMenuSetting(
+        @"IOS26Icons.Algorithm",
+        LGLocalized(@"prefs.control.icon_algorithm"),
+        LGLocalized(@"prefs.subtitle.icon_algorithm"),
+        @"apple",
+        @[
+            @{ @"value": @"apple", @"title": LGLocalized(@"prefs.option.apple_mitigated") },
+            @{ @"value": @"legacy", @"title": LGLocalized(@"prefs.option.legacy_algorithm") },
+        ]);
+    NSDictionary *mode = LGMenuSetting(
+        @"IOS26Icons.Mode",
+        LGLocalized(@"prefs.control.icon_mode"),
+        LGLocalized(@"prefs.subtitle.icon_mode"),
+        @"clear",
+        @[
+            @{ @"value": @"clear", @"title": LGLocalized(@"prefs.option.clear") },
+            @{ @"value": @"color", @"title": LGLocalized(@"prefs.option.tinted") },
+        ]);
+    NSMutableDictionary *hue = [LGSliderSetting(
+        @"IOS26Icons.TintHue",
+        LGLocalized(@"prefs.control.tint_hue"),
+        LGLocalized(@"prefs.subtitle.tint_hue"),
+        0.37, 0.0, 1.0, 2) mutableCopy];
+    hue[@"hue_slider"] = @YES;
+    return @[
+        LGGlassEnabledSetting(@"IOS26Icons.Enabled", NO),
+        LGSettingControlledByKey(algorithm, @"IOS26Icons.Enabled", @NO),
+        LGSettingControlledByKey(mode, @"IOS26Icons.Enabled", @NO),
+        LGSettingControlledByKey([hue copy], @"IOS26Icons.Enabled", @NO),
+        LGSettingControlledByKey(
+            LGSliderSetting(@"IOS26Icons.TintIntensity",
+                            LGLocalized(@"prefs.control.tint_intensity"),
+                            LGLocalized(@"prefs.subtitle.tint_intensity"),
+                            0.78, 0.0, 1.0, 2),
+            @"IOS26Icons.Enabled", @NO),
+    ];
+}
+
 NSArray<NSDictionary *> *LGSearchPillItems(void) {
     return LGRendererItemsForHostPrefix(@"SearchPill");
 }

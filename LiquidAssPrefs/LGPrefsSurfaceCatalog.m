@@ -10,6 +10,7 @@ NSString * const LGPrefsSurfaceDock = @"Dock";
 NSString * const LGPrefsSurfaceFolderIcons = @"FolderIcons";
 NSString * const LGPrefsSurfaceAppIcons = @"AppIcons";
 NSString * const LGPrefsSurfaceAppIconsEx = @"AppIconsEx";
+NSString * const LGPrefsSurfaceIOS26Icons = @"IOS26Icons";
 NSString * const LGPrefsSurfaceOpenFolder = @"OpenFolder";
 NSString * const LGPrefsSurfaceContextMenu = @"ContextMenu";
 NSString * const LGPrefsSurfaceBanner = @"Banner";
@@ -40,6 +41,7 @@ BOOL LGPrefsSurfaceIsKnown(NSString *identifier) {
            [identifier isEqualToString:LGPrefsSurfaceFolderIcons] ||
            [identifier isEqualToString:LGPrefsSurfaceAppIcons] ||
            [identifier isEqualToString:LGPrefsSurfaceAppIconsEx] ||
+           [identifier isEqualToString:LGPrefsSurfaceIOS26Icons] ||
            [identifier isEqualToString:LGPrefsSurfaceOpenFolder] ||
            [identifier isEqualToString:LGPrefsSurfaceContextMenu] ||
            [identifier isEqualToString:LGPrefsSurfaceBanner] ||
@@ -71,6 +73,7 @@ NSString *LGPrefsSurfaceTitle(NSString *identifier) {
     if ([identifier isEqualToString:LGPrefsSurfaceFolderIcons]) return LGLocalized(@"prefs.section.folder_icons.title");
     if ([identifier isEqualToString:LGPrefsSurfaceAppIcons]) return LGLocalized(@"prefs.section.app_icons.title");
     if ([identifier isEqualToString:LGPrefsSurfaceAppIconsEx]) return LGLocalized(@"prefs.section.app_icons_ex.title");
+    if ([identifier isEqualToString:LGPrefsSurfaceIOS26Icons]) return LGLocalized(@"prefs.section.ios26_icons.title");
     if ([identifier isEqualToString:LGPrefsSurfaceOpenFolder]) return LGLocalized(@"prefs.section.folder_open.title");
     if ([identifier isEqualToString:LGPrefsSurfaceContextMenu]) return LGLocalized(@"prefs.section.context_menu.title");
     if ([identifier isEqualToString:LGPrefsSurfaceBanner]) return LGLocalized(@"prefs.section.banner.title");
@@ -101,6 +104,7 @@ NSString *LGPrefsSurfaceSubtitle(NSString *identifier) {
     if ([identifier isEqualToString:LGPrefsSurfaceAppLibrary]) return LGLocalized(@"prefs.surface.app_library.subtitle");
     if ([identifier isEqualToString:LGPrefsSurfaceSurfaces]) return LGLocalized(@"prefs.surface.surfaces.subtitle");
     if ([identifier isEqualToString:LGPrefsSurfaceAppIconsEx]) return LGLocalized(@"prefs.surface.app_icons_ex.subtitle");
+    if ([identifier isEqualToString:LGPrefsSurfaceIOS26Icons]) return LGLocalized(@"prefs.surface.ios26_icons.subtitle");
     if ([identifier isEqualToString:LGPrefsSurfaceMoreOptions]) return LGLocalized(@"prefs.misc.about.subtitle");
     if ([identifier isEqualToString:LGPrefsSurfaceSettings]) return LGLocalized(@"prefs.misc.prefs_settings.subtitle");
     return @"";
@@ -127,6 +131,7 @@ NSString *LGPrefsSurfaceSymbolName(NSString *identifier) {
     if ([identifier isEqualToString:LGPrefsSurfaceFolderIcons]) return @"folder.fill";
     if ([identifier isEqualToString:LGPrefsSurfaceAppIcons]) return @"app.fill";
     if ([identifier isEqualToString:LGPrefsSurfaceAppIconsEx]) return @"sparkles";
+    if ([identifier isEqualToString:LGPrefsSurfaceIOS26Icons]) return @"square.stack.3d.up.fill";
     if ([identifier isEqualToString:LGPrefsSurfaceOpenFolder]) return @"folder";
     if ([identifier isEqualToString:LGPrefsSurfaceContextMenu]) return @"ellipsis.circle";
     if ([identifier isEqualToString:LGPrefsSurfaceBanner]) return @"rectangle.topthird.inset.filled";
@@ -156,7 +161,8 @@ NSArray<NSDictionary *> *LGPrefsSurfaceItems(NSString *identifier) {
         LGSectionSetting(LGLocalized(@"prefs.surface.group.home.title"), LGLocalized(@"prefs.surface.group.home.subtitle")),
         @{ @"type": @"nav", @"title": LGPrefsSurfaceTitle(LGPrefsSurfaceDock), @"surface_identifier": LGPrefsSurfaceDock },
         @{ @"type": @"nav", @"title": LGPrefsSurfaceTitle(LGPrefsSurfaceFolderIcons), @"surface_identifier": LGPrefsSurfaceFolderIcons },
-        @{ @"type": @"nav", @"title": LGPrefsSurfaceTitle(LGPrefsSurfaceAppIcons), @"surface_identifier": LGPrefsSurfaceAppIcons },
+        @{ @"type": @"nav", @"title": LGPrefsSurfaceTitle(LGPrefsSurfaceAppIcons), @"surface_identifier": LGPrefsSurfaceAppIcons, @"disabled": @YES },
+        @{ @"type": @"nav", @"title": LGPrefsSurfaceTitle(LGPrefsSurfaceIOS26Icons), @"surface_identifier": LGPrefsSurfaceIOS26Icons },
         @{ @"type": @"nav", @"title": LGPrefsSurfaceTitle(LGPrefsSurfaceAppIconsEx), @"surface_identifier": LGPrefsSurfaceAppIconsEx },
         @{ @"type": @"nav", @"title": LGPrefsSurfaceTitle(LGPrefsSurfaceOpenFolder), @"surface_identifier": LGPrefsSurfaceOpenFolder },
         @{ @"type": @"nav", @"title": LGPrefsSurfaceTitle(LGPrefsSurfaceContextMenu), @"surface_identifier": LGPrefsSurfaceContextMenu },
@@ -184,6 +190,7 @@ NSArray<NSDictionary *> *LGPrefsSurfaceItems(NSString *identifier) {
     if ([identifier isEqualToString:LGPrefsSurfaceFolderIcons]) return LGRendererItemsForHostPrefix(@"FolderIcon");
     if ([identifier isEqualToString:LGPrefsSurfaceAppIcons]) return LGAppIconItems();
     if ([identifier isEqualToString:LGPrefsSurfaceAppIconsEx]) return LGAppIconExItems();
+    if ([identifier isEqualToString:LGPrefsSurfaceIOS26Icons]) return LGIOS26IconItems();
     if ([identifier isEqualToString:LGPrefsSurfaceOpenFolder]) return LGRendererItemsForHostPrefix(@"OpenFolder");
     if ([identifier isEqualToString:LGPrefsSurfaceContextMenu]) return LGContextMenuItems();
     if ([identifier isEqualToString:LGPrefsSurfaceBanner]) return LGRendererItemsForHostPrefix(@"Banner");

@@ -10,6 +10,7 @@ FOUNDATION_EXPORT NSString * const LGPrefsSurfaceDock;
 FOUNDATION_EXPORT NSString * const LGPrefsSurfaceFolderIcons;
 FOUNDATION_EXPORT NSString * const LGPrefsSurfaceAppIcons;
 FOUNDATION_EXPORT NSString * const LGPrefsSurfaceAppIconsEx;
+FOUNDATION_EXPORT NSString * const LGPrefsSurfaceIOS26Icons;
 FOUNDATION_EXPORT NSString * const LGPrefsSurfaceOpenFolder;
 FOUNDATION_EXPORT NSString * const LGPrefsSurfaceContextMenu;
 FOUNDATION_EXPORT NSString * const LGPrefsSurfaceBanner;

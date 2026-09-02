@@ -16,8 +16,8 @@
 "prefs.control.variable_font_width" = "寬度";
 "prefs.control.variable_font_height" = "高度";
 "prefs.control.variable_font_softness" = "柔和度";
-"prefs.control.motion_highlights" = "Motion Highlights";
-"prefs.control.motion_highlights_sensitivity" = "Motion Sensitivity";
+"prefs.control.motion_highlights" = "動態高光";
+"prefs.control.motion_highlights_sensitivity" = "動態靈敏度";
 
 "prefs.subtitle.enabled" = "啟用或關閉此玻璃視圖";
 "prefs.subtitle.blur" = "玻璃視圖的柔和程度";
@@ -25,12 +25,12 @@
 "prefs.subtitle.glass_thickness" = "玻璃體積的深度，視覺上變化不大";
 "prefs.subtitle.refractive_index" = "玻璃效果的光學密度";
 "prefs.subtitle.refraction" = "背景在玻璃視圖中彎曲的效果";
-"prefs.subtitle.chromatic_dispersion" = "Split refracted light into subtle red, green, and blue effects on this surface.";
+"prefs.subtitle.chromatic_dispersion" = "將折射光在此表面分離成細微的紅、綠、藍效果。";
 "prefs.subtitle.dispersion_strength" = "套用於此表面的 RGB 分離程度";
 "prefs.subtitle.specular" = "玻璃視圖上的高光強度";
 "prefs.subtitle.quality" = "玻璃視圖的紋理縮放。較低的值可提升效能，但會降低視覺品質";
-"prefs.subtitle.motion_highlights" = "Rotate the glass rim with device compass.";
-"prefs.subtitle.motion_highlights_sensitivity" = "How strongly device compass steers the highlight.";
+"prefs.subtitle.motion_highlights" = "利用裝置指南針旋轉玻璃邊緣高光。";
+"prefs.subtitle.motion_highlights_sensitivity" = "控制裝置指南針對高光方向的影響程度。";
 "prefs.subtitle.variable_font" = "可用時為玻璃時鐘使用 iOS 26 風格的自適應時鐘字體。";
 "prefs.subtitle.variable_font_size" = "iOS 26 時鐘字體的字級倍率。";
 "prefs.subtitle.variable_font_weight" = "iOS 26 時鐘字體的字重軸數值。";
@@ -40,7 +40,7 @@
 
 "prefs.subtitle.global_enabled" = "插件總開關";
 
-"prefs.root.runtime_cache_footer" = "%@ cached to RAM";
+"prefs.root.runtime_cache_footer" = "RAM 快取：%@";
 
 "prefs.section.dock.title" = "Dock";
 "prefs.section.folder_icons.title" = "檔案夾圖示";
@@ -55,8 +55,8 @@
 "prefs.section.search_field.title" = "搜尋欄";
 "prefs.section.main.title" = "主選單";
 "prefs.section.misc.title" = "其他";
-"prefs.section.motion_highlights.title" = "Motion Highlights";
-"prefs.section.motion_highlights.subtitle" = "Use device motion to steer glass specular highlights.";
+"prefs.section.motion_highlights.title" = "動態高光";
+"prefs.section.motion_highlights.subtitle" = "利用裝置動作引導玻璃的鏡面高光。";
 
 "prefs.button.reset" = "重置";
 "prefs.button.cancel" = "取消";
@@ -95,8 +95,8 @@
 "prefs.value_prompt.title" = "設定數值";
 "prefs.value_prompt.message" = "請輸入一個數值";
 
-"prefs.hero.eyebrow" = "沒有比這更讚的了";
-"prefs.hero.subtitle" = "史上最屌的插件，無人能比！";
+"prefs.hero.eyebrow" = "沒有比這更爛的了……";
+"prefs.hero.subtitle" = "有史以來最「爛」的插件。";
 
 "prefs.surface.homescreen.title" = "主畫面";
 "prefs.surface.homescreen.subtitle" = "主畫面相關介面的液態玻璃控制選項。";
@@ -115,7 +115,7 @@
 "prefs.misc.respring.title" = "重新啟動主畫面";
 "prefs.misc.respring.subtitle" = "重新啟動 SpringBoard 與相關渲染服務。";
 "prefs.misc.about.title" = "更多選項";
-"prefs.misc.about.subtitle" = "語言、關於、版本資訊、贊助等";
+"prefs.misc.about.subtitle" = "額外控制項與進階偏好設定。";
 "prefs.misc.prefs_settings.title" = "關於";
 "prefs.misc.prefs_settings.subtitle" = "語言、版本資訊、贊助等。";
 "prefs.misc.options_section.title" = "額外內容";
@@ -137,8 +137,8 @@
 "prefs.rwb.material_view.subtitle" = "同時隱藏支援的小工具堆疊材質背景。實驗性功能。";
 "prefs.misc.language.title" = "語言";
 
-"prefs.control_center.fullscreen_backdrop_blur_radius.title" = "Fullscreen Blur Radius";
-"prefs.control_center.fullscreen_backdrop_blur_radius.subtitle" = "Caps the stock Control Center background material blur. Lower values make the fullscreen blur lighter.";
+"prefs.control_center.fullscreen_backdrop_blur_radius.title" = "全螢幕模糊半徑";
+"prefs.control_center.fullscreen_backdrop_blur_radius.subtitle" = "限制原生控制中心背景材質的模糊程度。數值越低，全螢幕模糊越淡。";
 "prefs.control_center.fullscreen_backdrop_dim_color.title" = "全螢幕壓暗";
 "prefs.control_center.fullscreen_backdrop_dim_color.subtitle" = "覆蓋在全螢幕模糊上的顏色。顏色的 Alpha 值控制壓暗程度。";
 
@@ -157,50 +157,62 @@
 "prefs.control.keyboard_overhang" = "頂部延伸";
 "prefs.subtitle.keyboard_overhang" = "隱藏預測列時，在鍵盤上方額外保留的高度。";
 
-/* TODO: Translate synced English fallback strings. */
-"prefs.control.bezel_ratio" = "Bezel Ratio";
-"prefs.control.light_tint_color" = "Light Tint";
-"prefs.control.dark_tint_color" = "Dark Tint";
-"prefs.subtitle.bezel_ratio" = "Width of the refracting edge relative to the glass view's short side.";
-"prefs.subtitle.light_tint_color" = "Color and opacity used while the device is in Light Mode.";
-"prefs.subtitle.dark_tint_color" = "Color and opacity used while the device is in Dark Mode.";
-"prefs.section.alerts.title" = "Alerts";
-"prefs.section.spotlight.title" = "Spotlight Search Bar";
-"prefs.surface.surfaces.title" = "Surfaces";
-"prefs.surface.surfaces.subtitle" = "Browse and tune every Liquid Glass surface.";
-"prefs.surface.group.home.title" = "Home Screen";
-"prefs.surface.group.home.subtitle" = "Surfaces shown around the Home Screen and Control Center.";
-"prefs.surface.group.lock.title" = "Lock Screen";
-"prefs.surface.group.lock.subtitle" = "Surfaces shown before the device is unlocked.";
-"prefs.surface.group.library.title" = "App Library";
-"prefs.surface.group.library.subtitle" = "Surfaces used while browsing the App Library.";
-"prefs.surface.group.system.title" = "System UI";
-"prefs.surface.group.system.subtitle" = "Shared system controls available across apps.";
-"prefs.surface.coversheet.title" = "Cover Sheet Pull";
-"prefs.surface.keyboard.title" = "Keyboard";
-"prefs.surface.tab_bar.title" = "Tab Bar";
-"prefs.surface.tab_bar_selection.title" = "Selection Lens";
-"prefs.surface.global_controls.title" = "Controls";
-"prefs.global_controls.exclusions.title" = "Exclusion List";
-"prefs.global_controls.exclusions.subtitle" = "Skip custom controls in matching bundle IDs or executable names.";
-"prefs.global_controls.exclusions.body" = "Enter one bundle ID or executable name per line. Changes apply after reopening the affected app.";
+"prefs.control.bezel_ratio" = "邊框比例";
+"prefs.control.light_tint_color" = "淺色外觀色調";
+"prefs.control.dark_tint_color" = "深色外觀色調";
+"prefs.subtitle.bezel_ratio" = "折射邊緣相對於玻璃視圖短邊的寬度。";
+"prefs.subtitle.light_tint_color" = "裝置使用淺色外觀時套用的顏色與不透明度。";
+"prefs.subtitle.dark_tint_color" = "裝置使用深色外觀時套用的顏色與不透明度。";
+"prefs.section.alerts.title" = "提示框";
+"prefs.section.spotlight.title" = "Spotlight 搜尋列";
+"prefs.surface.surfaces.title" = "表面";
+"prefs.surface.surfaces.subtitle" = "瀏覽並調整每個液態玻璃表面。";
+"prefs.surface.group.home.title" = "主畫面";
+"prefs.surface.group.home.subtitle" = "主畫面與控制中心周圍顯示的表面。";
+"prefs.surface.group.lock.title" = "鎖定畫面";
+"prefs.surface.group.lock.subtitle" = "裝置解鎖前顯示的表面。";
+"prefs.surface.group.library.title" = "App 資料庫";
+"prefs.surface.group.library.subtitle" = "瀏覽 App 資料庫時使用的表面。";
+"prefs.surface.group.system.title" = "系統介面";
+"prefs.surface.group.system.subtitle" = "各 App 共用的系統控制項。";
+"prefs.surface.coversheet.title" = "封面頁下拉";
+"prefs.surface.keyboard.title" = "鍵盤";
+"prefs.surface.tab_bar.title" = "分頁列";
+"prefs.surface.tab_bar_selection.title" = "選取透鏡";
+"prefs.surface.global_controls.title" = "控制項";
+"prefs.global_controls.exclusions.title" = "排除列表";
+"prefs.global_controls.exclusions.subtitle" = "在符合的 Bundle ID 或執行檔名稱中略過自訂控制項。";
+"prefs.global_controls.exclusions.body" = "每行輸入一個 Bundle ID 或執行檔名稱。重新開啟受影響的 App 後套用變更。";
 "prefs.global_controls.exclusions.placeholder" = "com.example.app\nExampleExecutable";
-"prefs.global_controls.section.title" = "Custom Controls";
-"prefs.global_controls.section.subtitle" = "Choose which system controls are replaced across apps.";
-"prefs.global_controls.switches.title" = "Switches";
-"prefs.global_controls.switches.subtitle" = "Replace standard switches with liquid switches.";
-"prefs.global_controls.sliders.title" = "Sliders";
-"prefs.global_controls.sliders.subtitle" = "Replace standard sliders with liquid sliders.";
-"prefs.global_controls.segmented.title" = "Segmented Controls";
-"prefs.global_controls.segmented.subtitle" = "Add liquid selection behavior to segmented controls.";
+"prefs.global_controls.section.title" = "自訂控制項";
+"prefs.global_controls.section.subtitle" = "選擇要在各 App 中取代的系統控制項。";
+"prefs.global_controls.switches.title" = "開關";
+"prefs.global_controls.switches.subtitle" = "以液態開關取代標準開關。";
+"prefs.global_controls.sliders.title" = "滑桿";
+"prefs.global_controls.sliders.subtitle" = "以液態滑桿取代標準滑桿。";
+"prefs.global_controls.segmented.title" = "分段控制項";
+"prefs.global_controls.segmented.subtitle" = "為分段控制項加入液態選取效果。";
 
-/* TODO: Translate synced English fallback strings. */
-"prefs.app_icons_warning.title" = "Enable App Icons?";
-"prefs.app_icons_warning.body" = "Be aware that enabling app icons will be VERY laggy. DO NOT complain about lag issues if you have this surface enabled, thank you.";
-"prefs.app_icons_warning.confirm" = "Enable";
-"prefs.control.fresnel_glare" = "Fresnel Glare";
-"prefs.subtitle.fresnel_glare" = "Controls the edge glare added by the glass shader.";
+"prefs.app_icons_warning.title" = "啟用 App 圖示？";
+"prefs.app_icons_warning.body" = "請注意，啟用 App 圖示會非常卡頓。若已啟用此表面，請勿回報卡頓問題，謝謝。";
+"prefs.app_icons_warning.confirm" = "啟用";
+"prefs.control.fresnel_glare" = "菲涅耳眩光";
+"prefs.subtitle.fresnel_glare" = "控制玻璃著色器加入的邊緣眩光。";
 "prefs.section.app_icons_ex.title" = "圖示高光";
 "prefs.surface.app_icons_ex.subtitle" = "為主畫面 App 圖示加入細緻的自適應高光。";
 "prefs.control.highlight_intensity" = "高光強度";
 "prefs.subtitle.highlight_intensity" = "控制 App 圖示邊緣高光的強弱。";
+"prefs.section.ios26_icons.title" = "iOS 26 圖示";
+"prefs.surface.ios26_icons.subtitle" = "重現透明與彩色圖示效果；與「App 圖示」及「圖示高光」互斥。";
+"prefs.control.icon_mode" = "圖示模式";
+"prefs.subtitle.icon_mode" = "選擇圖示的透明玻璃算繪樣式。";
+"prefs.control.icon_algorithm" = "算繪演算法";
+"prefs.subtitle.icon_algorithm" = "Apple 緩和演算法模擬 iOS 27 對舊版圖示的相容處理；舊版演算法保留原有背景分離效果。";
+"prefs.option.apple_mitigated" = "Apple 緩和演算法";
+"prefs.option.legacy_algorithm" = "舊版演算法";
+"prefs.option.clear" = "透明";
+"prefs.option.tinted" = "著色";
+"prefs.control.tint_hue" = "著色色相";
+"prefs.subtitle.tint_hue" = "選擇所有透明圖示玻璃使用的統一顏色。";
+"prefs.control.tint_intensity" = "著色強度";
+"prefs.subtitle.tint_intensity" = "控制顏色對透明玻璃的著色程度。";

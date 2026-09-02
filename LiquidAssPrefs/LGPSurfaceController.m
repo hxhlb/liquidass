@@ -1016,7 +1016,10 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
     objc_setAssociatedObject(toggle, kLGPreferenceKeyKey, item[@"key"], OBJC_ASSOCIATION_COPY_NONATOMIC);
     [toggle addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
         UISwitch *sender = (UISwitch *)action.sender;
-        if ([item[@"key"] isEqualToString:@"AppIcons.Enabled"] && sender.isOn) {
+        BOOL warnsAboutIconPerformance =
+            [item[@"key"] isEqualToString:@"AppIcons.Enabled"]
+            || [item[@"key"] isEqualToString:@"IOS26Icons.Enabled"];
+        if (warnsAboutIconPerformance && sender.isOn) {
             __weak UISwitch *weakSender = sender;
             UIAlertController *alert = [UIAlertController
                 alertControllerWithTitle:LGLocalized(@"prefs.app_icons_warning.title")
@@ -1035,6 +1038,12 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
                             UISwitch *confirmedSender = weakSender;
                             if (!confirmedSender) return;
                             [confirmedSender setOn:YES animated:YES];
+                            if ([item[@"key"] isEqualToString:@"AppIcons.Enabled"]) {
+                                LGWritePreference(@"IOS26Icons.Enabled", @NO);
+                            } else {
+                                LGWritePreference(@"AppIcons.Enabled", @NO);
+                            }
+                            LGWritePreference(@"AppIconsEx.Enabled", @NO);
                             LGWritePreferenceAndMaybeRequireRespring(item[@"key"], @YES);
                             [self handleRespringStateChanged:nil];
                             if ([item[@"controls_following_panel"] boolValue]) {
@@ -1045,6 +1054,13 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
                         }]];
             [self presentViewController:alert animated:YES completion:nil];
             return;
+        }
+        if (sender.isOn && [item[@"key"] isEqualToString:@"AppIconsEx.Enabled"]) {
+            LGWritePreference(@"AppIcons.Enabled", @NO);
+            LGWritePreference(@"IOS26Icons.Enabled", @NO);
+        } else if (sender.isOn && [item[@"key"] isEqualToString:@"IOS26Icons.Enabled"]) {
+            LGWritePreference(@"AppIcons.Enabled", @NO);
+            LGWritePreference(@"AppIconsEx.Enabled", @NO);
         }
         if ([item[@"key"] isEqualToString:@"SettingsControls.Enabled"]) {
             LGWritePreference(item[@"key"], @(sender.isOn));
@@ -1314,6 +1330,16 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
     slider.maximumValue = maxValue;
     slider.value = [stored doubleValue];
     slider.minimumTrackTintColor = _accentColor;
+    BOOL hueSlider = [item[@"hue_slider"] boolValue];
+    if (hueSlider) {
+        UIColor *hueColor = [UIColor colorWithHue:slider.value
+                                       saturation:0.82
+                                       brightness:0.96
+                                            alpha:1.0];
+        slider.minimumTrackTintColor = hueColor;
+        slider.maximumTrackTintColor = [hueColor colorWithAlphaComponent:0.24];
+        slider.thumbTintColor = UIColor.whiteColor;
+    }
 
     UILabel *valueLabel = [self sliderValueLabelForStoredValue:stored
                                                       decimals:decimals
@@ -1335,6 +1361,14 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
     [slider addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
         UISlider *sender = (UISlider *)action.sender;
         valueLabel.text = LGFormatSliderValue(sender.value, decimals);
+        if (hueSlider) {
+            UIColor *hueColor = [UIColor colorWithHue:sender.value
+                                           saturation:0.82
+                                           brightness:0.96
+                                                alpha:1.0];
+            sender.minimumTrackTintColor = hueColor;
+            sender.maximumTrackTintColor = [hueColor colorWithAlphaComponent:0.24];
+        }
     }] forControlEvents:UIControlEventValueChanged];
     UIControlEvents commitEvents = UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel;
     [slider addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
@@ -1485,7 +1519,8 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
     button.contentEdgeInsets = UIEdgeInsetsZero;
     #pragma clang diagnostic pop
     NSString *surfaceIdentifier = item[@"surface_identifier"];
-    if (surfaceIdentifier.length) {
+    BOOL disabled = [item[@"disabled"] boolValue];
+    if (surfaceIdentifier.length && !disabled) {
         [button addTarget:self action:@selector(openSurfaceForNavigationButton:)
               forControlEvents:UIControlEventTouchUpInside];
     } else {
@@ -1512,6 +1547,12 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
     chevron.contentMode = UIViewContentModeScaleAspectFit;
     [chevron.widthAnchor constraintEqualToConstant:12.0].active = YES;
     [chevron.heightAnchor constraintEqualToConstant:20.0].active = YES;
+    if (disabled) {
+        button.enabled = NO;
+        button.alpha = 0.46;
+        titleLabel.textColor = [UIColor tertiaryLabelColor];
+        chevron.tintColor = [UIColor quaternaryLabelColor];
+    }
 
     UIView *headerRow = [self controlHeaderRowWithTitleLabel:titleLabel
                                               accessoryViews:@[chevron]
@@ -1541,6 +1582,7 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
 
 - (void)openSurfaceForNavigationButton:(UIButton *)button {
     NSDictionary *item = objc_getAssociatedObject(button, kLGPanelItemKey);
+    if ([item[@"disabled"] boolValue]) return;
     NSString *identifier = item[@"surface_identifier"];
     if (!LGPrefsSurfaceIsKnown(identifier)) return;
     LGPSurfaceController *controller = [[LGPSurfaceController alloc]

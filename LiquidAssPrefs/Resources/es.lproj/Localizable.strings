@@ -190,3 +190,17 @@
 "prefs.surface.app_icons_ex.subtitle" = "Añade reflejos sutiles y adaptativos a los iconos de la pantalla de inicio.";
 "prefs.control.highlight_intensity" = "Intensidad del reflejo";
 "prefs.subtitle.highlight_intensity" = "Controla la intensidad del reflejo en el borde del icono.";
+"prefs.section.ios26_icons.title" = "Iconos de iOS 26";
+"prefs.surface.ios26_icons.subtitle" = "Recrea iconos translúcidos claros y en color. Es incompatible con Iconos de apps y Reflejos de iconos.";
+"prefs.control.icon_mode" = "Modo de icono";
+"prefs.subtitle.icon_mode" = "Elige el estilo de renderizado translúcido.";
+"prefs.control.icon_algorithm" = "Algoritmo de renderizado";
+"prefs.subtitle.icon_algorithm" = "Apple mitigado reproduce la adaptación de iOS 27 para iconos antiguos. El algoritmo anterior restaura la separación de fondo previa.";
+"prefs.option.apple_mitigated" = "Apple mitigado";
+"prefs.option.legacy_algorithm" = "Algoritmo anterior";
+"prefs.option.clear" = "Transparente";
+"prefs.option.tinted" = "Tintado";
+"prefs.control.tint_hue" = "Tono del tinte";
+"prefs.subtitle.tint_hue" = "Elige el color global aplicado al cristal transparente de los iconos.";
+"prefs.control.tint_intensity" = "Intensidad del tinte";
+"prefs.subtitle.tint_intensity" = "Controla la intensidad del color sobre el cristal transparente.";

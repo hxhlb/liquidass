@@ -182,3 +182,17 @@
 "prefs.surface.app_icons_ex.subtitle" = "Adds subtle, adaptive highlights to Home Screen app icons.";
 "prefs.control.highlight_intensity" = "Highlight Intensity";
 "prefs.subtitle.highlight_intensity" = "Controls the strength of the icon edge highlight.";
+"prefs.section.ios26_icons.title" = "iOS 26 Icons";
+"prefs.surface.ios26_icons.subtitle" = "Recreates translucent Clear and Color icons. Mutually exclusive with App Icons and Icon Highlights.";
+"prefs.control.icon_mode" = "Icon Mode";
+"prefs.subtitle.icon_mode" = "Choose the translucent icon rendering style.";
+"prefs.control.icon_algorithm" = "Rendering Algorithm";
+"prefs.subtitle.icon_algorithm" = "Apple Mitigated follows the iOS 27 fallback for legacy icons. Legacy restores the previous background-separation algorithm.";
+"prefs.option.apple_mitigated" = "Apple Mitigated";
+"prefs.option.legacy_algorithm" = "Legacy";
+"prefs.option.clear" = "Clear";
+"prefs.option.tinted" = "Tinted";
+"prefs.control.tint_hue" = "Tint Hue";
+"prefs.subtitle.tint_hue" = "Choose the global color applied to transparent icon glass.";
+"prefs.control.tint_intensity" = "Tint Intensity";
+"prefs.subtitle.tint_intensity" = "Control how strongly the tint colors the transparent glass.";
