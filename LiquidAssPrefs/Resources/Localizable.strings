@@ -107,6 +107,12 @@
 "prefs.section.lockscreen_quick_actions.title" = "Quick Actions";
 "prefs.section.lockscreen_passcode.title" = "Passcode";
 "prefs.section.lockscreen_clock.title" = "Clock";
+"prefs.section.lockscreen_date_label.title" = "Lock Screen Date";
+"prefs.section.lockscreen_date_label.subtitle" = "Customize the date shown above the lock screen clock.";
+"prefs.control.date_format_enabled" = "Custom Date Format";
+"prefs.subtitle.date_format_enabled" = "Replace the lock screen date with a custom format.";
+"prefs.control.date_format" = "Date Format";
+"prefs.subtitle.date_format" = "Uses Unicode date pattern syntax, for example EEE MMM d.";
 "prefs.surface.app_library.title" = "App Library";
 "prefs.surface.app_library.subtitle" = "Glass controls for App Library-related surfaces.";
 "prefs.surface.surfaces.title" = "Surfaces";

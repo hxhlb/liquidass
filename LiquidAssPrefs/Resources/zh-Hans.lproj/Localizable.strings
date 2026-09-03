@@ -96,6 +96,12 @@
 "prefs.section.lockscreen_quick_actions.title" = "快捷操作";
 "prefs.section.lockscreen_passcode.title" = "密码";
 "prefs.section.lockscreen_clock.title" = "时钟";
+"prefs.section.lockscreen_date_label.title" = "锁屏日期";
+"prefs.section.lockscreen_date_label.subtitle" = "自定义锁屏时钟上方显示的日期。";
+"prefs.control.date_format_enabled" = "自定义日期格式";
+"prefs.subtitle.date_format_enabled" = "使用自定义格式替换系统锁屏日期。";
+"prefs.control.date_format" = "日期格式";
+"prefs.subtitle.date_format" = "使用 Unicode 日期格式语法，例如 EEE MMM d。";
 "prefs.surface.app_library.title" = "App 资源库";
 "prefs.surface.app_library.subtitle" = "与 App 资源库表面相关的玻璃控制项。";
 "prefs.misc.respring.title" = "重启桌面";

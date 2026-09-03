@@ -377,6 +377,18 @@ NSDictionary *LGMenuSetting(NSString *key, NSString *title, NSString *subtitle, 
     };
 }
 
+static NSDictionary *LGStringSetting(NSString *key, NSString *title, NSString *subtitle,
+                                     NSString *fallback, NSString *placeholder) {
+    return @{
+        @"type": @"string",
+        @"key": key ?: @"",
+        @"title": title ?: @"",
+        @"subtitle": subtitle ?: @"",
+        @"default": fallback ?: @"",
+        @"placeholder": placeholder ?: @""
+    };
+}
+
 NSDictionary *LGSliderSetting(NSString *key, NSString *title, NSString *subtitle,
                               CGFloat fallback, CGFloat min, CGFloat max, NSInteger decimals) {
     return @{
@@ -762,10 +774,31 @@ static NSArray<NSDictionary *> *LGClockVariableFontItems(void) {
     ];
 }
 
+static NSArray<NSDictionary *> *LGClockDateFormatItems(void) {
+    NSMutableDictionary *enabled = [LGSwitchSetting(@"Lockscreen.Clock.DateFormat.Enabled",
+                                                      LGLocalized(@"prefs.control.date_format_enabled"),
+                                                      LGLocalized(@"prefs.subtitle.date_format_enabled"),
+                                                      YES) mutableCopy];
+    enabled[@"controls_following_panel"] = @YES;
+    return @[
+        LGSectionSetting(LGLocalized(@"prefs.section.lockscreen_date_label.title"),
+                         LGLocalized(@"prefs.section.lockscreen_date_label.subtitle")),
+        enabled.copy,
+        LGSettingControlledByKey(
+            LGStringSetting(@"Lockscreen.Clock.DateFormat.Format",
+                            LGLocalized(@"prefs.control.date_format"),
+                            LGLocalized(@"prefs.subtitle.date_format"),
+                            @"EEE MMM d",
+                            @"EEE MMM d"),
+            @"Lockscreen.Clock.DateFormat.Enabled", @YES),
+    ];
+}
+
 NSArray<NSDictionary *> *LGClockItems(void) {
     return LGJoinItemGroups(@[
         LGRendererItemsForHostPrefix(@"Clock"),
         LGClockVariableFontItems(),
+        LGClockDateFormatItems(),
     ]);
 }
 

@@ -108,6 +108,12 @@
 "prefs.section.lockscreen_quick_actions.title" = "快速操作";
 "prefs.section.lockscreen_passcode.title" = "密碼";
 "prefs.section.lockscreen_clock.title" = "時鐘";
+"prefs.section.lockscreen_date_label.title" = "鎖定畫面日期";
+"prefs.section.lockscreen_date_label.subtitle" = "自訂鎖定畫面時鐘上方顯示的日期。";
+"prefs.control.date_format_enabled" = "自訂日期格式";
+"prefs.subtitle.date_format_enabled" = "使用自訂格式取代系統鎖定畫面日期。";
+"prefs.control.date_format" = "日期格式";
+"prefs.subtitle.date_format" = "使用 Unicode 日期格式語法，例如 EEE MMM d。";
 
 "prefs.surface.app_library.title" = "App 資料庫";
 "prefs.surface.app_library.subtitle" = "App 資料庫相關介面的玻璃控制項。";

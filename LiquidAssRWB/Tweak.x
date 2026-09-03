@@ -14,6 +14,36 @@ static NSSet<NSString *> *kWidgetBundleIdentifiers = nil;
 static void *kRWBOriginalBackgroundColorKey = &kRWBOriginalBackgroundColorKey;
 static void *kRWBOriginalWindowStyleKey = &kRWBOriginalWindowStyleKey;
 static NSHashTable<UIWindow *> *sRWBWindows;
+static BOOL sRWBIsWidgetRenderer = NO;
+
+static NSUserDefaults *RWBPreferences(void) {
+    static NSUserDefaults *preferences;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSString *suiteName = sRWBIsWidgetRenderer
+            ? @"/var/mobile/Library/Preferences/dylv.liquidassprefs.plist"
+            : LGPrefsDomain;
+        preferences = [[NSUserDefaults alloc] initWithSuiteName:suiteName];
+    });
+    return preferences;
+}
+
+static NSDictionary<NSString *, id> *RWBCopyPreferences(void) {
+    NSDictionary<NSString *, id> *preferences = RWBPreferences().dictionaryRepresentation;
+    return [preferences isKindOfClass:NSDictionary.class] ? preferences : @{};
+}
+
+static BOOL RWBPreferenceBool(NSDictionary<NSString *, id> *preferences,
+                              NSString *key, BOOL fallback) {
+    id value = preferences[key];
+    return [value isKindOfClass:NSNumber.class] ? [value boolValue] : fallback;
+}
+
+static NSString *RWBPreferenceString(NSDictionary<NSString *, id> *preferences,
+                                     NSString *key, NSString *fallback) {
+    id value = preferences[key];
+    return [value isKindOfClass:NSString.class] ? value : fallback;
+}
 
 static NSArray<NSString *> *RWBParseThirdPartyBundleIDs(NSString *rawText) {
     if (![rawText isKindOfClass:[NSString class]] || rawText.length == 0) return @[];
@@ -29,20 +59,20 @@ static NSArray<NSString *> *RWBParseThirdPartyBundleIDs(NSString *rawText) {
 }
 
 static void ReloadPrefs(void) {
-    LGReloadPreferences();
-    kIsEnabled = LG_globalEnabled() &&
-                 LG_prefBool(@"Widgets.Enabled", YES) &&
-                 LG_prefBool(@"RWB.Enabled", YES);
-    kIsEnabledForSystemWidgets = LG_prefBool(@"RWB.SystemWidgets.Enabled", YES);
-    kIsEnabledForMaterialView = LG_prefBool(@"RWB.MaterialView.Enabled", NO);
-    kForceDarkMode = LG_prefBool(@"RWB.ForceDarkMode", YES);
+    NSDictionary<NSString *, id> *preferences = RWBCopyPreferences();
+    kIsEnabled = RWBPreferenceBool(preferences, @"Global.Enabled", YES) &&
+                 RWBPreferenceBool(preferences, @"Widgets.Enabled", YES) &&
+                 RWBPreferenceBool(preferences, @"RWB.Enabled", YES);
+    kIsEnabledForSystemWidgets =
+        RWBPreferenceBool(preferences, @"RWB.SystemWidgets.Enabled", YES);
+    kIsEnabledForMaterialView =
+        RWBPreferenceBool(preferences, @"RWB.MaterialView.Enabled", NO);
+    kForceDarkMode = RWBPreferenceBool(preferences, @"RWB.ForceDarkMode", YES);
     kMaxWidgetWidth = 140.0;
     kMaxWidgetHeight = 140.0;
 
-    NSString *configuredBundleIDs =
-        LGHasExplicitPreferenceValue(@"RWB.ThirdPartyBundleIDs")
-            ? LG_prefString(@"RWB.ThirdPartyBundleIDs", @"")
-            : LGRWBDefaultWidgetBundleIDsText();
+    NSString *configuredBundleIDs = RWBPreferenceString(
+        preferences, @"RWB.ThirdPartyBundleIDs", LGRWBDefaultWidgetBundleIDsText());
     NSMutableOrderedSet<NSString *> *bundleIDs =
         [NSMutableOrderedSet orderedSetWithArray:
             RWBParseThirdPartyBundleIDs(configuredBundleIDs)];
@@ -194,7 +224,7 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
 
 - (void)viewWillAppear:(BOOL)animated {
     %orig;
-    if (!kIsEnabledForMaterialView) return;
+    if (!kIsEnabled || !kIsEnabledForMaterialView) return;
     UIView *firstChild = ((UIViewController *)self).view.subviews.firstObject;
     firstChild = firstChild.subviews.firstObject;
     if ([NSStringFromClass(firstChild.class) isEqualToString:@"MTMaterialView"]) {
@@ -208,7 +238,7 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
 
 - (void)viewWillAppear:(BOOL)animated {
     %orig;
-    if (!kIsEnabledForMaterialView) return;
+    if (!kIsEnabled || !kIsEnabledForMaterialView) return;
     UIView *firstChild = ((UIViewController *)self).view.subviews.firstObject;
     if ([NSStringFromClass(firstChild.class) isEqualToString:@"MTMaterialView"]) {
         firstChild.alpha = 0.0;
@@ -410,6 +440,10 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
 %end
 
 %ctor {
+    NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier ?: @"";
+    sRWBIsWidgetRenderer =
+        [bundleIdentifier hasPrefix:@"com.apple.chrono.WidgetRenderer-"];
+
     ReloadPrefs();
 
     CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
@@ -419,7 +453,6 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
                                     NULL,
                                     CFNotificationSuspensionBehaviorCoalesce);
 
-    NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier ?: @"";
     if ([bundleIdentifier isEqualToString:@"com.apple.springboard"]) {
         %init(RWBSpringBoard);
     } else if ([bundleIdentifier isEqualToString:@"com.apple.chronod"] ||
