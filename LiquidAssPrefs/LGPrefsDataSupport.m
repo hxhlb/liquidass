@@ -810,8 +810,6 @@ static NSArray<NSDictionary *> *LGClockVariableFontItems(void) {
                                                                   LGLocalized(@"prefs.subtitle.variable_font"),
                                                                   YES) mutableCopy];
     variableFontEnabled[@"controls_following_panel"] = @YES;
-    variableFontEnabled[@"enabled_key"] = @"Clock.Enabled";
-    variableFontEnabled[@"enabled_default"] = @YES;
     return @[
         LGSpacerSetting(8.0, 0.0),
         variableFontEnabled.copy,
