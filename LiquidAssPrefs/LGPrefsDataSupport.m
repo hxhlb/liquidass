@@ -469,9 +469,13 @@ NSArray<NSDictionary *> *LGRendererItemsForHostPrefix(NSString *prefix) {
     if ([prefix isEqualToString:@"DynamicIsland"]) enabled[@"requires_island_restart"] = @YES;
     NSMutableArray<NSDictionary *> *items = [NSMutableArray arrayWithArray:@[
         enabled.copy,
-        LGSliderSetting(key(@"BezelRatio"), LGLocalized(@"prefs.control.bezel_ratio"),
-                        LGLocalized(@"prefs.subtitle.bezel_ratio"),
-                        bezelRatioDefault, 0.0, 1.0, 3),
+        [prefix isEqualToString:@"Clock"]
+            ? LGSliderSetting(key(@"BezelWidth"), LGLocalized(@"prefs.control.bezel_width"),
+                              LGLocalized(@"prefs.subtitle.bezel_width"),
+                              12.0, 1.0, 40.0, 1)
+            : LGSliderSetting(key(@"BezelRatio"), LGLocalized(@"prefs.control.bezel_ratio"),
+                              LGLocalized(@"prefs.subtitle.bezel_ratio"),
+                              bezelRatioDefault, 0.0, 1.0, 3),
         LGGlassThicknessSetting(key(@"GlassThickness"), host->glassThickness, 0.0, 220.0, 1),
         LGGlassRefractionSetting(key(@"RefractionScale"), host->refractionScale, 0.0, 5.0, 2),
         LGGlassRefractiveIndexSetting(key(@"RefractiveIndex"), host->refractiveIndex, 1.0, 3.0, 2),

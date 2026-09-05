@@ -254,3 +254,7 @@
 "prefs.misc.debug_logging.subtitle" = "Writes verbose diagnostics to liquidglass.log. Leave off unless you are troubleshooting.";
 "prefs.misc.export_logs.title" = "Export Logs";
 "prefs.export_logs.none" = "No saved logs were found.";
+
+/* TODO: Translate synced English fallback strings. */
+"prefs.control.bezel_width" = "Bezel Width";
+"prefs.subtitle.bezel_width" = "Width of the refracting edge around the clock glyphs, in points.";

@@ -2,6 +2,7 @@
 
 "prefs.control.enabled" = "Enabled";
 "prefs.control.bezel_ratio" = "Bezel Ratio";
+"prefs.control.bezel_width" = "Bezel Width";
 "prefs.control.blur" = "Blur";
 "prefs.control.corner_radius" = "Corner Radius";
 "prefs.control.glass_thickness" = "Glass Thickness";
@@ -28,6 +29,7 @@
 
 "prefs.subtitle.enabled" = "Turn this glass view on or off.";
 "prefs.subtitle.bezel_ratio" = "Width of the refracting edge relative to the glass view's short side.";
+"prefs.subtitle.bezel_width" = "Width of the refracting edge around the clock glyphs, in points.";
 "prefs.subtitle.blur" = "Softness of the glass view.";
 "prefs.subtitle.corner_radius" = "Roundness of the glass view.";
 "prefs.subtitle.glass_thickness" = "Depth of the glass volume, visually it does not change anything much.";
