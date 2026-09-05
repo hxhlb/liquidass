@@ -21,6 +21,10 @@
 "prefs.control.variable_font_softness" = "Softness";
 "prefs.control.motion_highlights" = "Motion Highlights";
 "prefs.control.motion_highlights_sensitivity" = "Motion Sensitivity";
+"prefs.notification.label_color.title" = "Label Color";
+"prefs.notification.label_color.subtitle" = "Choose white or black notification text.";
+"prefs.color.white" = "White";
+"prefs.color.black" = "Black";
 
 "prefs.subtitle.enabled" = "Turn this glass view on or off.";
 "prefs.subtitle.bezel_ratio" = "Width of the refracting edge relative to the glass view's short side.";
@@ -67,7 +71,7 @@
 "prefs.button.reset" = "Reset";
 "prefs.button.cancel" = "Cancel";
 "prefs.app_icons_warning.title" = "Enable App Icons?";
-"prefs.app_icons_warning.body" = "Be aware that enabling app icons will be VERY laggy. DO NOT complain about lag issues if you have this surface enabled, thank you.";
+"prefs.app_icons_warning.body" = "Be aware that enabling app icons will be VERY laggy. DO NOT complain about lag issues if you have this surface enabled, thank you.\n\nAdditionally, this surface is only meant to pair with transparent icon packs (Liquid glAss by timbovill for example), don't enable this surface if you don't have one active.";
 "prefs.app_icons_warning.confirm" = "Enable";
 "prefs.button.respring" = "Restart System UI";
 "prefs.button.later" = "Later";
@@ -131,6 +135,8 @@
 "prefs.surface.tab_bar_selection.title" = "Selection Lens";
 "prefs.misc.respring.title" = "Restart System UI";
 "prefs.misc.respring.subtitle" = "Restart backboardd, SpringBoard, and related rendering services.";
+"prefs.misc.exit_safe_mode.title" = "Exit Safe Mode";
+"prefs.misc.exit_safe_mode.subtitle" = "Exit Liquid (Gl)ass safe mode if active.";
 "prefs.misc.about.title" = "More Options";
 "prefs.misc.about.subtitle" = "Additional controls and advanced preferences.";
 "prefs.misc.prefs_settings.title" = "About";
@@ -140,7 +146,6 @@
 "prefs.control.fresnel_glare" = "Fresnel Glare";
 "prefs.subtitle.fresnel_glare" = "Controls the edge glare added by the glass shader.";
 "prefs.misc.rwb_third_party.title" = "RWB list";
-"prefs.misc.rwb_third_party.subtitle" = "Enter widget bundle ids for the RWB allowlist.";
 "prefs.misc.rwb_third_party.editor_body" = "Enter one bundle id per line.";
 "prefs.misc.rwb_third_party.placeholder" = "com.example.widget\ncom.example.anotherwidget";
 "prefs.rwb.section.title" = "Remove Widget Background";
@@ -173,6 +178,10 @@
 "prefs.global_controls.exclusions.subtitle" = "Skip custom controls in matching bundle IDs or executable names.";
 "prefs.global_controls.exclusions.body" = "Enter one bundle ID or executable name per line. Changes apply after reopening the affected app.";
 "prefs.global_controls.exclusions.placeholder" = "com.example.app\nExampleExecutable";
+"prefs.tab_bar.exclusions.title" = "Exclusion List";
+"prefs.tab_bar.exclusions.subtitle" = "Skip tab bars in matching bundle IDs or executable names.";
+"prefs.tab_bar.exclusions.body" = "Enter one bundle ID or executable name per line. Changes apply after reopening the affected app.";
+"prefs.tab_bar.exclusions.placeholder" = "com.example.app\nExampleExecutable";
 "prefs.global_controls.section.title" = "Custom Controls";
 "prefs.global_controls.section.subtitle" = "Choose which system controls are replaced across apps.";
 "prefs.global_controls.switches.title" = "Switches";
@@ -184,6 +193,8 @@
 
 "prefs.section.keyboard_geometry.title" = "Keyboard Geometry";
 "prefs.section.keyboard_geometry.subtitle" = "Shape and spacing for the keyboard glass.";
+"prefs.control.keyboard_key_radius" = "Key Corner Radius";
+"prefs.subtitle.keyboard_key_radius" = "Corner radius used when rendering keyboard keys.";
 "prefs.control.keyboard_overhang" = "Overhang";
 "prefs.subtitle.keyboard_overhang" = "Extra height reserved above the keyboard when the prediction bar is hidden.";
 "prefs.section.app_icons_ex.title" = "Icon Highlights";
@@ -217,3 +228,7 @@
 "prefs.island.hide_idle.subtitle" = "When enabled, the outer glass edge follows the system island and hides while inactive. When disabled, the edge remains visible while inactive.";
 "prefs.surface.dynamic_island.subtitle" = "Experimental glass background for Dynamic Island on iOS 17 and later. After changing Enable, return to the home page and restart System UI. Activity content and controls stay visible.";
 "prefs.island.restart.body" = "Return to the Liquid (Gl)ass home page and tap Restart System UI after enabling or disabling island glass. This change takes effect when the system recreates the island background.";
+"prefs.misc.debug_logging.title" = "Debug Logging";
+"prefs.misc.debug_logging.subtitle" = "Writes verbose diagnostics to liquidglass.log. Leave off unless you are troubleshooting.";
+"prefs.misc.export_logs.title" = "Export Logs";
+"prefs.export_logs.none" = "No saved logs were found.";

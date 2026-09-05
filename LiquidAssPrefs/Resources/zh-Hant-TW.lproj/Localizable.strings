@@ -128,7 +128,6 @@
 "prefs.misc.options_section.subtitle" = "實驗性功能及其他內容";
 
 "prefs.misc.rwb_third_party.title" = "RWB 列表";
-"prefs.misc.rwb_third_party.subtitle" = "輸入用於 RWB 允許列表的小工具 Bundle ID。";
 "prefs.misc.rwb_third_party.editor_body" = "每行輸入一個 Bundle ID。";
 "prefs.misc.rwb_third_party.placeholder" = "com.example.widget\ncom.example.anotherwidget";
 "prefs.rwb.section.title" = "移除小工具背景";
@@ -237,3 +236,21 @@
 "prefs.island.hide_idle.subtitle" = "開啟後，外層玻璃亮邊跟隨系統在閒置時隱藏；關閉後，閒置狀態仍顯示亮邊。";
 "prefs.surface.dynamic_island.subtitle" = "實驗性功能：為 iOS 17 及以上的動態島加入玻璃背景，保留活動內容與操作。修改「啟用」後，請返回首頁重新啟動系統介面。";
 "prefs.island.restart.body" = "啟用或關閉動態島玻璃後，請返回 Liquid (Gl)ass 首頁點擊「重新啟動系統介面」。系統重新建立動態島背景後，此修改才會完整生效。";
+
+/* TODO: Translate synced English fallback strings. */
+"prefs.notification.label_color.title" = "Label Color";
+"prefs.notification.label_color.subtitle" = "Choose white or black notification text.";
+"prefs.color.white" = "White";
+"prefs.color.black" = "Black";
+"prefs.misc.exit_safe_mode.title" = "Exit Safe Mode";
+"prefs.misc.exit_safe_mode.subtitle" = "Exit Liquid (Gl)ass safe mode if active.";
+"prefs.tab_bar.exclusions.title" = "Exclusion List";
+"prefs.tab_bar.exclusions.subtitle" = "Skip tab bars in matching bundle IDs or executable names.";
+"prefs.tab_bar.exclusions.body" = "Enter one bundle ID or executable name per line. Changes apply after reopening the affected app.";
+"prefs.tab_bar.exclusions.placeholder" = "com.example.app\nExampleExecutable";
+"prefs.control.keyboard_key_radius" = "Key Corner Radius";
+"prefs.subtitle.keyboard_key_radius" = "Corner radius used when rendering keyboard keys.";
+"prefs.misc.debug_logging.title" = "Debug Logging";
+"prefs.misc.debug_logging.subtitle" = "Writes verbose diagnostics to liquidglass.log. Leave off unless you are troubleshooting.";
+"prefs.misc.export_logs.title" = "Export Logs";
+"prefs.export_logs.none" = "No saved logs were found.";
