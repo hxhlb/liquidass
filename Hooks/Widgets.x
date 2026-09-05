@@ -2,6 +2,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import "../Shared/LGLiveBackdropView.h"
 #import "../Shared/LGGlassKit.h"
+#import "../Shared/LGSharedSupport.h"
 #import <objc/runtime.h>
 
 static const CGFloat kWidgetCornerRadius = 20.2;
@@ -12,6 +13,10 @@ static void *kLegacyWidgetHostKey = &kLegacyWidgetHostKey;
 static BOOL widgetUsesLegacyDirectGlass(void) {
     NSInteger majorVersion = NSProcessInfo.processInfo.operatingSystemVersion.majorVersion;
     return majorVersion == 15 || majorVersion == 16;
+}
+
+static BOOL widgetBackgroundRemovalEnabled(void) {
+    return lgHostEnabled(@"Widgets") && LG_prefBool(@"RWB.Enabled", YES);
 }
 
 @interface CHSWidget : NSObject
@@ -71,7 +76,6 @@ static UIView *widgetFindDescendantNamed(UIView *view, NSString *name) {
 }
 
 static BOOL isWidgetGlassHostContainer(UIView *view) {
-    if (widgetUsesLegacyDirectGlass()) return NO;
     // widget internals vary so use the nearest stable container
     if (!isExactClass(view, @"UIView")) return NO;
     if (view.bounds.size.width < 120.0 || view.bounds.size.height < 120.0) return NO;
@@ -174,6 +178,12 @@ static UIView *legacyWidgetHost(SBHWidgetWrapperView *wrapper) {
 }
 
 static void updateLegacyWidgetWrapper(SBHWidgetWrapperView *wrapper) {
+    UIView *containerHost = widgetAncestorContainerHost(wrapper);
+    if (containerHost) {
+        removeLegacyWidgetGlass(wrapper);
+        injectWidgetGlass(containerHost);
+        return;
+    }
     UIView *host = legacyWidgetHost(wrapper);
     UIView *previousHost = objc_getAssociatedObject(wrapper, kLegacyWidgetHostKey);
     if (previousHost && previousHost != host) removeLegacyWidgetGlass(wrapper);
@@ -211,7 +221,7 @@ static void updateLegacyWidgetBackground(SBHWidgetWrapperBackgroundView *backgro
     UIView *widget = [background respondsToSelector:
         @selector(widgetBackgroundView)] ? background.widgetBackgroundView : nil;
     BOOL suppress = widgetUsesLegacyDirectGlass() &&
-                    lgHostEnabled(@"Widgets") && background.window;
+                    widgetBackgroundRemovalEnabled() && background.window;
     if (underlying) {
         if (suppress) lgSuppressStock(underlying, @"Widgets", YES);
         else underlying.hidden = NO;
@@ -249,42 +259,42 @@ static void updateLegacyWidgetBackground(SBHWidgetWrapperBackgroundView *backgro
 
 %hook CHUISAvocadoHostViewController
 - (void)_updateBackgroundMaterialAndColor {
-    if (widgetUsesLegacyDirectGlass() && lgHostEnabled(@"Widgets")) {
+    if (widgetUsesLegacyDirectGlass() && widgetBackgroundRemovalEnabled()) {
         [self setBackgroundViewMode:0];
         return;
     }
-    if (lgHostEnabled(@"Widgets") && self.widget.extensionBundleIdentifier.length) return;
+    if (widgetBackgroundRemovalEnabled() && self.widget.extensionBundleIdentifier.length) return;
     %orig;
 }
 - (NSInteger)_expectedBackgroundViewMode {
-    if (widgetUsesLegacyDirectGlass() && lgHostEnabled(@"Widgets")) return 0;
+    if (widgetUsesLegacyDirectGlass() && widgetBackgroundRemovalEnabled()) return 0;
     return %orig;
 }
 - (void)setBackgroundViewMode:(NSInteger)mode {
-    if (widgetUsesLegacyDirectGlass() && lgHostEnabled(@"Widgets")) mode = 0;
+    if (widgetUsesLegacyDirectGlass() && widgetBackgroundRemovalEnabled()) mode = 0;
     %orig(mode);
 }
 - (id)screenshotManager {
-    if (lgHostEnabled(@"Widgets") && self.widget.extensionBundleIdentifier.length) return nil;
+    if (widgetBackgroundRemovalEnabled() && self.widget.extensionBundleIdentifier.length) return nil;
     return %orig;
 }
 %end
 
 %hook CHUISWidgetHostViewController
 - (void)_updateBackgroundMaterialAndColor {
-    if (lgHostEnabled(@"Widgets") && self.widget.extensionBundleIdentifier.length) return;
+    if (widgetBackgroundRemovalEnabled() && self.widget.extensionBundleIdentifier.length) return;
     %orig;
 }
 - (void)_updatePersistedSnapshotContent {
-    if (lgHostEnabled(@"Widgets") && self.widget.extensionBundleIdentifier.length) return;
+    if (widgetBackgroundRemovalEnabled() && self.widget.extensionBundleIdentifier.length) return;
     %orig;
 }
 - (void)_updatePersistedSnapshotContentIfNecessary {
-    if (lgHostEnabled(@"Widgets") && self.widget.extensionBundleIdentifier.length) return;
+    if (widgetBackgroundRemovalEnabled() && self.widget.extensionBundleIdentifier.length) return;
     %orig;
 }
 - (id)_snapshotImageFromURL:(id)arg1 {
-    if (lgHostEnabled(@"Widgets") && self.widget.extensionBundleIdentifier.length) return nil;
+    if (widgetBackgroundRemovalEnabled() && self.widget.extensionBundleIdentifier.length) return nil;
     return %orig;
 }
 %end

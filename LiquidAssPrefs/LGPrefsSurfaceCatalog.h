@@ -19,6 +19,7 @@ FOUNDATION_EXPORT NSString * const LGPrefsSurfaceControlCenter;
 FOUNDATION_EXPORT NSString * const LGPrefsSurfaceSearchPill;
 FOUNDATION_EXPORT NSString * const LGPrefsSurfaceSpotlight;
 FOUNDATION_EXPORT NSString * const LGPrefsSurfaceWidgets;
+FOUNDATION_EXPORT NSString * const LGPrefsSurfaceDynamicIsland;
 FOUNDATION_EXPORT NSString * const LGPrefsSurfaceAppLibraryPods;
 FOUNDATION_EXPORT NSString * const LGPrefsSurfaceAppLibrarySearch;
 FOUNDATION_EXPORT NSString * const LGPrefsSurfaceNotifications;

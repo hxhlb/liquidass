@@ -451,9 +451,12 @@ NSArray<NSDictionary *> *LGRendererItemsForHostPrefix(NSString *prefix) {
     };
     NSString *lightTint = [NSString stringWithUTF8String:host->lightTintHex];
     NSString *darkTint = [NSString stringWithUTF8String:host->darkTintHex];
-    BOOL enabledByDefault = ![prefix isEqualToString:@"AppIcons"];
+    BOOL enabledByDefault = ![prefix isEqualToString:@"AppIcons"]
+        && ![prefix isEqualToString:@"DynamicIsland"];
+    NSMutableDictionary *enabled = [LGGlassEnabledSetting(key(@"Enabled"), enabledByDefault) mutableCopy];
+    if ([prefix isEqualToString:@"DynamicIsland"]) enabled[@"requires_island_restart"] = @YES;
     return @[
-        LGGlassEnabledSetting(key(@"Enabled"), enabledByDefault),
+        enabled.copy,
         LGSliderSetting(key(@"BezelRatio"), LGLocalized(@"prefs.control.bezel_ratio"),
                         LGLocalized(@"prefs.subtitle.bezel_ratio"),
                         host->bezelRatio, 0.0, 1.0, 3),
@@ -685,6 +688,21 @@ NSArray<NSDictionary *> *LGIOS26IconItems(void) {
             @{ @"value": @"clear", @"title": LGLocalized(@"prefs.option.clear") },
             @{ @"value": @"color", @"title": LGLocalized(@"prefs.option.tinted") },
         ]);
+    NSDictionary *subjectStyle = LGMenuSetting(
+        @"IOS26Icons.SubjectStyle",
+        LGLocalized(@"prefs.control.subject_style"),
+        LGLocalized(@"prefs.subtitle.subject_style"),
+        @"soft",
+        @[
+            @{ @"value": @"soft", @"title": LGLocalized(@"prefs.option.soft_white") },
+            @{ @"value": @"fresh", @"title": LGLocalized(@"prefs.option.fresh_color") },
+        ]);
+    NSMutableDictionary *globalProvider = [LGSwitchSetting(
+        @"IOS26Icons.GlobalProvider.Enabled",
+        LGLocalized(@"prefs.control.global_icon_provider"),
+        LGLocalized(@"prefs.subtitle.global_icon_provider"),
+        NO) mutableCopy];
+    globalProvider[@"requires_icon_provider_restart"] = @YES;
     NSMutableDictionary *hue = [LGSliderSetting(
         @"IOS26Icons.TintHue",
         LGLocalized(@"prefs.control.tint_hue"),
@@ -695,6 +713,8 @@ NSArray<NSDictionary *> *LGIOS26IconItems(void) {
         LGGlassEnabledSetting(@"IOS26Icons.Enabled", NO),
         LGSettingControlledByKey(algorithm, @"IOS26Icons.Enabled", @NO),
         LGSettingControlledByKey(mode, @"IOS26Icons.Enabled", @NO),
+        LGSettingControlledByKey(subjectStyle, @"IOS26Icons.Enabled", @NO),
+        LGSettingControlledByKey(globalProvider.copy, @"IOS26Icons.Enabled", @NO),
         LGSettingControlledByKey([hue copy], @"IOS26Icons.Enabled", @NO),
         LGSettingControlledByKey(
             LGSliderSetting(@"IOS26Icons.TintIntensity",
@@ -849,20 +869,22 @@ NSArray<NSDictionary *> *LGAppLibraryItems(void) {
 }
 
 NSArray<NSDictionary *> *LGWidgetItems(void) {
+    NSMutableDictionary *removeBackground = [LGSettingControlledByKey(
+        LGSwitchSetting(@"RWB.Enabled",
+                        LGLocalized(@"prefs.rwb.enabled.title"),
+                        LGLocalized(@"prefs.rwb.enabled.subtitle"), YES),
+        @"Widgets.Enabled", @YES) mutableCopy];
+    removeBackground[@"requires_backboard_restart"] = @YES;
     return LGJoinItemGroups(@[
         LGRendererItemsForHostPrefix(@"Widgets"),
         @[
             LGSectionSetting(LGLocalized(@"prefs.rwb.section.title"),
                              LGLocalized(@"prefs.rwb.section.subtitle")),
-            LGSettingControlledByKey(
-                LGSwitchSetting(@"RWB.Enabled",
-                                LGLocalized(@"prefs.rwb.enabled.title"),
-                                LGLocalized(@"prefs.rwb.enabled.subtitle"), YES),
-                @"Widgets.Enabled", @YES),
+            removeBackground.copy,
             LGSettingControlledByKey(
                 LGSwitchSetting(@"RWB.ForceDarkMode",
                                 LGLocalized(@"prefs.rwb.force_dark.title"),
-                                LGLocalized(@"prefs.rwb.force_dark.subtitle"), YES),
+                                LGLocalized(@"prefs.rwb.force_dark.subtitle"), NO),
                 @"RWB.Enabled", @YES),
             LGSettingControlledByKey(
                 LGSwitchSetting(@"RWB.SystemWidgets.Enabled",
@@ -873,12 +895,6 @@ NSArray<NSDictionary *> *LGWidgetItems(void) {
                 LGSwitchSetting(@"RWB.MaterialView.Enabled",
                                 LGLocalized(@"prefs.rwb.material_view.title"),
                                 LGLocalized(@"prefs.rwb.material_view.subtitle"), NO),
-                @"RWB.Enabled", @YES),
-            LGSettingControlledByKey(
-                LGKeyedNavSetting(@"RWB.ThirdPartyBundleIDs",
-                              LGLocalized(@"prefs.misc.rwb_third_party.title"),
-                              LGLocalized(@"prefs.misc.rwb_third_party.subtitle"),
-                              @"editThirdPartyAppRWB"),
                 @"RWB.Enabled", @YES),
         ],
     ]);
@@ -917,6 +933,10 @@ NSArray<NSDictionary *> *LGAllSurfaceItems(void) {
     [all addObjectsFromArray:LGHomescreenItems()];
     [all addObjectsFromArray:LGLockscreenItems()];
     [all addObjectsFromArray:LGAppLibraryItems()];
+    [all addObjectsFromArray:LGRendererItemsForHostPrefix(@"DynamicIsland")];
+    [all addObject:LGSwitchSetting(@"DynamicIsland.HideWhenInactive",
+        LGLocalized(@"prefs.island.hide_idle.title"),
+        LGLocalized(@"prefs.island.hide_idle.subtitle"), NO)];
     return [all copy];
 }
 

@@ -15,6 +15,8 @@ CFStringRef const LGPrefsChangedNotification = CFSTR("dylv.liquidassprefs/Reload
 CFStringRef const LGPrefsRespringNotification = CFSTR("dylv.liquidassprefs/Respring");
 const char * const LGPrefsChangedNotificationCString = "dylv.liquidassprefs/Reload";
 const char * const LGPrefsRespringNotificationCString = "dylv.liquidassprefs/Respring";
+const char * const LGChronodRestartNotificationCString =
+    "dylv.liquidassprefs/RestartChronod";
 const CGFloat LGKeyboardDefaultCornerRadius = 28.0;
 const CGFloat LGKeyboardDefaultOverhang = 20.0;
 const CGFloat LGBannerDefaultCornerRadius = 18.5;

@@ -577,6 +577,7 @@ void LGPresentRespringConfirmation(UIViewController *controller) {
                   style:UIAlertActionStyleDefault
                 handler:^(__unused UIAlertAction *action) {
         LGSetNeedsRespring(NO);
+        notify_post(LGChronodRestartNotificationCString);
         notify_post(LGPrefsRespringNotificationCString);
     }]];
     [controller presentViewController:alert animated:YES completion:nil];

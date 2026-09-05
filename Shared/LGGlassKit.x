@@ -52,7 +52,7 @@ BOOL lgHostEnabled(NSString *prefix) {
     }
     if ([v isKindOfClass:[NSNumber class]]) return [v boolValue];
 
-    if ([prefix isEqualToString:@"AppIcons"]) return NO;
+    if ([prefix isEqualToString:@"AppIcons"] || [prefix isEqualToString:@"DynamicIsland"]) return NO;
     return YES;
 }
 

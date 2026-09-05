@@ -327,10 +327,13 @@ static LGIOS26ReferencePalette LGIOS26ReferencePaletteForPixels(
         + 0.7152 * palette.secondaryG + 0.0722 * palette.secondaryB;
     CGFloat backgroundCoverage = primaryDominance
         + (palette.hasSecondary ? secondaryDominance : 0.0);
-    palette.coherentSamples = primaryDominance >= 0.34
+    BOOL stronglyDominantPrimary = primaryDominance >= 0.62
+        && primary.variance < 0.012;
+    palette.coherentSamples = stronglyDominantPrimary
+        || (primaryDominance >= 0.34
         && backgroundCoverage >= 0.58
         && primary.variance < 0.006
-        && (!palette.hasSecondary || secondary.variance < 0.006);
+        && (!palette.hasSecondary || secondary.variance < 0.006));
     free(samples);
     return palette;
 }
@@ -561,7 +564,9 @@ UIImage *LGIOS26ProcessedIconImage(UIImage *image, LGIOS26IconMode mode) {
     return processed ?: image;
 }
 
-UIImage *LGIOS26AppleMitigatedIconImage(UIImage *image, BOOL darkAppearance) {
+UIImage *LGIOS26AppleMitigatedIconImage(UIImage *image,
+                                       BOOL darkAppearance,
+                                       BOOL preservesSubjectColor) {
     if (!image.CGImage) return image;
     static NSCache<NSString *, NSDictionary<NSString *, UIImage *> *> *cache;
     static dispatch_once_t onceToken;
@@ -571,9 +576,10 @@ UIImage *LGIOS26AppleMitigatedIconImage(UIImage *image, BOOL darkAppearance) {
         cache.totalCostLimit = 24 * 1024 * 1024;
     });
 
-    NSString *cacheKey = [NSString stringWithFormat:@"%p-%d",
+    NSString *cacheKey = [NSString stringWithFormat:@"%p-%d-%d",
                           image.CGImage,
-                          darkAppearance];
+                          darkAppearance,
+                          preservesSubjectColor];
     NSDictionary<NSString *, UIImage *> *cachedEntry = [cache objectForKey:cacheKey];
     UIImage *cachedSource = cachedEntry[@"source"];
     UIImage *cachedProcessed = cachedEntry[@"processed"];
@@ -678,20 +684,72 @@ UIImage *LGIOS26AppleMitigatedIconImage(UIImage *image, BOOL darkAppearance) {
             CGFloat subject = drawByReference ? referenceSubject : localSubject;
             subject = MAX(subject, edge * 0.62);
 
+            // Apple's mitigated legacy path keeps the simulated-glass chiclet
+            // separate from the flattened source. Leave coherent background
+            // pixels mostly transparent here so the backdrop layer remains the
+            // substrate, then retain the detected glyph as its own pass.
+            CGFloat subjectCoverage = LGIOS26Smoothstep(0.08, 0.92, subject);
+            CGFloat substrateAlpha = darkAppearance ? 0.10 : 0.055;
+            CGFloat glyphAlpha = preservesSubjectColor
+                ? (darkAppearance ? 0.76 : 0.72) : 0.58;
+            CGFloat resolvedAlpha;
+            if (drawByReference) {
+                resolvedAlpha = substrateAlpha
+                    + (glyphAlpha - substrateAlpha) * subjectCoverage;
+            } else {
+                resolvedAlpha = (darkAppearance ? 0.16 : 0.12)
+                    + (darkAppearance ? 0.48 : 0.44) * subjectCoverage;
+            }
+            resolvedAlpha += edge * (darkAppearance ? 0.035 : 0.03);
             CGFloat outputAlpha = sourceAlpha
-                * LGIOS26Clamp(0.08 + 0.30 * subject + 0.20 * edge,
-                               0.0,
-                               0.58);
-            CGFloat tone = darkAppearance
-                ? 0.34 + 0.56 * subject + 0.06 * edge
-                : (0.20 + 0.54 * pow(luminance, 0.82))
-                    + subject * (0.94 - (0.20 + 0.54 * pow(luminance, 0.82)))
-                    + 0.08 * edge;
-            tone = LGIOS26Clamp(tone, 0.06, 0.96);
+                * LGIOS26Clamp(resolvedAlpha, 0.0, 0.80);
+
+            CGFloat sourceTone = darkAppearance
+                ? 0.34 + 0.42 * pow(luminance, 0.82)
+                : 0.44 + 0.36 * pow(luminance, 0.78);
+            CGFloat directionalEdge = 0.0;
+            CGFloat gradientLength = sqrt(horizontal * horizontal
+                + vertical * vertical);
+            if (gradientLength > 0.0001) {
+                directionalEdge = LGIOS26Clamp(
+                    -(horizontal + vertical) / (gradientLength * M_SQRT2),
+                    -1.0,
+                    1.0);
+            }
+            CGFloat highlight = edge * MAX(directionalEdge, 0.0);
+            CGFloat darklight = edge * MAX(-directionalEdge, 0.0);
+            CGFloat neutralTone = sourceTone
+                + 0.055 * highlight
+                - 0.075 * darklight;
+            neutralTone = LGIOS26Clamp(neutralTone,
+                                       darkAppearance ? 0.18 : 0.26,
+                                       0.90);
+            CGFloat subjectColorWeight = LGIOS26Smoothstep(0.28,
+                                                            0.82,
+                                                            subjectCoverage);
+            CGFloat outputRed, outputGreen, outputBlue;
+            if (preservesSubjectColor) {
+                outputRed = neutralTone
+                    + (red - neutralTone) * subjectColorWeight;
+                outputGreen = neutralTone
+                    + (green - neutralTone) * subjectColorWeight;
+                outputBlue = neutralTone
+                    + (blue - neutralTone) * subjectColorWeight;
+            } else {
+                // iOS 27 changes the glass/chiclet between Light and Dark while
+                // keeping clear-mode glyphs on the same restrained white axis.
+                CGFloat softWhite = 0.96;
+                CGFloat outputTone = neutralTone
+                    + (softWhite - neutralTone) * subjectColorWeight;
+                outputRed = outputGreen = outputBlue = outputTone;
+            }
             uint8_t *output = outputPixels + y * rowBytes + x * 4;
-            uint8_t premultipliedTone =
-                (uint8_t)llround(255.0 * tone * outputAlpha);
-            output[0] = output[1] = output[2] = premultipliedTone;
+            output[0] = (uint8_t)llround(255.0
+                * LGIOS26Clamp(outputRed, 0.0, 1.0) * outputAlpha);
+            output[1] = (uint8_t)llround(255.0
+                * LGIOS26Clamp(outputGreen, 0.0, 1.0) * outputAlpha);
+            output[2] = (uint8_t)llround(255.0
+                * LGIOS26Clamp(outputBlue, 0.0, 1.0) * outputAlpha);
             output[3] = (uint8_t)llround(255.0 * outputAlpha);
         }
     }
@@ -979,6 +1037,7 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity) 
 @property (nonatomic) BOOL currentDarkAppearance;
 @property (nonatomic) CGFloat currentTintHue;
 @property (nonatomic) CGFloat currentTintIntensity;
+@property (nonatomic) BOOL currentPreservesSubjectColor;
 @property (nonatomic) BOOL hasConfiguration;
 @property (nonatomic) BOOL hasMaterialConfiguration;
 @property (nonatomic) CGRect laidOutBounds;
@@ -1160,13 +1219,15 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity) 
     self.rimMask.frame = bounds;
     self.glossMask.frame = bounds;
     CGFloat shortest = MIN(CGRectGetWidth(bounds), CGRectGetHeight(bounds));
-    // Keep the bevel silhouette as a static tint/highlight mask.
-    CGFloat bezel = LGIOS26Clamp(shortest * 0.13, 5.0, 8.5);
-    CGRect innerRect = CGRectInset(bounds, bezel, bezel);
-    CGFloat innerRadius = MAX(0.0, cornerRadius - bezel * 0.72);
     CGMutablePathRef path = CGPathCreateMutable();
     CGPathAddRoundedRect(path, NULL, bounds, cornerRadius, cornerRadius);
-    CGPathAddRoundedRect(path, NULL, innerRect, innerRadius, innerRadius);
+    if (self.currentAlgorithm != LGIOS26IconAlgorithmAppleMitigated) {
+        // The older algorithms only use refraction as a static bevel ring.
+        CGFloat bezel = LGIOS26Clamp(shortest * 0.13, 5.0, 8.5);
+        CGRect innerRect = CGRectInset(bounds, bezel, bezel);
+        CGFloat innerRadius = MAX(0.0, cornerRadius - bezel * 0.72);
+        CGPathAddRoundedRect(path, NULL, innerRect, innerRadius, innerRadius);
+    }
     self.refractionMask.path = path;
     CGPathRelease(path);
     CGFloat rimInset = self.rimMask.lineWidth * 0.5 + 0.15;
@@ -1190,14 +1251,19 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity) 
                algorithm:(LGIOS26IconAlgorithm)algorithm
           darkAppearance:(BOOL)darkAppearance
                  tintHue:(CGFloat)tintHue
-           tintIntensity:(CGFloat)tintIntensity {
+           tintIntensity:(CGFloat)tintIntensity
+   preservesSubjectColor:(BOOL)preservesSubjectColor
+        imageIsProcessed:(BOOL)imageIsProcessed {
     if (!image.CGImage) return;
     tintHue = tintHue - floor(tintHue);
     tintIntensity = LGIOS26Clamp(tintIntensity, 0.0, 1.0);
     [self configureMaterial];
     UIImage *sourceImage;
-    if (algorithm == LGIOS26IconAlgorithmAppleMitigated) {
-        UIImage *mitigated = LGIOS26AppleMitigatedIconImage(image, darkAppearance);
+    if (imageIsProcessed) {
+        sourceImage = image;
+    } else if (algorithm == LGIOS26IconAlgorithmAppleMitigated) {
+        UIImage *mitigated = LGIOS26AppleMitigatedIconImage(
+            image, darkAppearance, preservesSubjectColor);
         sourceImage = mode == LGIOS26IconModeTinted
             ? LGIOS26TintedIconImage(mitigated, tintHue, tintIntensity)
             : mitigated;
@@ -1212,6 +1278,7 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity) 
         || self.currentMode != mode
         || self.currentAlgorithm != algorithm
         || self.currentDarkAppearance != darkAppearance
+        || self.currentPreservesSubjectColor != preservesSubjectColor
         || fabs(self.currentTintHue - tintHue) > 0.0005
         || fabs(self.currentTintIntensity - tintIntensity) > 0.0005;
 
@@ -1246,12 +1313,16 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity) 
     self.currentDarkAppearance = darkAppearance;
     self.currentTintHue = tintHue;
     self.currentTintIntensity = tintIntensity;
+    self.currentPreservesSubjectColor = preservesSubjectColor;
     self.hasConfiguration = YES;
+    BOOL appleMitigated = algorithm == LGIOS26IconAlgorithmAppleMitigated;
     self.backdropLayer.backgroundColor = darkAppearance
         ? [UIColor colorWithWhite:0.0 alpha:0.20].CGColor
         : UIColor.clearColor.CGColor;
     if (mode == LGIOS26IconModeClear) {
-        self.backdropLayer.opacity = darkAppearance ? 0.88f : 0.82f;
+        self.backdropLayer.opacity = appleMitigated
+            ? (darkAppearance ? 0.74f : 0.70f)
+            : (darkAppearance ? 0.88f : 0.82f);
         self.glassLayer.colors = darkAppearance
             ? @[
                 (id)[UIColor colorWithWhite:0.0 alpha:0.28].CGColor,
@@ -1267,15 +1338,17 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity) 
             id identityFilter = LGIOS26IdentityColorFilter();
             self.basePortal.filters = identityFilter ? @[identityFilter] : @[];
             self.basePortal.compositingFilter = nil;
-            self.basePortal.opacity = 0.90f;
+            self.basePortal.opacity = appleMitigated ? 0.85f : 0.90f;
         } else {
             self.sourceLayer.hidden = NO;
-            self.sourceLayer.opacity = 0.90f;
+            self.sourceLayer.opacity = appleMitigated ? 0.85f : 0.90f;
         }
-        self.rimLayer.opacity = 0.72f;
-        self.rimBloomLayer.opacity = 0.38f;
-        self.glossLayer.opacity = 0.42f;
-        self.glyphHighlightLayer.opacity = darkAppearance ? 0.70f : 0.60f;
+        self.rimLayer.opacity = appleMitigated ? 0.42f : 0.72f;
+        self.rimBloomLayer.opacity = appleMitigated ? 0.22f : 0.38f;
+        self.glossLayer.opacity = appleMitigated ? 0.28f : 0.42f;
+        self.glyphHighlightLayer.opacity = appleMitigated
+            ? (darkAppearance ? 0.15f : 0.12f)
+            : (darkAppearance ? 0.70f : 0.60f);
         self.rimBloomLayer.colors = @[
             (id)UIColor.clearColor.CGColor,
             (id)UIColor.clearColor.CGColor,

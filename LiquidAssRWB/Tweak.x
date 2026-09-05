@@ -2,12 +2,13 @@
 
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+#import <unistd.h>
 #import "../Shared/LGSharedSupport.h"
 
 static BOOL kIsEnabled = YES;
 static BOOL kIsEnabledForSystemWidgets = YES;
 static BOOL kIsEnabledForMaterialView = NO;
-static BOOL kForceDarkMode = YES;
+static BOOL kForceDarkMode = NO;
 static CGFloat kMaxWidgetWidth = 140.0;
 static CGFloat kMaxWidgetHeight = 140.0;
 static NSSet<NSString *> *kWidgetBundleIdentifiers = nil;
@@ -15,6 +16,7 @@ static void *kRWBOriginalBackgroundColorKey = &kRWBOriginalBackgroundColorKey;
 static void *kRWBOriginalWindowStyleKey = &kRWBOriginalWindowStyleKey;
 static NSHashTable<UIWindow *> *sRWBWindows;
 static BOOL sRWBIsWidgetRenderer = NO;
+static BOOL sRWBIsChronod = NO;
 
 static NSUserDefaults *RWBPreferences(void) {
     static NSUserDefaults *preferences;
@@ -67,7 +69,7 @@ static void ReloadPrefs(void) {
         RWBPreferenceBool(preferences, @"RWB.SystemWidgets.Enabled", YES);
     kIsEnabledForMaterialView =
         RWBPreferenceBool(preferences, @"RWB.MaterialView.Enabled", NO);
-    kForceDarkMode = RWBPreferenceBool(preferences, @"RWB.ForceDarkMode", YES);
+    kForceDarkMode = RWBPreferenceBool(preferences, @"RWB.ForceDarkMode", NO);
     kMaxWidgetWidth = 140.0;
     kMaxWidgetHeight = 140.0;
 
@@ -123,6 +125,15 @@ static void RWBReloadPrefsCallback(CFNotificationCenterRef __unused center,
     ReloadPrefs();
 }
 
+static void RWBRestartChronodCallback(
+    CFNotificationCenterRef __unused center,
+    void * __unused observer,
+    CFStringRef __unused name,
+    const void * __unused object,
+    CFDictionaryRef __unused userInfo) {
+    if (sRWBIsChronod) _exit(0);
+}
+
 @interface CHSWidget : NSObject
 @property (nonatomic, copy, readonly) NSString *extensionBundleIdentifier;
 @end
@@ -166,7 +177,7 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
     if (!kIsEnabled || bundleIdentifier.length == 0) return NO;
     if (!kIsEnabledForSystemWidgets && [bundleIdentifier hasPrefix:@"com.apple."])
         return NO;
-    return [kWidgetBundleIdentifiers containsObject:bundleIdentifier];
+    return YES;
 }
 
 %group RWBSpringBoard
@@ -255,6 +266,16 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
 
 %property (nonatomic, strong) NSNumber *rwb_shouldHideBackground;
 
+- (UIWindow *)initWithFrame:(CGRect)frame {
+    UIWindow *window = %orig;
+    if (!sRWBWindows) sRWBWindows = [NSHashTable weakObjectsHashTable];
+    if (window) [sRWBWindows addObject:window];
+    if (window && sRWBIsWidgetRenderer && kIsEnabled) {
+        window.rwb_shouldHideBackground = @YES;
+    }
+    return window;
+}
+
 - (UIWindow *)initWithWindowScene:(UIWindowScene *)scene {
     if ([scene isKindOfClass:%c(CHUISAvocadoWindowScene)]) {
         CHUISAvocadoWindowScene *avocadoScene = (CHUISAvocadoWindowScene *)scene;
@@ -270,6 +291,10 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
     UIWindow *window = %orig;
     if (!sRWBWindows) sRWBWindows = [NSHashTable weakObjectsHashTable];
     if (window) [sRWBWindows addObject:window];
+    if (window && sRWBIsWidgetRenderer && kIsEnabled &&
+        !window.rwb_shouldHideBackground.boolValue) {
+        window.rwb_shouldHideBackground = @YES;
+    }
     if (window && kIsEnabled && kForceDarkMode) {
         if (!objc_getAssociatedObject(window, kRWBOriginalWindowStyleKey)) {
             objc_setAssociatedObject(window, kRWBOriginalWindowStyleKey,
@@ -279,6 +304,15 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
         [window setOverrideUserInterfaceStyle:UIUserInterfaceStyleDark];
     }
     return window;
+}
+
+- (void)setWindowScene:(UIWindowScene *)scene {
+    %orig;
+    if (sRWBIsWidgetRenderer && kIsEnabled) {
+        self.rwb_shouldHideBackground = @YES;
+    }
+    if (!sRWBWindows) sRWBWindows = [NSHashTable weakObjectsHashTable];
+    [sRWBWindows addObject:self];
 }
 
 %end
@@ -443,6 +477,18 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
     NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier ?: @"";
     sRWBIsWidgetRenderer =
         [bundleIdentifier hasPrefix:@"com.apple.chrono.WidgetRenderer-"];
+    sRWBIsChronod = [bundleIdentifier isEqualToString:@"com.apple.chronod"];
+
+    if (sRWBIsChronod &&
+        NSProcessInfo.processInfo.operatingSystemVersion.majorVersion == 15) {
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            NULL,
+            RWBRestartChronodCallback,
+            CFSTR("dylv.liquidassprefs/RestartChronod"),
+            NULL,
+            CFNotificationSuspensionBehaviorDeliverImmediately);
+    }
 
     ReloadPrefs();
 

@@ -1011,7 +1011,11 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
 - (UISwitch *)configuredToggleForItem:(NSDictionary *)item {
     UISwitch *toggle = [[LGPrefsSwitchClass() alloc] initWithFrame:CGRectZero];
     toggle.onTintColor = _accentColor;
-    toggle.on = [LGReadPreference(item[@"key"], item[@"default"]) boolValue];
+    NSNumber *forcedValue = item[@"forced_value"];
+    toggle.on = forcedValue
+        ? forcedValue.boolValue
+        : [LGReadPreference(item[@"key"], item[@"default"]) boolValue];
+    if ([item[@"disabled"] boolValue]) toggle.enabled = NO;
     objc_setAssociatedObject(toggle, kLGDefaultValueKey, item[@"default"], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(toggle, kLGPreferenceKeyKey, item[@"key"], OBJC_ASSOCIATION_COPY_NONATOMIC);
     [toggle addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
@@ -1073,6 +1077,23 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
             LGRefreshRespringBarGlass(_respringBar);
         } else {
             LGWritePreferenceAndMaybeRequireRespring(item[@"key"], @(sender.isOn));
+            if ([item[@"requires_backboard_restart"] boolValue]) {
+                LGSetRespringBarDismissed(NO);
+                LGSetNeedsRespring(YES);
+                LGPresentInfoSheet(self,
+                                   LGLocalized(@"prefs.rwb.restart_required.title"),
+                                   LGLocalized(@"prefs.rwb.restart_required.body"));
+            } else if ([item[@"requires_island_restart"] boolValue]) {
+                LGSetRespringBarDismissed(NO);
+                LGSetNeedsRespring(YES);
+                LGPresentInfoSheet(self, LGLocalized(@"prefs.respring_bar.title"),
+                    LGLocalized(@"prefs.island.restart.body"));
+            } else if ([item[@"requires_icon_provider_restart"] boolValue]) {
+                LGPresentInfoSheet(
+                    self,
+                    LGLocalized(@"prefs.icon_provider.restart_required.title"),
+                    LGLocalized(@"prefs.icon_provider.restart_required.body"));
+            }
             [self handleRespringStateChanged:nil];
         }
         if ([item[@"controls_following_panel"] boolValue]) {

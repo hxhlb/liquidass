@@ -58,7 +58,7 @@
 
 "prefs.button.reset" = "重置";
 "prefs.button.cancel" = "取消";
-"prefs.button.respring" = "重启 SpringBoard";
+"prefs.button.respring" = "重启系统界面";
 "prefs.button.later" = "稍后";
 "prefs.button.reopen_settings" = "重新打开";
 "prefs.button.ok" = "确定";
@@ -68,8 +68,8 @@
 "prefs.reset_confirm.title" = "确认重置？";
 "prefs.reset_confirm.body" = "此操作会将所有偏好设置重置为默认值。确定要继续吗？";
 "prefs.reset_confirm.surface_body_format" = "这将把 %@ 的所有设置重置为默认值。确定要继续吗？";
-"prefs.respring_confirm.title" = "确认重启桌面";
-"prefs.respring_confirm.body" = "此操作将重新启动 backboardd 与 SpringBoard，是否继续？";
+"prefs.respring_confirm.title" = "确认重启系统界面";
+"prefs.respring_confirm.body" = "此操作将重新启动 backboardd、SpringBoard 与相关小组件渲染服务，是否继续？";
 "prefs.import_prefs.error_invalid" = "剪贴板中不包含有效的 LiquidAss 偏好设置数据块。";
 "prefs.import_prefs.error_empty" = "导入的偏好设置数据块为空。";
 "prefs.import_prefs.error_read" = "无法读取选中的偏好设置文件。";
@@ -78,8 +78,8 @@
 "prefs.export_prefs.error" = "无法生成可共享的偏好设置导出文件。";
 "prefs.reopen_settings.title" = "重新打开设置";
 "prefs.reopen_settings.body" = "此更改将在下次打开“设置”时生效。现在重新打开“设置”吗？";
-"prefs.respring_bar.title" = "建议重启桌面";
-"prefs.respring_bar.subtitle" = "进行更改后，建议重启桌面。";
+"prefs.respring_bar.title" = "需要重启系统界面";
+"prefs.respring_bar.subtitle" = "重启系统界面与相关渲染服务后，此修改才会生效。";
 "prefs.info.title" = "信息";
 "prefs.jump_to.title" = "跳转到";
 "prefs.value_prompt.title" = "设定数值";
@@ -104,8 +104,8 @@
 "prefs.subtitle.date_format" = "使用 Unicode 日期格式语法，例如 EEE MMM d。";
 "prefs.surface.app_library.title" = "App 资源库";
 "prefs.surface.app_library.subtitle" = "与 App 资源库表面相关的玻璃控制项。";
-"prefs.misc.respring.title" = "重启桌面";
-"prefs.misc.respring.subtitle" = "重新启动 SpringBoard 与相关渲染服务。";
+"prefs.misc.respring.title" = "重启系统界面";
+"prefs.misc.respring.subtitle" = "重新启动 backboardd、SpringBoard 与相关渲染服务。";
 "prefs.misc.about.title" = "更多选项";
 "prefs.misc.about.subtitle" = "附加控制项和高级偏好设置。";
 "prefs.misc.prefs_settings.title" = "关于";
@@ -117,9 +117,11 @@
 "prefs.misc.rwb_third_party.editor_body" = "每行输入一个 bundle ID。";
 "prefs.misc.rwb_third_party.placeholder" = "com.example.widget\ncom.example.anotherwidget";
 "prefs.rwb.section.title" = "移除小组件背景";
-"prefs.rwb.section.subtitle" = "控制小组件背景移除及相关兼容行为。";
+"prefs.rwb.section.subtitle" = "为全部小组件提供可选的透明玻璃模式。";
 "prefs.rwb.enabled.title" = "移除小组件背景";
-"prefs.rwb.enabled.subtitle" = "移除 RWB 白名单中小组件的背景。";
+"prefs.rwb.enabled.subtitle" = "先将小组件背景透明化，再显示玻璃效果。修改后需要重启 backboardd。";
+"prefs.rwb.restart_required.title" = "需要重启";
+"prefs.rwb.restart_required.body" = "请返回 Liquid (Gl)ass 设置首页，点击“重启系统界面”。此操作会刷新 backboardd、SpringBoard 与当前系统所需的小组件渲染服务。";
 "prefs.rwb.force_dark.title" = "强制深色外观";
 "prefs.rwb.force_dark.subtitle" = "使用深色外观渲染由 RWB 处理的小组件。";
 "prefs.rwb.system_widgets.title" = "包含系统小组件";
@@ -200,7 +202,20 @@
 "prefs.option.legacy_algorithm" = "旧版算法";
 "prefs.option.clear" = "透明";
 "prefs.option.tinted" = "着色";
+"prefs.control.subject_style" = "透明主体风格";
+"prefs.subtitle.subject_style" = "“柔白”贴近 iOS 27；“清彩”保留识别到的主体原色。";
+"prefs.option.soft_white" = "柔白";
+"prefs.option.fresh_color" = "清彩";
+"prefs.control.global_icon_provider" = "全局处理图标（实验性）";
+"prefs.subtitle.global_icon_provider" = "同时处理设置、Spotlight 与其他 App 通过 IconServices 获取的图标。可能增加卡顿或发热；修改后请退出并重新打开相关 App。";
+"prefs.icon_provider.restart_required.title" = "需要重新打开相关 App";
+"prefs.icon_provider.restart_required.body" = "此功能在各 App 进程内运行。修改后请退出并重新打开“设置”、Spotlight 或其他相关 App；若桌面图标仍未刷新，请返回 Liquid (Gl)ass 首页点击“重启系统界面”。";
 "prefs.control.tint_hue" = "着色色相";
 "prefs.subtitle.tint_hue" = "选择所有透明图标玻璃使用的统一颜色。";
 "prefs.control.tint_intensity" = "着色强度";
 "prefs.subtitle.tint_intensity" = "控制颜色对透明玻璃的着色程度。";
+"prefs.surface.dynamic_island.title" = "灵动岛";
+"prefs.island.hide_idle.title" = "无活动时隐藏";
+"prefs.island.hide_idle.subtitle" = "当前只能开启闲置隐藏，暂时无法关闭。";
+"prefs.surface.dynamic_island.subtitle" = "实验性功能：为 iOS 17 及以上的灵动岛添加玻璃背景，保留活动内容与操作。修改“启用”后，请返回首页重启系统界面。";
+"prefs.island.restart.body" = "启用或关闭灵动岛玻璃后，请返回 Liquid (Gl)ass 首页点击“重启系统界面”。系统重新创建灵动岛背景后，此修改才会完整生效。";

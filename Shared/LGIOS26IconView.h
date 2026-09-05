@@ -13,7 +13,9 @@ typedef NS_ENUM(NSInteger, LGIOS26IconAlgorithm) {
 };
 
 UIImage *LGIOS26ProcessedIconImage(UIImage *image, LGIOS26IconMode mode);
-UIImage *LGIOS26AppleMitigatedIconImage(UIImage *image, BOOL darkAppearance);
+UIImage *LGIOS26AppleMitigatedIconImage(UIImage *image,
+                                       BOOL darkAppearance,
+                                       BOOL preservesSubjectColor);
 UIImage *LGIOS26GrayscaleIconImage(UIImage *image);
 UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity);
 
@@ -25,6 +27,8 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity);
                algorithm:(LGIOS26IconAlgorithm)algorithm
           darkAppearance:(BOOL)darkAppearance
                  tintHue:(CGFloat)tintHue
-           tintIntensity:(CGFloat)tintIntensity;
+           tintIntensity:(CGFloat)tintIntensity
+   preservesSubjectColor:(BOOL)preservesSubjectColor
+        imageIsProcessed:(BOOL)imageIsProcessed;
 
 @end

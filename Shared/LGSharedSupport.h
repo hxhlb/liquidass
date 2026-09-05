@@ -19,6 +19,7 @@ FOUNDATION_EXPORT CFStringRef const LGPrefsChangedNotification;
 FOUNDATION_EXPORT CFStringRef const LGPrefsRespringNotification;
 FOUNDATION_EXPORT const char * const LGPrefsChangedNotificationCString;
 FOUNDATION_EXPORT const char * const LGPrefsRespringNotificationCString;
+FOUNDATION_EXPORT const char * const LGChronodRestartNotificationCString;
 
 NSString *LGMainBundleIdentifier(void);
 BOOL LGIsSpringBoardProcess(void);

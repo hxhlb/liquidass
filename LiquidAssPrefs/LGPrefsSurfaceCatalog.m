@@ -19,6 +19,7 @@ NSString * const LGPrefsSurfaceControlCenter = @"ControlCenter";
 NSString * const LGPrefsSurfaceSearchPill = @"SearchPill";
 NSString * const LGPrefsSurfaceSpotlight = @"Spotlight";
 NSString * const LGPrefsSurfaceWidgets = @"Widgets";
+NSString * const LGPrefsSurfaceDynamicIsland = @"DynamicIsland";
 NSString * const LGPrefsSurfaceAppLibraryPods = @"AppLibraryPods";
 NSString * const LGPrefsSurfaceAppLibrarySearch = @"AppLibrarySearch";
 NSString * const LGPrefsSurfaceNotifications = @"Notifications";
@@ -50,6 +51,7 @@ BOOL LGPrefsSurfaceIsKnown(NSString *identifier) {
            [identifier isEqualToString:LGPrefsSurfaceSearchPill] ||
            [identifier isEqualToString:LGPrefsSurfaceSpotlight] ||
            [identifier isEqualToString:LGPrefsSurfaceWidgets] ||
+           [identifier isEqualToString:LGPrefsSurfaceDynamicIsland] ||
            [identifier isEqualToString:LGPrefsSurfaceAppLibraryPods] ||
            [identifier isEqualToString:LGPrefsSurfaceAppLibrarySearch] ||
            [identifier isEqualToString:LGPrefsSurfaceNotifications] ||
@@ -82,6 +84,7 @@ NSString *LGPrefsSurfaceTitle(NSString *identifier) {
     if ([identifier isEqualToString:LGPrefsSurfaceSearchPill]) return LGLocalized(@"prefs.section.search_pill.title");
     if ([identifier isEqualToString:LGPrefsSurfaceSpotlight]) return LGLocalized(@"prefs.section.spotlight.title");
     if ([identifier isEqualToString:LGPrefsSurfaceWidgets]) return LGLocalized(@"prefs.section.widgets.title");
+    if ([identifier isEqualToString:LGPrefsSurfaceDynamicIsland]) return LGLocalized(@"prefs.surface.dynamic_island.title");
     if ([identifier isEqualToString:LGPrefsSurfaceAppLibraryPods]) return LGLocalized(@"prefs.section.category_pods.title");
     if ([identifier isEqualToString:LGPrefsSurfaceAppLibrarySearch]) return LGLocalized(@"prefs.section.search_field.title");
     if ([identifier isEqualToString:LGPrefsSurfaceNotifications]) return LGLocalized(@"prefs.section.lockscreen_notifications.title");
@@ -98,6 +101,7 @@ NSString *LGPrefsSurfaceTitle(NSString *identifier) {
 }
 
 NSString *LGPrefsSurfaceSubtitle(NSString *identifier) {
+    if ([identifier isEqualToString:LGPrefsSurfaceDynamicIsland]) return LGLocalized(@"prefs.surface.dynamic_island.subtitle");
 
     if ([identifier isEqualToString:LGPrefsSurfaceHomescreen]) return LGLocalized(@"prefs.surface.homescreen.subtitle");
     if ([identifier isEqualToString:LGPrefsSurfaceLockscreen]) return LGLocalized(@"prefs.surface.lockscreen.subtitle");
@@ -140,6 +144,7 @@ NSString *LGPrefsSurfaceSymbolName(NSString *identifier) {
     if ([identifier isEqualToString:LGPrefsSurfaceSearchPill]) return @"magnifyingglass";
     if ([identifier isEqualToString:LGPrefsSurfaceSpotlight]) return @"magnifyingglass.circle.fill";
     if ([identifier isEqualToString:LGPrefsSurfaceWidgets]) return @"rectangle.3.group.fill";
+    if ([identifier isEqualToString:LGPrefsSurfaceDynamicIsland]) return @"capsule.fill";
     if ([identifier isEqualToString:LGPrefsSurfaceAppLibraryPods]) return @"square.grid.2x2.fill";
     if ([identifier isEqualToString:LGPrefsSurfaceAppLibrarySearch]) return @"magnifyingglass";
     if ([identifier isEqualToString:LGPrefsSurfaceNotifications]) return @"bell.fill";
@@ -182,6 +187,7 @@ NSArray<NSDictionary *> *LGPrefsSurfaceItems(NSString *identifier) {
         @{ @"type": @"nav", @"title": LGPrefsSurfaceTitle(LGPrefsSurfaceAppLibraryPods), @"surface_identifier": LGPrefsSurfaceAppLibraryPods },
         @{ @"type": @"nav", @"title": LGPrefsSurfaceTitle(LGPrefsSurfaceAppLibrarySearch), @"surface_identifier": LGPrefsSurfaceAppLibrarySearch },
         LGSectionSetting(LGLocalized(@"prefs.surface.group.system.title"), LGLocalized(@"prefs.surface.group.system.subtitle")),
+        @{ @"type": @"nav", @"title": LGPrefsSurfaceTitle(LGPrefsSurfaceDynamicIsland), @"surface_identifier": LGPrefsSurfaceDynamicIsland },
         @{ @"type": @"nav", @"title": LGPrefsSurfaceTitle(LGPrefsSurfaceGlobalControls), @"surface_identifier": LGPrefsSurfaceGlobalControls },
         @{ @"type": @"nav", @"title": LGPrefsSurfaceTitle(LGPrefsSurfaceKeyboard), @"surface_identifier": LGPrefsSurfaceKeyboard },
         @{ @"type": @"nav", @"title": LGPrefsSurfaceTitle(LGPrefsSurfaceTabBar), @"surface_identifier": LGPrefsSurfaceTabBar },
@@ -199,6 +205,17 @@ NSArray<NSDictionary *> *LGPrefsSurfaceItems(NSString *identifier) {
     if ([identifier isEqualToString:LGPrefsSurfaceSearchPill]) return LGSearchPillItems();
     if ([identifier isEqualToString:LGPrefsSurfaceSpotlight]) return LGRendererItemsForHostPrefix(@"Spotlight");
     if ([identifier isEqualToString:LGPrefsSurfaceWidgets]) return LGWidgetItems();
+    if ([identifier isEqualToString:LGPrefsSurfaceDynamicIsland]) {
+        NSMutableDictionary *hideIdle = [LGSwitchSetting(
+            @"DynamicIsland.HideWhenInactive",
+            LGLocalized(@"prefs.island.hide_idle.title"),
+            LGLocalized(@"prefs.island.hide_idle.subtitle"), YES) mutableCopy];
+        hideIdle[@"disabled"] = @YES;
+        hideIdle[@"forced_value"] = @YES;
+        return [@[LGSectionSetting(nil, LGLocalized(@"prefs.surface.dynamic_island.subtitle")),
+                  hideIdle.copy]
+            arrayByAddingObjectsFromArray:LGRendererItemsForHostPrefix(@"DynamicIsland")];
+    }
     if ([identifier isEqualToString:LGPrefsSurfaceAppLibraryPods]) return LGRendererItemsForHostPrefix(@"AppLibrary");
     if ([identifier isEqualToString:LGPrefsSurfaceAppLibrarySearch]) return LGRendererItemsForHostPrefix(@"AppLibSearch");
     if ([identifier isEqualToString:LGPrefsSurfaceNotifications]) return LGRendererItemsForHostPrefix(@"Notification");

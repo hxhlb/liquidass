@@ -60,7 +60,7 @@
 
 "prefs.button.reset" = "重置";
 "prefs.button.cancel" = "取消";
-"prefs.button.respring" = "重新啟動主畫面";
+"prefs.button.respring" = "重新啟動系統介面";
 "prefs.button.later" = "稍後";
 "prefs.button.reopen_settings" = "重新開啟";
 "prefs.button.ok" = "確定";
@@ -71,8 +71,8 @@
 "prefs.reset_confirm.body" = "此操作將把所有設定回復為預設值。是否繼續？";
 "prefs.reset_confirm.surface_body_format" = "這將會把所有 %@ 重置為預設值。是否繼續？";
 
-"prefs.respring_confirm.title" = "確認重新啟動主畫面";
-"prefs.respring_confirm.body" = "此操作將重新啟動 backboardd 與 SpringBoard，是否繼續？";
+"prefs.respring_confirm.title" = "確認重新啟動系統介面";
+"prefs.respring_confirm.body" = "此操作將重新啟動 backboardd、SpringBoard 與相關小工具渲染服務，是否繼續？";
 
 "prefs.import_prefs.error_invalid" = "所選的檔案不是有效的 LiquidAss 設定資料。";
 "prefs.import_prefs.error_empty" = "匯入的設定資料是空的。";
@@ -85,8 +85,8 @@
 "prefs.reopen_settings.title" = "重新開啟設定";
 "prefs.reopen_settings.body" = "此變更將在下次開啟設定時生效。現在要重新開啟設定嗎？";
 
-"prefs.respring_bar.title" = "建議重新啟動主畫面";
-"prefs.respring_bar.subtitle" = "建議在變更後重新啟動主畫面以套用設定";
+"prefs.respring_bar.title" = "需要重新啟動系統介面";
+"prefs.respring_bar.subtitle" = "重新啟動系統介面與相關渲染服務後，此修改才會生效。";
 
 "prefs.info.title" = "資訊";
 
@@ -118,8 +118,8 @@
 "prefs.surface.app_library.title" = "App 資料庫";
 "prefs.surface.app_library.subtitle" = "App 資料庫相關介面的玻璃控制項。";
 
-"prefs.misc.respring.title" = "重新啟動主畫面";
-"prefs.misc.respring.subtitle" = "重新啟動 SpringBoard 與相關渲染服務。";
+"prefs.misc.respring.title" = "重新啟動系統介面";
+"prefs.misc.respring.subtitle" = "重新啟動 backboardd、SpringBoard 與相關渲染服務。";
 "prefs.misc.about.title" = "更多選項";
 "prefs.misc.about.subtitle" = "額外控制項與進階偏好設定。";
 "prefs.misc.prefs_settings.title" = "關於";
@@ -132,9 +132,11 @@
 "prefs.misc.rwb_third_party.editor_body" = "每行輸入一個 Bundle ID。";
 "prefs.misc.rwb_third_party.placeholder" = "com.example.widget\ncom.example.anotherwidget";
 "prefs.rwb.section.title" = "移除小工具背景";
-"prefs.rwb.section.subtitle" = "控制小工具背景移除及相關相容行為。";
+"prefs.rwb.section.subtitle" = "為全部小工具提供可選的透明玻璃模式。";
 "prefs.rwb.enabled.title" = "移除小工具背景";
-"prefs.rwb.enabled.subtitle" = "移除 RWB 允許列表中小工具的背景。";
+"prefs.rwb.enabled.subtitle" = "先將小工具背景透明化，再顯示玻璃效果。修改後需要重新啟動 backboardd。";
+"prefs.rwb.restart_required.title" = "需要重新啟動";
+"prefs.rwb.restart_required.body" = "請返回 Liquid (Gl)ass 設定首頁，點擊「重新啟動系統介面」。此操作會刷新 backboardd、SpringBoard 與目前系統所需的小工具渲染服務。";
 "prefs.rwb.force_dark.title" = "強制深色外觀";
 "prefs.rwb.force_dark.subtitle" = "使用深色外觀渲染由 RWB 處理的小工具。";
 "prefs.rwb.system_widgets.title" = "包含系統小工具";
@@ -218,7 +220,20 @@
 "prefs.option.legacy_algorithm" = "舊版演算法";
 "prefs.option.clear" = "透明";
 "prefs.option.tinted" = "著色";
+"prefs.control.subject_style" = "透明主體風格";
+"prefs.subtitle.subject_style" = "「柔白」貼近 iOS 27；「清彩」保留辨識到的主體原色。";
+"prefs.option.soft_white" = "柔白";
+"prefs.option.fresh_color" = "清彩";
+"prefs.control.global_icon_provider" = "全域處理圖示（實驗性）";
+"prefs.subtitle.global_icon_provider" = "同時處理「設定」、Spotlight 與其他 App 透過 IconServices 取得的圖示。可能增加卡頓或發熱；修改後請退出並重新開啟相關 App。";
+"prefs.icon_provider.restart_required.title" = "需要重新開啟相關 App";
+"prefs.icon_provider.restart_required.body" = "此功能在各 App 行程內執行。修改後請退出並重新開啟「設定」、Spotlight 或其他相關 App；若主畫面圖示仍未重新整理，請返回 Liquid (Gl)ass 首頁點擊「重新啟動系統介面」。";
 "prefs.control.tint_hue" = "著色色相";
 "prefs.subtitle.tint_hue" = "選擇所有透明圖示玻璃使用的統一顏色。";
 "prefs.control.tint_intensity" = "著色強度";
 "prefs.subtitle.tint_intensity" = "控制顏色對透明玻璃的著色程度。";
+"prefs.surface.dynamic_island.title" = "動態島";
+"prefs.island.hide_idle.title" = "無活動時隱藏";
+"prefs.island.hide_idle.subtitle" = "目前只能開啟閒置隱藏，暫時無法關閉。";
+"prefs.surface.dynamic_island.subtitle" = "實驗性功能：為 iOS 17 及以上的動態島加入玻璃背景，保留活動內容與操作。修改「啟用」後，請返回首頁重新啟動系統介面。";
+"prefs.island.restart.body" = "啟用或關閉動態島玻璃後，請返回 Liquid (Gl)ass 首頁點擊「重新啟動系統介面」。系統重新建立動態島背景後，此修改才會完整生效。";
