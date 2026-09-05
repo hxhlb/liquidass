@@ -698,6 +698,9 @@ static NSString *LGClockVariableFontPath(void) {
 @property (nonatomic, strong) CAShapeLayer *glyphMaskLayer;
 @property (nonatomic, weak) UIView *renderContainer;
 @property (nonatomic) CGRect originalLabelFrame;
+@property (nonatomic) CGRect lastAppliedLabelFrame;
+@property (nonatomic, strong) NSArray<NSArray *> *directClipState;
+@property (nonatomic) BOOL directFontApplied;
 @property (nonatomic) BOOL hasRenderContainerState;
 @property (nonatomic) BOOL originalRenderContainerClipsToBounds;
 @property (nonatomic) BOOL originalRenderContainerMasksToBounds;
@@ -874,6 +877,111 @@ static BOOL LGClockLabelUsesOurFont(UILabel *label) {
     return LGClockIsOurFont(LGClockAttributedFont(label));
 }
 
+static CGFloat LGClockSyntheticEmbolden(void) {
+    CGFloat weight = LGClockAxisValue(@"weight");
+    if (weight <= 400.0) return 0.0;
+    CGFloat baseAmount = ((weight - 400.0) / 600.0) * 4.0;
+    CGFloat heavyAmount = weight > 750.0
+        ? ((weight - 750.0) / 250.0) * 3.0 : 0.0;
+    return MIN(7.0, baseAmount + heavyAmount);
+}
+
+static void LGClockApplyFontToSourceLabel(UILabel *label, UIFont *font,
+                                          BOOL embolden) {
+    if (!label || !font) return;
+    UIFont *currentFont = label.attributedText.length
+        ? LGClockAttributedFont(label) : label.font;
+    if ([currentFont isEqual:font]) return;
+    label.font = font;
+
+    NSString *text = label.attributedText.string.length
+        ? label.attributedText.string : label.text;
+    if (!text.length) return;
+    NSMutableAttributedString *attributed = label.attributedText.length
+        ? label.attributedText.mutableCopy
+        : [[NSMutableAttributedString alloc] initWithString:text];
+    NSRange range = NSMakeRange(0, attributed.length);
+    [attributed addAttribute:NSFontAttributeName value:font range:range];
+    [attributed removeAttribute:NSStrokeColorAttributeName range:range];
+    [attributed removeAttribute:NSStrokeWidthAttributeName range:range];
+    if (embolden) {
+        CGFloat amount = LGClockSyntheticEmbolden();
+        if (amount > 0.0) {
+            CGFloat strokePercentage = -(amount / MAX(font.pointSize, 1.0)) * 100.0;
+            [attributed addAttribute:NSStrokeColorAttributeName
+                               value:label.textColor ?: UIColor.whiteColor
+                               range:range];
+            [attributed addAttribute:NSStrokeWidthAttributeName
+                               value:@(strokePercentage)
+                               range:range];
+        }
+    }
+    label.attributedText = attributed;
+}
+
+static CGRect LGClockDirectFrame(LGClockState *state, UILabel *label,
+                                 UIFont *font) {
+    CGRect currentFrame = label.frame;
+    CGRect baseFrame = state.originalLabelFrame;
+    if (CGRectIsNull(state.lastAppliedLabelFrame) ||
+        !CGRectEqualToRect(currentFrame, state.lastAppliedLabelFrame)) {
+        baseFrame = currentFrame;
+        state.originalLabelFrame = baseFrame;
+    }
+
+    NSString *text = label.text.length ? label.text : label.attributedText.string;
+    CGSize measured = [text sizeWithAttributes:@{ NSFontAttributeName: font }];
+    CGFloat lineHeight = MAX(CGRectGetHeight(baseFrame), font.lineHeight);
+    CGFloat width = MAX(CGRectGetWidth(baseFrame), ceil(measured.width) + 18.0);
+    CGFloat height = MAX(CGRectGetHeight(baseFrame),
+                         ceil(lineHeight) + ceil(lineHeight * 0.18) + 18.0);
+    CGFloat widthDelta = width - CGRectGetWidth(baseFrame);
+    CGFloat originX = CGRectGetMinX(baseFrame);
+    if (label.textAlignment == NSTextAlignmentRight) {
+        originX -= widthDelta;
+    } else if (label.textAlignment == NSTextAlignmentCenter) {
+        originX -= floor(widthDelta * 0.5);
+    }
+    return CGRectMake(originX, CGRectGetMinY(baseFrame), width, height);
+}
+
+static void LGClockOpenDirectClipChain(LGClockState *state, UILabel *label,
+                                       UIView *host) {
+    if (!state.directClipState) {
+        NSMutableArray<NSArray *> *saved = [NSMutableArray array];
+        for (UIView *view = label; view && view != host; view = view.superview) {
+            [saved addObject:@[ view, @(view.clipsToBounds),
+                                @(view.layer.masksToBounds) ]];
+        }
+        state.directClipState = saved.copy;
+    }
+    for (NSArray *entry in state.directClipState) {
+        UIView *view = entry[0];
+        view.clipsToBounds = NO;
+        view.layer.masksToBounds = NO;
+    }
+}
+
+static void LGClockRestoreDirectFontState(LGClockState *state) {
+    UILabel *label = state.sourceLabel;
+    if (label && state.directFontApplied) {
+        BOOL previousApplying = state.applying;
+        state.applying = YES;
+        if (state.originalFont)
+            LGClockApplyFontToSourceLabel(label, state.originalFont, NO);
+        label.frame = state.originalLabelFrame;
+        state.applying = previousApplying;
+    }
+    for (NSArray *entry in state.directClipState) {
+        UIView *view = entry[0];
+        view.clipsToBounds = [entry[1] boolValue];
+        view.layer.masksToBounds = [entry[2] boolValue];
+    }
+    state.directClipState = nil;
+    state.directFontApplied = NO;
+    state.lastAppliedLabelFrame = CGRectNull;
+}
+
 @implementation LGClockState
 
 - (instancetype)init {
@@ -923,6 +1031,7 @@ static BOOL LGClockLabelUsesOurFont(UILabel *label) {
         self.originalLabelAlpha = label.alpha;
         self.originalLabelHidden = label.hidden;
         self.originalLabelFrame = label.frame;
+        self.lastAppliedLabelFrame = CGRectNull;
         LGClockLog(@"source host=%@ label=%@ frame=%@ bounds=%@ text=%@ directFont={%@} attributedFont={%@} savedFont={%@} savedAssociated=%d variablePref=%d",
                    NSStringFromClass(host.class), NSStringFromClass(label.class),
                    NSStringFromCGRect(label.frame), NSStringFromCGRect(label.bounds),
@@ -944,6 +1053,25 @@ static BOOL LGClockLabelUsesOurFont(UILabel *label) {
     BOOL enabled = LGClockEnabled();
     BOOL variableFontEnabled = LGClockVariableFontEnabled();
     UIView *renderContainer = host;
+    if (variableFontEnabled) {
+        CGFloat pointSize = MAX(self.originalFont.pointSize * LGClockFontScale(), 1.0);
+        UIFont *directFont = [[LGClockFontStore shared]
+            fontAtPointSize:pointSize
+                 heightAxis:LGClockAxisValue(@"height")];
+        if (directFont) {
+            BOOL previousApplying = self.applying;
+            self.applying = YES;
+            LGClockApplyFontToSourceLabel(label, directFont, YES);
+            CGRect directFrame = LGClockDirectFrame(self, label, directFont);
+            label.frame = directFrame;
+            self.lastAppliedLabelFrame = directFrame;
+            self.directFontApplied = YES;
+            LGClockOpenDirectClipChain(self, label, host);
+            self.applying = previousApplying;
+        }
+    } else {
+        LGClockRestoreDirectFontState(self);
+    }
     CGRect sourceRect = [label convertRect:label.bounds toView:renderContainer];
     UIView *nearestObstacle = nil;
     CGRect nearestObstacleFrame = CGRectNull;
@@ -952,6 +1080,12 @@ static BOOL LGClockLabelUsesOurFont(UILabel *label) {
                                                    &nearestObstacle,
                                                    &nearestObstacleFrame,
                                                    &obstacleCandidates);
+    if (variableFontEnabled) {
+        nearestTop = CGFLOAT_MAX;
+        nearestObstacle = nil;
+        nearestObstacleFrame = CGRectNull;
+        obstacleCandidates = 0;
+    }
     CFTimeInterval profileObstacleEnd = CACurrentMediaTime();
     if (nearestTop != CGFLOAT_MAX) nearestTop = round(nearestTop * 2.0) * 0.5;
     NSString *signature = [NSString stringWithFormat:@"%d|%d|%@|%.2f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f",
@@ -964,7 +1098,8 @@ static BOOL LGClockLabelUsesOurFont(UILabel *label) {
                            nearestTop, LGClockBezelWidth(),
                            CGRectGetMinX(sourceRect), CGRectGetMinY(sourceRect),
                            CGRectGetWidth(sourceRect), CGRectGetHeight(sourceRect)];
-    BOOL fontStateMatches = enabled ? (self.glassView != nil)
+    BOOL directFontMatches = !variableFontEnabled || LGClockLabelUsesOurFont(label);
+    BOOL fontStateMatches = enabled ? (self.glassView != nil && directFontMatches)
                                     : !LGClockLabelUsesOurFont(label);
     if ([signature isEqualToString:self.lastSignature] && fontStateMatches) {
         self.skippedChanges++;
@@ -1269,6 +1404,7 @@ static BOOL LGClockLabelUsesOurFont(UILabel *label) {
                    self.glassView, self.sourceLabel.alpha, self.sourceLabel.hidden);
     if (self.sourceLabel && !self.applying) {
         self.applying = YES;
+        LGClockRestoreDirectFontState(self);
         self.sourceLabel.alpha = self.originalLabelAlpha;
         self.sourceLabel.hidden = self.originalLabelHidden;
         self.applying = NO;
@@ -1298,6 +1434,9 @@ static BOOL LGClockLabelUsesOurFont(UILabel *label) {
     self.sourceLabel = nil;
     self.visibleSourceView = nil;
     self.originalFont = nil;
+    self.directClipState = nil;
+    self.directFontApplied = NO;
+    self.lastAppliedLabelFrame = CGRectNull;
     self.renderCanvasSize = CGSizeZero;
     self.lastSignature = nil;
     self.lastFontDiagnostic = nil;
