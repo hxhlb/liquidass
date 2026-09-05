@@ -61,6 +61,7 @@ static NSHashTable<UIImageView *> *sLGIOS26StackImageViews;
 static NSHashTable *sLGIOS26FolderSharedCaches;
 static NSHashTable<UIView *> *sLGIOS26DockLibraryCards;
 static char kLGIOS26DockLibraryCardKey;
+static char kLGIOS26CrossfadeCardKey;
 static LGIOS26IconMode sLGIOS26Mode = LGIOS26IconModeClear;
 static LGIOS26IconAlgorithm sLGIOS26Algorithm = LGIOS26IconAlgorithmAppleMitigated;
 static CGFloat sLGIOS26TintHue = 0.37;
@@ -87,6 +88,16 @@ static NSCache<NSValue *, NSDictionary<NSString *, id> *> *
 @end
 
 @implementation LGIOS26DockLibraryCardState
+@end
+
+@interface LGIOS26CrossfadeCardState : NSObject
+@property (nonatomic, weak) UIView *material;
+@property (nonatomic, weak) UIView *tint;
+@property (nonatomic) BOOL materialHidden;
+@property (nonatomic) BOOL tintHidden;
+@end
+
+@implementation LGIOS26CrossfadeCardState
 @end
 
 static BOOL LGIOS26Enabled(void) {
@@ -824,6 +835,57 @@ static void LGRestoreIOS26DockLibraryCard(UIView *card) {
     [state.rim removeFromSuperlayer];
     objc_setAssociatedObject(card, &kLGIOS26DockLibraryCardKey, nil,
                              OBJC_ASSOCIATION_ASSIGN);
+}
+
+static void LGRestoreIOS26CrossfadeCard(UIView *card) {
+    LGIOS26CrossfadeCardState *state = objc_getAssociatedObject(
+        card, &kLGIOS26CrossfadeCardKey);
+    if (!state) return;
+    state.material.hidden = state.materialHidden;
+    state.tint.hidden = state.tintHidden;
+    objc_setAssociatedObject(card, &kLGIOS26CrossfadeCardKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+}
+
+static void LGApplyIOS26CrossfadeCard(UIView *card) {
+    if (!isExactClass(card, @"_SBHLibraryCategoryStackViewBackgroundView")) return;
+    BOOL eligible = LGIOS26Enabled() && card.window
+        && hasAncestorOfClassName(card, @"SBHLibraryPodCrossfadeView");
+    if (!eligible) {
+        LGRestoreIOS26CrossfadeCard(card);
+        return;
+    }
+    UIView *tint = LGIOS26DockCardSubview(card, "_tintingView");
+    UIView *material = LGIOS26DockCardSubview(card, "_materialView");
+    if (!tint && !material) return;
+    LGIOS26CrossfadeCardState *state = objc_getAssociatedObject(
+        card, &kLGIOS26CrossfadeCardKey);
+    if (state && (state.tint != tint || state.material != material)) {
+        LGRestoreIOS26CrossfadeCard(card);
+        state = nil;
+    }
+    if (!state) {
+        state = [LGIOS26CrossfadeCardState new];
+        state.tint = tint;
+        state.material = material;
+        state.tintHidden = tint.hidden;
+        state.materialHidden = material.hidden;
+        objc_setAssociatedObject(card, &kLGIOS26CrossfadeCardKey, state,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    tint.hidden = YES;
+    material.hidden = YES;
+    [CATransaction commit];
+}
+
+static void LGApplyIOS26CrossfadeCardsInView(UIView *view) {
+    if (!view) return;
+    LGApplyIOS26CrossfadeCard(view);
+    for (UIView *subview in view.subviews) {
+        LGApplyIOS26CrossfadeCardsInView(subview);
+    }
 }
 
 static void LGApplyIOS26DockLibraryCard(UIView *card) {
@@ -1659,16 +1721,43 @@ static void LGScheduleIOS26AppearanceRefresh(void) {
 - (void)layoutSubviews {
     %orig;
     LGApplyIOS26DockLibraryCard((UIView *)self);
+    LGApplyIOS26CrossfadeCard((UIView *)self);
 }
 
 - (void)didMoveToWindow {
     %orig;
     LGApplyIOS26DockLibraryCard((UIView *)self);
+    LGApplyIOS26CrossfadeCard((UIView *)self);
 }
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previous {
     %orig(previous);
     LGApplyIOS26DockLibraryCard((UIView *)self);
+    LGApplyIOS26CrossfadeCard((UIView *)self);
+}
+
+%end
+
+%hook SBHLibraryPodCrossfadeView
+
+- (void)layoutSubviews {
+    %orig;
+    LGApplyIOS26CrossfadeCardsInView((UIView *)self);
+}
+
+- (void)didMoveToWindow {
+    %orig;
+    LGApplyIOS26CrossfadeCardsInView((UIView *)self);
+}
+
+- (void)setSourceViewCrossfadeFraction:(CGFloat)fraction {
+    %orig(fraction);
+    LGApplyIOS26CrossfadeCardsInView((UIView *)self);
+}
+
+- (void)setPodIconViewCrossfadeFraction:(CGFloat)fraction {
+    %orig(fraction);
+    LGApplyIOS26CrossfadeCardsInView((UIView *)self);
 }
 
 %end
