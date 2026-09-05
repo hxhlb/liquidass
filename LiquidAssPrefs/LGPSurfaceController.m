@@ -1011,11 +1011,7 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
 - (UISwitch *)configuredToggleForItem:(NSDictionary *)item {
     UISwitch *toggle = [[LGPrefsSwitchClass() alloc] initWithFrame:CGRectZero];
     toggle.onTintColor = _accentColor;
-    NSNumber *forcedValue = item[@"forced_value"];
-    toggle.on = forcedValue
-        ? forcedValue.boolValue
-        : [LGReadPreference(item[@"key"], item[@"default"]) boolValue];
-    if ([item[@"disabled"] boolValue]) toggle.enabled = NO;
+    toggle.on = [LGReadPreference(item[@"key"], item[@"default"]) boolValue];
     objc_setAssociatedObject(toggle, kLGDefaultValueKey, item[@"default"], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(toggle, kLGPreferenceKeyKey, item[@"key"], OBJC_ASSOCIATION_COPY_NONATOMIC);
     [toggle addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {

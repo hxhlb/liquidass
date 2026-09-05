@@ -10,8 +10,6 @@ static char kLGIslandDriverKey;
 static NSHashTable<UIView *> *sLGIslandContainers;
 static NSMapTable<UIView *, NSMutableDictionary *> *sLGIslandCurtains;
 static BOOL sLGIslandUpdatingCurtains;
-static BOOL sLGIslandContainsContent = YES;
-static BOOL sLGIslandContentKnown;
 static NSMapTable<UIView *, NSNumber *> *sLGIslandTransitionShadows;
 static BOOL sLGIslandProxyGainMaps;
 static BOOL sLGIslandCreatingNativeGainMap;
@@ -31,6 +29,7 @@ static UIView *sLGIslandNativeGainMap;
 // observer. Do the same locally without changing every LGLiveBackdropView.
 @interface LGIslandBackdropView : LGLiveBackdropView
 @property (nonatomic) BOOL lgIslandLayoutEnabled;
+- (void)lgAttachRimLayersToCarrier:(CALayer *)carrier;
 - (void)lgSetRimRenderingSuppressed:(BOOL)suppressed;
 @end
 
@@ -38,9 +37,30 @@ static UIView *sLGIslandNativeGainMap;
 {
     BOOL _lgRimRenderingSuppressed;
     NSMapTable<CALayer *, NSNumber *> *_lgRimOriginalOpacities;
+    NSArray<CAGradientLayer *> *_lgIslandRimLayers;
 }
 - (void)layoutSubviews {
     if (self.lgIslandLayoutEnabled) [super layoutSubviews];
+}
+
+- (void)lgAttachRimLayersToCarrier:(CALayer *)carrier {
+    if (!carrier) return;
+    NSMutableArray<CAGradientLayer *> *layers = [NSMutableArray array];
+    for (CALayer *layer in self.layer.sublayers.copy) {
+        if ([layer isKindOfClass:CAGradientLayer.class]) {
+            [layers addObject:(CAGradientLayer *)layer];
+        }
+    }
+    for (CAGradientLayer *layer in _lgIslandRimLayers) {
+        if (layer && ![layers containsObject:layer]) [layers addObject:layer];
+    }
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    for (CAGradientLayer *layer in layers) {
+        if (layer.superlayer != carrier) [carrier addSublayer:layer];
+    }
+    [CATransaction commit];
+    _lgIslandRimLayers = layers.copy;
 }
 
 - (void)lgSetRimRenderingSuppressed:(BOOL)suppressed {
@@ -51,7 +71,10 @@ static UIView *sLGIslandNativeGainMap;
     }
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    for (CALayer *layer in self.layer.sublayers.copy) {
+    NSArray<CALayer *> *layers = _lgIslandRimLayers.count
+        ? (NSArray<CALayer *> *)_lgIslandRimLayers
+        : self.layer.sublayers.copy;
+    for (CALayer *layer in layers) {
         if (![layer isKindOfClass:CAGradientLayer.class]) continue;
         NSNumber *original = [_lgRimOriginalOpacities objectForKey:layer];
         if (suppressed) {
@@ -110,23 +133,8 @@ static void LGInstallIslandNativeGainMap(void) {
     [rootWindow addSubview:keepalive];
 }
 
-static BOOL LGIslandShouldHideIdle(void) {
-    return LGIslandEnabled() && LG_prefBool(@"DynamicIsland.HideWhenInactive", NO)
-        && sLGIslandContentKnown && !sLGIslandContainsContent;
-}
-
-static void LGIslandReadInitialContentState(UIView *container) {
-    if (sLGIslandContentKnown) return;
-    Ivar delegateIvar = class_getInstanceVariable(container.class, "_delegate");
-    id controller = delegateIvar ? object_getIvar(container, delegateIvar) : nil;
-    Ivar contentIvar = class_getInstanceVariable([controller class],
-                                                  "_systemApertureContainsAnyContent");
-    const char *encoding = contentIvar ? ivar_getTypeEncoding(contentIvar) : NULL;
-    if (encoding && (encoding[0] == 'B' || encoding[0] == 'c')) {
-        const uint8_t *bytes = (__bridge const void *)controller;
-        sLGIslandContainsContent = bytes[ivar_getOffset(contentIvar)] != 0;
-        sLGIslandContentKnown = YES;
-    }
+static BOOL LGIslandFollowsSystemIdleState(void) {
+    return LG_prefBool(@"DynamicIsland.HideWhenInactive", YES);
 }
 
 static NSMutableDictionary *LGIslandCurtainState(UIView *view) {
@@ -191,8 +199,10 @@ static BOOL LGIslandLayerIsSettled(CALayer *model) {
 @property (nonatomic) CGFloat fillAlpha;
 @property (nonatomic) CGFloat gainMapAlpha;
 @property (nonatomic, strong) LGIslandBackdropView *glass;
+@property (nonatomic, strong) UIView *rimHost;
 @property (nonatomic, strong) CADisplayLink *displayLink;
 @property (nonatomic) NSUInteger settledFrames;
+@property (nonatomic) NSUInteger minimumTrackingFrames;
 @property (nonatomic) CGRect targetBounds;
 @property (nonatomic) CGFloat targetRadius;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *stockEdges;
@@ -251,6 +261,8 @@ static BOOL LGIslandLayerIsSettled(CALayer *model) {
     [self restoreStockEdges];
     [self.glass removeFromSuperview];
     self.glass = nil;
+    [self.rimHost removeFromSuperview];
+    self.rimHost = nil;
     self.targetBounds = CGRectNull;
 }
 
@@ -264,6 +276,7 @@ static BOOL LGIslandLayerIsSettled(CALayer *model) {
         UIView *view = entry[@"view"];
         view.hidden = [entry[@"hidden"] boolValue];
     }
+    [_rimHost removeFromSuperview];
     [_glass removeFromSuperview];
 }
 
@@ -280,7 +293,7 @@ static BOOL LGIslandLayerIsSettled(CALayer *model) {
         return;
     }
     if (self.fill != fill || self.gainMap != gain || self.clipHost != clip
-        || self.glass.superview != clip) {
+        || self.glass.superview != clip || self.rimHost.superview != group) {
         [self restore];
         NSString *filterType = LGFilterTypeForHostPrefix(@"DynamicIsland");
         LGIslandBackdropView *glass = filterType.length
@@ -297,15 +310,22 @@ static BOOL LGIslandLayerIsSettled(CALayer *model) {
         self.fillAlpha = fill.alpha;
         self.gainMapAlpha = gain.alpha;
         self.glass = glass;
+        UIView *rimHost = [[UIView alloc] initWithFrame:CGRectZero];
+        rimHost.userInteractionEnabled = NO;
+        rimHost.accessibilityElementsHidden = YES;
+        rimHost.backgroundColor = UIColor.clearColor;
+        self.rimHost = rimHost;
         self.targetBounds = CGRectNull;
         glass.userInteractionEnabled = NO;
         glass.accessibilityElementsHidden = YES;
         glass.backgroundColor = UIColor.clearColor;
         glass.lgIslandLayoutEnabled = YES;
         [clip insertSubview:glass atIndex:0];
+        [group addSubview:rimHost];
         [glass setNeedsLayout];
         [glass layoutIfNeeded];
         glass.lgIslandLayoutEnabled = NO;
+        [glass lgAttachRimLayersToCarrier:rimHost.layer];
         lgTrackGlass(glass, @"DynamicIsland", nil);
     }
 
@@ -316,7 +336,6 @@ static BOOL LGIslandLayerIsSettled(CALayer *model) {
     if (geometryChanged) [self.glass lgSetRimRenderingSuppressed:YES];
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    clip.clipsToBounds = YES;
     self.glass.frame = clip.bounds;
     self.glass.bounds = clip.bounds;
     self.glass.layer.cornerRadius = radius;
@@ -327,6 +346,10 @@ static BOOL LGIslandLayerIsSettled(CALayer *model) {
     gain.hidden = YES;
     gain.alpha = 0.0;
     [self suppressStockEdges];
+    CGRect rimFrame = [group convertRect:clip.bounds fromView:clip];
+    self.rimHost.frame = rimFrame;
+    self.rimHost.bounds = clip.bounds;
+    self.rimHost.layer.cornerRadius = radius;
     [CATransaction commit];
     if (geometryChanged) {
         self.targetBounds = clip.bounds;
@@ -348,8 +371,10 @@ static BOOL LGIslandLayerIsSettled(CALayer *model) {
     UIView *container = self.container;
     UIView *fill = self.fill;
     UIView *clip = self.clipHost;
+    UIView *group = LGIslandViewIvar(container, "_backgroundGroupingView");
     if (!LGIslandEnabled() || !container.window || !fill.superview || !clip.superview
-        || self.glass.superview != clip) {
+        || !group.superview || self.glass.superview != clip
+        || self.rimHost.superview != group) {
         [self restore];
         return;
     }
@@ -360,31 +385,43 @@ static BOOL LGIslandLayerIsSettled(CALayer *model) {
     self.gainMap.hidden = YES;
     self.gainMap.alpha = 0.0;
     [self suppressStockEdges];
-    BOOL hidden = LGIslandShouldHideIdle() || clip.hidden;
-    CGFloat opacity = 1.0;
-    for (UIView *ancestor = clip; ancestor; ancestor = ancestor.superview) {
-        hidden = hidden || ancestor.hidden;
+    BOOL rimHidden = NO;
+    CGFloat rimOpacity = 1.0;
+    for (UIView *ancestor = group; ancestor; ancestor = ancestor.superview) {
+        rimHidden = rimHidden || ancestor.hidden;
         CALayer *visibleAncestor = ancestor.layer.presentationLayer ?: ancestor.layer;
-        opacity *= visibleAncestor.opacity;
+        rimOpacity *= visibleAncestor.opacity;
     }
-    self.glass.hidden = hidden;
-    self.glass.layer.opacity = opacity;
+    if (LGIslandFollowsSystemIdleState()) {
+        rimHidden = rimHidden || clip.hidden;
+        CALayer *visibleClip = clip.layer.presentationLayer ?: clip.layer;
+        rimOpacity *= visibleClip.opacity;
+    }
+    self.glass.hidden = NO;
+    self.glass.layer.opacity = 1.0;
+    self.rimHost.hidden = rimHidden;
+    self.rimHost.layer.opacity = rimOpacity;
     [CATransaction commit];
-    BOOL moving = !LGIslandLayerIsSettled(clip.layer)
+    BOOL moving = !LGIslandLayerIsSettled(group.layer)
+        || !LGIslandLayerIsSettled(clip.layer)
         || !LGIslandLayerIsSettled(fill.layer)
         || !LGIslandLayerIsSettled(container.layer);
     if (moving) {
         self.settledFrames = 0;
         return;
     }
+    if (self.minimumTrackingFrames > 0) self.minimumTrackingFrames--;
     self.settledFrames++;
-    if (self.settledFrames < 4) return;
+    if (self.settledFrames == 4) {
+        self.glass.lgIslandLayoutEnabled = YES;
+        [self.glass setNeedsLayout];
+        [self.glass layoutIfNeeded];
+        self.glass.lgIslandLayoutEnabled = NO;
+        [self.glass lgAttachRimLayersToCarrier:self.rimHost.layer];
+        [self.glass lgSetRimRenderingSuppressed:NO];
+    }
+    if (self.settledFrames < 4 || self.minimumTrackingFrames > 0) return;
 
-    self.glass.lgIslandLayoutEnabled = YES;
-    [self.glass setNeedsLayout];
-    [self.glass layoutIfNeeded];
-    self.glass.lgIslandLayoutEnabled = NO;
-    [self.glass lgSetRimRenderingSuppressed:NO];
     self.displayLink.paused = YES;
 }
 
@@ -393,7 +430,6 @@ static BOOL LGIslandLayerIsSettled(CALayer *model) {
 static void LGRefreshIsland(UIView *container) {
     if (!container) return;
     LGInstallIslandNativeGainMap();
-    LGIslandReadInitialContentState(container);
     if (!sLGIslandContainers) sLGIslandContainers = [NSHashTable weakObjectsHashTable];
     [sLGIslandContainers addObject:container];
     LGIslandGlassDriver *driver = objc_getAssociatedObject(container, &kLGIslandDriverKey);
@@ -419,6 +455,17 @@ static void LGRefreshAllIslands(void) {
             shadow.hidden = [[sLGIslandTransitionShadows objectForKey:shadow] boolValue];
         }
         [sLGIslandTransitionShadows removeAllObjects];
+    }
+}
+
+static void LGWakeIslandVisibilityTracking(void) {
+    LGRefreshAllIslands();
+    for (UIView *container in sLGIslandContainers.allObjects) {
+        LGIslandGlassDriver *driver = objc_getAssociatedObject(
+            container, &kLGIslandDriverKey);
+        if (!driver.displayLink) continue;
+        driver.minimumTrackingFrames = MAX(driver.minimumTrackingFrames, 90);
+        driver.displayLink.paused = NO;
     }
 }
 
@@ -459,17 +506,15 @@ static BOOL LGIslandGainMapIsBackground(UIView *view) {
         || hasAncestorOfClassName(view, @"_SBSystemApertureGainMapView");
 }
 
-%group LGIslandActivityLifecycle
+%group LGIslandActivityWakeLifecycle
 %hook SBSystemApertureController
 - (void)systemApertureViewController:(id)controller containsAnyContent:(BOOL)containsContent {
     %orig(controller, containsContent);
-    void (^update)(void) = ^{
-        sLGIslandContainsContent = containsContent;
-        sLGIslandContentKnown = YES;
-        LGRefreshAllIslands();
+    void (^wake)(void) = ^{
+        LGWakeIslandVisibilityTracking();
     };
-    if (NSThread.isMainThread) update();
-    else dispatch_async(dispatch_get_main_queue(), update);
+    if (NSThread.isMainThread) wake();
+    else dispatch_async(dispatch_get_main_queue(), wake);
 }
 %end
 %end
@@ -599,7 +644,7 @@ static BOOL LGIslandGainMapIsBackground(UIView *view) {
             Class controllerClass = NSClassFromString(@"SBSystemApertureController");
             if (class_getInstanceMethod(controllerClass,
                     @selector(systemApertureViewController:containsAnyContent:))) {
-                %init(LGIslandActivityLifecycle);
+                %init(LGIslandActivityWakeLifecycle);
             }
             lgObservePreferenceReload(^{
                 LGRefreshAllIslands();

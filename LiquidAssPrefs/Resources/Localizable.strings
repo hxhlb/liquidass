@@ -213,7 +213,7 @@
 "prefs.control.tint_intensity" = "Tint Intensity";
 "prefs.subtitle.tint_intensity" = "Control how strongly the tint colors the transparent glass.";
 "prefs.surface.dynamic_island.title" = "Dynamic Island";
-"prefs.island.hide_idle.title" = "Hide When Inactive";
-"prefs.island.hide_idle.subtitle" = "Inactive hiding is currently required and cannot be turned off.";
+"prefs.island.hide_idle.title" = "Hide Edge When Inactive";
+"prefs.island.hide_idle.subtitle" = "When enabled, the outer glass edge follows the system island and hides while inactive. When disabled, the edge remains visible while inactive.";
 "prefs.surface.dynamic_island.subtitle" = "Experimental glass background for Dynamic Island on iOS 17 and later. After changing Enable, return to the home page and restart System UI. Activity content and controls stay visible.";
 "prefs.island.restart.body" = "Return to the Liquid (Gl)ass home page and tap Restart System UI after enabling or disabling island glass. This change takes effect when the system recreates the island background.";

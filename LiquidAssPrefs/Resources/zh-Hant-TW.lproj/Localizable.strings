@@ -233,7 +233,7 @@
 "prefs.control.tint_intensity" = "著色強度";
 "prefs.subtitle.tint_intensity" = "控制顏色對透明玻璃的著色程度。";
 "prefs.surface.dynamic_island.title" = "動態島";
-"prefs.island.hide_idle.title" = "無活動時隱藏";
-"prefs.island.hide_idle.subtitle" = "目前只能開啟閒置隱藏，暫時無法關閉。";
+"prefs.island.hide_idle.title" = "閒置時隱藏亮邊";
+"prefs.island.hide_idle.subtitle" = "開啟後，外層玻璃亮邊跟隨系統在閒置時隱藏；關閉後，閒置狀態仍顯示亮邊。";
 "prefs.surface.dynamic_island.subtitle" = "實驗性功能：為 iOS 17 及以上的動態島加入玻璃背景，保留活動內容與操作。修改「啟用」後，請返回首頁重新啟動系統介面。";
 "prefs.island.restart.body" = "啟用或關閉動態島玻璃後，請返回 Liquid (Gl)ass 首頁點擊「重新啟動系統介面」。系統重新建立動態島背景後，此修改才會完整生效。";

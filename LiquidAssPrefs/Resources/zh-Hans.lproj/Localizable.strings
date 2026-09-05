@@ -215,7 +215,7 @@
 "prefs.control.tint_intensity" = "着色强度";
 "prefs.subtitle.tint_intensity" = "控制颜色对透明玻璃的着色程度。";
 "prefs.surface.dynamic_island.title" = "灵动岛";
-"prefs.island.hide_idle.title" = "无活动时隐藏";
-"prefs.island.hide_idle.subtitle" = "当前只能开启闲置隐藏，暂时无法关闭。";
+"prefs.island.hide_idle.title" = "闲置时隐藏亮边";
+"prefs.island.hide_idle.subtitle" = "开启后，外层玻璃亮边跟随系统在闲置时隐藏；关闭后，闲置状态仍显示亮边。";
 "prefs.surface.dynamic_island.subtitle" = "实验性功能：为 iOS 17 及以上的灵动岛添加玻璃背景，保留活动内容与操作。修改“启用”后，请返回首页重启系统界面。";
 "prefs.island.restart.body" = "启用或关闭灵动岛玻璃后，请返回 Liquid (Gl)ass 首页点击“重启系统界面”。系统重新创建灵动岛背景后，此修改才会完整生效。";

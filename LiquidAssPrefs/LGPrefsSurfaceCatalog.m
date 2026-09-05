@@ -206,14 +206,10 @@ NSArray<NSDictionary *> *LGPrefsSurfaceItems(NSString *identifier) {
     if ([identifier isEqualToString:LGPrefsSurfaceSpotlight]) return LGRendererItemsForHostPrefix(@"Spotlight");
     if ([identifier isEqualToString:LGPrefsSurfaceWidgets]) return LGWidgetItems();
     if ([identifier isEqualToString:LGPrefsSurfaceDynamicIsland]) {
-        NSMutableDictionary *hideIdle = [LGSwitchSetting(
-            @"DynamicIsland.HideWhenInactive",
-            LGLocalized(@"prefs.island.hide_idle.title"),
-            LGLocalized(@"prefs.island.hide_idle.subtitle"), YES) mutableCopy];
-        hideIdle[@"disabled"] = @YES;
-        hideIdle[@"forced_value"] = @YES;
         return [@[LGSectionSetting(nil, LGLocalized(@"prefs.surface.dynamic_island.subtitle")),
-                  hideIdle.copy]
+                  LGSwitchSetting(@"DynamicIsland.HideWhenInactive",
+                                  LGLocalized(@"prefs.island.hide_idle.title"),
+                                  LGLocalized(@"prefs.island.hide_idle.subtitle"), YES)]
             arrayByAddingObjectsFromArray:LGRendererItemsForHostPrefix(@"DynamicIsland")];
     }
     if ([identifier isEqualToString:LGPrefsSurfaceAppLibraryPods]) return LGRendererItemsForHostPrefix(@"AppLibrary");
