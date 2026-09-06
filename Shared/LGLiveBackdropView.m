@@ -135,6 +135,18 @@ static const CGFloat kLGClockCaptureScale = 0.50;
 
 static const CGFloat kLGPrefsControlScale = 1.50;
 static const CGFloat kLGDefaultScaleBudget = 8000.0;
+
+static BOOL LGEnhancedRendererProfileAtLaunch(void) {
+    static BOOL enhanced;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        id value = LGGlassPreferenceValue(@"Renderer.Profile");
+        enhanced = [value isKindOfClass:NSString.class] &&
+                   [value isEqualToString:@"enhanced"];
+    });
+    return enhanced;
+}
+
 static CGFloat LGQualityValue(void) {
     id value = LGGlassPreferenceValue(@"Global.Quality");
     CGFloat quality = [value respondsToSelector:@selector(doubleValue)]
@@ -536,7 +548,8 @@ static const CGFloat kLGGlassEdgeWidth = 1.0;
         if (hostIdentifier == LGHostIdentifierClock) {
             wantScale = kLGClockCaptureScale;
         } else if (hostIdentifier == LGHostIdentifierCoverSheet ||
-                   hostIdentifier == LGHostIdentifierTabBar) {
+                   (LGEnhancedRendererProfileAtLaunch() &&
+                    hostIdentifier == LGHostIdentifierTabBar)) {
             wantScale = 1.0;
         } else {
             wantScale = LGUsesPrefsControlCaptureScale(_lgFilterType)

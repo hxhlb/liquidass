@@ -234,3 +234,8 @@
 "prefs.misc.debug_logging.subtitle" = "Writes verbose diagnostics to liquidglass.log. Leave off unless you are troubleshooting.";
 "prefs.misc.export_logs.title" = "Export Logs";
 "prefs.export_logs.none" = "No saved logs were found.";
+"prefs.renderer.profile.title" = "Rendering Mode";
+"prefs.renderer.profile.subtitle" = "Classic uses the banana29 renderer for lower overhead. Enhanced uses the upstream multi-sample renderer and may increase heat, power use, and backboardd load.";
+"prefs.renderer.profile.classic" = "Classic / Compatible";
+"prefs.renderer.profile.enhanced" = "Enhanced / High Quality";
+"prefs.renderer.profile.restart_body" = "Changing the rendering mode requires restarting System UI. Only one renderer runs on each glass surface.";

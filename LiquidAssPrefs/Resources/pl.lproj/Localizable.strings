@@ -240,3 +240,10 @@
 /* TODO: Translate synced English fallback strings. */
 "prefs.control.bezel_width" = "Bezel Width";
 "prefs.subtitle.bezel_width" = "Width of the refracting edge around the clock glyphs, in points.";
+
+/* TODO: Translate synced English fallback strings. */
+"prefs.renderer.profile.title" = "Rendering Mode";
+"prefs.renderer.profile.subtitle" = "Classic uses the banana29 renderer for lower overhead. Enhanced uses the upstream multi-sample renderer and may increase heat, power use, and backboardd load.";
+"prefs.renderer.profile.classic" = "Classic / Compatible";
+"prefs.renderer.profile.enhanced" = "Enhanced / High Quality";
+"prefs.renderer.profile.restart_body" = "Changing the rendering mode requires restarting System UI. Only one renderer runs on each glass surface.";

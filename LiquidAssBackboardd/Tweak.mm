@@ -294,6 +294,32 @@ typedef struct {
     simd_float4 tintColor;
 } LGUniforms;
 
+// Matches the banana29 shader ABI. Enhanced-only shape fields deliberately do
+// not cross this boundary.
+typedef struct {
+    simd_float2 resolution;
+    simd_float2 outputResolution;
+    simd_float2 screenResolution;
+    simd_float2 cardOrigin;
+    simd_float2 wallpaperResolution;
+    simd_float2 lensOrigin;
+    float       radius;
+    float       bezelWidth;
+    float       glassThickness;
+    float       refractionScale;
+    float       refractiveIndex;
+    simd_float2 wallpaperOrigin;
+    simd_float2 samplingTransformX;
+    simd_float2 samplingTransformY;
+    simd_float2 samplingTransformOffset;
+    float       samplingOrientation;
+    float       backdropZoom;
+    float       useGlyphMask;
+    float       dispersionStrength;
+    float       fresnelGlareStrength;
+    simd_float4 tintColor;
+} LGClassicUniforms;
+
 typedef void (*Render13Fn)(void*,
                            void*,
                            void*,
@@ -360,6 +386,7 @@ static const char *kForceHookPath =
     "/var/mobile/Library/Accessibility/lg_force_hook";
 
 static id<MTLLibrary>              g_shaderLibrary = nil;
+static id<MTLLibrary>              g_classicShaderLibrary = nil;
 static id<MTLBuffer>               g_uniformsBuf  = nil;
 static std::unordered_map<NSUInteger, id<MTLRenderPipelineState>> *g_renderPipelines = nullptr;
 static id<MTLComputePipelineState> g_blurPipeline = nil;
@@ -378,6 +405,7 @@ static size_t                      g_clockSharedMaskMappingSize = 0;
 static os_unfair_lock g_pipelineLock = OS_UNFAIR_LOCK_INIT;
 static os_unfair_lock g_clockMaskLock = OS_UNFAIR_LOCK_INIT;
 static bool           g_pipelineInit = false;
+static bool           g_enhancedRenderer = false;
 static NSInteger      g_osMajorVersion = 0;
 
 static const char *kClockSharedMaskPath =
@@ -409,6 +437,7 @@ typedef struct {
 __attribute__((destructor))
 static void liquidGlassShutdown(void) {
     g_shaderLibrary = nil;
+    g_classicShaderLibrary = nil;
     g_uniformsBuf  = nil;
     g_blurPipeline = nil;
     g_blurTextures = nil;
@@ -420,6 +449,8 @@ static void liquidGlassShutdown(void) {
         g_clockSharedMaskMappingSize = 0;
     }
 }
+
+#include "LGClassicShaderSource.h"
 
 static const char *kShaderSrc = R"MSL(
 #include <metal_stdlib>
@@ -927,26 +958,44 @@ static void ensurePipeline(__unsafe_unretained id<MTLDevice> device) {
             return;
         }
         g_shaderLibrary = lib;
-        lglog("shader library ready");
+        if (!g_enhancedRenderer) {
+            NSError *classicError = nil;
+            NSString *classicSource = [NSString stringWithUTF8String:kClassicShaderSrc];
+            g_classicShaderLibrary =
+                [device newLibraryWithSource:classicSource options:nil error:&classicError];
+            if (!g_classicShaderLibrary) {
+                lglog("Classic Metal compile failed: %s; stock pass will remain",
+                      classicError.localizedDescription.UTF8String);
+            }
+        }
+        lglog("shader libraries ready profile=%s classic=%s",
+              g_enhancedRenderer ? "enhanced" : "classic",
+              g_classicShaderLibrary ? "ready" : "unused/unavailable");
     }
     os_unfair_lock_unlock(&g_pipelineLock);
 }
 
 static id<MTLRenderPipelineState>
-renderPipelineForFormat(__unsafe_unretained id<MTLDevice> device, MTLPixelFormat format) {
+renderPipelineForFormat(__unsafe_unretained id<MTLDevice> device,
+                        MTLPixelFormat format,
+                        bool enhancedPipeline) {
     ensurePipeline(device);
-    if (!g_shaderLibrary || !g_renderPipelines) return nil;
+    if (!g_shaderLibrary || !g_renderPipelines ||
+        (!enhancedPipeline && !g_classicShaderLibrary)) return nil;
 
     os_unfair_lock_lock(&g_pipelineLock);
-    auto found = g_renderPipelines->find((NSUInteger)format);
+    NSUInteger pipelineKey = ((NSUInteger)format << 1) | (enhancedPipeline ? 1u : 0u);
+    auto found = g_renderPipelines->find(pipelineKey);
     if (found != g_renderPipelines->end()) {
         id<MTLRenderPipelineState> pipeline = found->second;
         os_unfair_lock_unlock(&g_pipelineLock);
         return pipeline;
     }
 
-    id<MTLFunction> vertex = [g_shaderLibrary newFunctionWithName:@"liquidGlassVertex"];
-    id<MTLFunction> fragment = [g_shaderLibrary newFunctionWithName:@"liquidGlassFragment"];
+    id<MTLLibrary> library = enhancedPipeline
+        ? g_shaderLibrary : g_classicShaderLibrary;
+    id<MTLFunction> vertex = [library newFunctionWithName:@"liquidGlassVertex"];
+    id<MTLFunction> fragment = [library newFunctionWithName:@"liquidGlassFragment"];
     MTLRenderPipelineDescriptor *descriptor = [MTLRenderPipelineDescriptor new];
     descriptor.vertexFunction = vertex;
     descriptor.fragmentFunction = fragment;
@@ -956,8 +1005,9 @@ renderPipelineForFormat(__unsafe_unretained id<MTLDevice> device, MTLPixelFormat
     id<MTLRenderPipelineState> pipeline =
         [device newRenderPipelineStateWithDescriptor:descriptor error:&error];
     if (pipeline) {
-        (*g_renderPipelines)[(NSUInteger)format] = pipeline;
-        lglog("render pipeline ready fmt=%lu", (unsigned long)format);
+        (*g_renderPipelines)[pipelineKey] = pipeline;
+        lglog("render pipeline ready fmt=%lu profile=%s", (unsigned long)format,
+              enhancedPipeline ? "enhanced" : "classic");
     } else {
         lglog("Render pipeline state failed fmt=%lu: %s",
               (unsigned long)format, error.localizedDescription.UTF8String);
@@ -1499,7 +1549,13 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
     float maxBezel = !strcmp(hp->prefPrefix, "CoverSheet")
         ? shortestF * 0.5f : kMaxBezelPx;
     lu.bezelWidth      = fminf(hp->bezelRatio * shortestF, maxBezel);
-    lu.glassThickness     = hp->glassThickness;
+    bool enhancedPipeline = g_enhancedRenderer ||
+        !strcmp(hp->prefPrefix, "PrefsSegment") ||
+        !strcmp(hp->prefPrefix, "TabBarSelection");
+    float canonicalThickness = hp->glassThickness > 60.0f
+        ? hp->glassThickness / 6.0f : hp->glassThickness;
+    lu.glassThickness     = enhancedPipeline
+        ? canonicalThickness * 6.0f : canonicalThickness;
     lu.refractionScale    = hp->refractionScale;
     lu.refractiveIndex    = hp->refractiveIndex;
     lu.dispersionStrength = hp->dispersionStrength;
@@ -1701,11 +1757,12 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
         return;
     }
 
-    id<MTLTexture> glassSourceTexture =
-        encodeOwnedGaussianBlur(cmdBuf, origTex, hp->blur);
+    id<MTLTexture> glassSourceTexture = enhancedPipeline
+        ? encodeOwnedGaussianBlur(cmdBuf, origTex, hp->blur)
+        : origTex;
 
     id<MTLRenderPipelineState> renderPipeline =
-        renderPipelineForFormat(device, destTex.pixelFormat);
+        renderPipelineForFormat(device, destTex.pixelFormat, enhancedPipeline);
     if (!renderPipeline) {
         lglog("ourCustomRender13: no render pipeline, kept stock pass");
         return;
@@ -1720,7 +1777,33 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
     [enc setRenderPipelineState:renderPipeline];
     [enc setFragmentTexture:glassSourceTexture atIndex:0];
     [enc setFragmentTexture:clockMask atIndex:1];
-    [enc setFragmentBytes:&lu length:sizeof(lu) atIndex:0];
+    if (enhancedPipeline) {
+        [enc setFragmentBytes:&lu length:sizeof(lu) atIndex:0];
+    } else {
+        LGClassicUniforms classic = {};
+        classic.resolution = lu.resolution;
+        classic.outputResolution = lu.outputResolution;
+        classic.screenResolution = lu.screenResolution;
+        classic.cardOrigin = lu.cardOrigin;
+        classic.wallpaperResolution = lu.wallpaperResolution;
+        classic.lensOrigin = lu.lensOrigin;
+        classic.radius = lu.radius;
+        classic.bezelWidth = lu.bezelWidth;
+        classic.glassThickness = canonicalThickness;
+        classic.refractionScale = lu.refractionScale;
+        classic.refractiveIndex = lu.refractiveIndex;
+        classic.wallpaperOrigin = lu.wallpaperOrigin;
+        classic.samplingTransformX = lu.samplingTransformX;
+        classic.samplingTransformY = lu.samplingTransformY;
+        classic.samplingTransformOffset = lu.samplingTransformOffset;
+        classic.samplingOrientation = lu.samplingOrientation;
+        classic.backdropZoom = lu.backdropZoom;
+        classic.useGlyphMask = lu.useGlyphMask;
+        classic.dispersionStrength = lu.dispersionStrength;
+        classic.fresnelGlareStrength = lu.fresnelGlareStrength;
+        classic.tintColor = lu.tintColor;
+        [enc setFragmentBytes:&classic length:sizeof(classic) atIndex:0];
+    }
     [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
     [enc endEncoding];
 
@@ -2222,6 +2305,9 @@ static void tweakInit(void) {
         NSNumber *debugLogging = bootPrefs[@"Debug.Logging.Enabled"];
         gLGBackboardDebugLogging = [debugLogging isKindOfClass:NSNumber.class]
             ? debugLogging.boolValue : false;
+        NSString *rendererProfile = [bootPrefs[@"Renderer.Profile"]
+            isKindOfClass:NSString.class] ? bootPrefs[@"Renderer.Profile"] : @"classic";
+        g_enhancedRenderer = [rendererProfile isEqualToString:@"enhanced"];
     }
     if (gLGBackboardDebugLogging) {
         FILE *lf = fopen(LG_LOG_PATH, "w"); if (lf) fclose(lf);

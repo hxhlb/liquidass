@@ -1024,6 +1024,17 @@ NSArray<NSDictionary *> *LGMoreOptionsItems(void) {
     NSMutableArray<NSDictionary *> *items = [NSMutableArray arrayWithArray:@[
         LGSectionSetting(LGLocalized(@"prefs.misc.options_section.title"),
                          LGLocalized(@"prefs.misc.options_section.subtitle"))]];
+    NSMutableDictionary *rendererProfile = [LGMenuSetting(
+        @"Renderer.Profile",
+        LGLocalized(@"prefs.renderer.profile.title"),
+        LGLocalized(@"prefs.renderer.profile.subtitle"),
+        @"classic",
+        @[
+            @{@"value": @"classic", @"title": LGLocalized(@"prefs.renderer.profile.classic")},
+            @{@"value": @"enhanced", @"title": LGLocalized(@"prefs.renderer.profile.enhanced")},
+        ]) mutableCopy];
+    rendererProfile[@"requires_backboard_restart"] = @YES;
+    [items addObject:[rendererProfile copy]];
     [items addObject:LGSliderSetting(@"Renderer.FresnelGlareStrength",
                                      LGLocalized(@"prefs.control.fresnel_glare"),
                                      LGLocalized(@"prefs.subtitle.fresnel_glare"),

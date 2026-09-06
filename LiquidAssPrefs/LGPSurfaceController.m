@@ -1243,8 +1243,15 @@ static void LGRefreshCoverSheetBezelRatioControl(UIView *root, CGFloat cornerRad
                 LGWritePreferenceObject(item[@"key"], value);
                 selectedValue = [value copy];
             }
-            applyMenuSelectionTitle(title);
             __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (strongSelf && [item[@"requires_backboard_restart"] boolValue]) {
+                LGSetRespringBarDismissed(NO);
+                LGSetNeedsRespring(YES);
+                LGPresentInfoSheet(strongSelf,
+                                   LGLocalized(@"prefs.respring_bar.title"),
+                                   LGLocalized(@"prefs.renderer.profile.restart_body"));
+            }
+            applyMenuSelectionTitle(title);
             UIButton *strongMenuButton = weakMenuButton;
             if (strongSelf && strongMenuButton) {
                 strongMenuButton.menu = [strongSelf menuForItem:item

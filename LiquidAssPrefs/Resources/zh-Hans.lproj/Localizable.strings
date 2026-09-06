@@ -240,3 +240,9 @@
 /* TODO: Translate synced English fallback strings. */
 "prefs.control.bezel_width" = "Bezel Width";
 "prefs.subtitle.bezel_width" = "Width of the refracting edge around the clock glyphs, in points.";
+
+"prefs.renderer.profile.title" = "渲染模式";
+"prefs.renderer.profile.subtitle" = "经典模式使用 banana29 渲染器，负载更低；增强模式使用上游多重采样渲染器，可能增加发热、耗电和 backboardd 占用。";
+"prefs.renderer.profile.classic" = "经典 / 兼容";
+"prefs.renderer.profile.enhanced" = "增强 / 高画质";
+"prefs.renderer.profile.restart_body" = "切换渲染模式后需要重启系统界面。每个玻璃表面只会运行一种渲染器。";
