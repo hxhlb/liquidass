@@ -342,7 +342,7 @@ static UIColor *LGSliderInactiveTrackColor(UITraitCollection *traitCollection) {
     self.thumbVelocityX = LGLiquidFilteredVelocity(self.thumbVelocityX, rawVelocity);
     self.lastTouchX = touchX;
     self.lastTouchTime = now;
-    [self updatePresentedThumbForTouchX:touchX];
+    [self updatePresentedThumbForTouchX:touchX updateValue:NO];
     [self updateEdgeHapticsForTouchX:touchX];
     [self updateGlassThumbFrameAnimated:NO];
     return continued;
@@ -353,7 +353,7 @@ static UIColor *LGSliderInactiveTrackColor(UITraitCollection *traitCollection) {
     CFTimeInterval touchDuration = CACurrentMediaTime() - self.touchBeganTime;
     if (touchDuration < 0.15 && touch) {
         CGFloat tapX = [touch locationInView:self].x;
-        [self updatePresentedThumbForTouchX:tapX];
+        [self updatePresentedThumbForTouchX:tapX updateValue:YES];
     }
     if (LGSliderUsesSegmentedMode(self)) {
         CGFloat snapCenterX = self.hasPresentedThumbCenter ? self.logicalThumbCenterX : [self resolvedThumbCenterX];
@@ -428,7 +428,8 @@ static UIColor *LGSliderInactiveTrackColor(UITraitCollection *traitCollection) {
     return LGLiquidOvershootDistance(touchX, minX, maxX);
 }
 
-- (void)updatePresentedThumbForTouchX:(CGFloat)touchX {
+- (void)updatePresentedThumbForTouchX:(CGFloat)touchX
+                           updateValue:(BOOL)updateValue {
     // logical value stays clamped while the visible thumb can overhang
     CGFloat minX = [self minimumThumbCenterX];
     CGFloat maxX = [self maximumThumbCenterX];
@@ -445,7 +446,7 @@ static UIColor *LGSliderInactiveTrackColor(UITraitCollection *traitCollection) {
     }
 
     CGFloat range = maxX - minX;
-    if (range > 0.0) {
+    if (updateValue && range > 0.0) {
         CGFloat normalized = (clampedX - minX) / range;
         float newValue = self.minimumValue + (float)normalized * (self.maximumValue - self.minimumValue);
         if (fabs(self.value - newValue) > 0.0001f) {

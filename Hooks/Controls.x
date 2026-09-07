@@ -14,6 +14,7 @@
 static void *kLGSettingsSwitchOverlayKey = &kLGSettingsSwitchOverlayKey;
 static void *kLGSettingsSliderOverlayKey = &kLGSettingsSliderOverlayKey;
 static void *kLGSettingsSliderVisualHostKey = &kLGSettingsSliderVisualHostKey;
+static void *kLGSettingsSliderInstallingKey = &kLGSettingsSliderInstallingKey;
 static void *kLGSettingsSegmentGlassKey = &kLGSettingsSegmentGlassKey;
 static void *kLGSettingsTopFadeKey = &kLGSettingsTopFadeKey;
 static void *kLGSettingsBackButtonKey = &kLGSettingsBackButtonKey;
@@ -1302,7 +1303,7 @@ static void LGSegmentAttachGesture(UISegmentedControl *control) {
     objc_setAssociatedObject(control, key, handler, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
-static void LGInstallSettingsSlider(UISlider *owner) {
+static void LGInstallSettingsSliderImpl(UISlider *owner) {
     if (!gLGSliderControlsEnabled || !owner.window ||
         [owner isKindOfClass:LGPrefsLiquidSlider.class] ||
         LGInsideLiquidAssPrefs(owner)) {
@@ -1328,6 +1329,9 @@ static void LGInstallSettingsSlider(UISlider *owner) {
             UISlider *strongOwner = weakOwner;
             LGPrefsLiquidSlider *sender = (LGPrefsLiquidSlider *)action.sender;
             if (!strongOwner) return;
+            float range = fabsf(strongOwner.maximumValue - strongOwner.minimumValue);
+            float epsilon = fmaxf(FLT_EPSILON, range * 0.000001f);
+            if (fabsf(strongOwner.value - sender.value) <= epsilon) return;
             [strongOwner setValue:sender.value animated:NO];
             [strongOwner sendActionsForControlEvents:UIControlEventValueChanged];
         }] forControlEvents:UIControlEventValueChanged];
@@ -1420,6 +1424,25 @@ static void LGInstallSettingsSlider(UISlider *owner) {
         [overlay setValue:owner.value animated:NO];
     LGSuppressNativeSliderContents(owner, overlay);
     [container bringSubviewToFront:overlay];
+}
+
+static void LGInstallSettingsSlider(UISlider *owner) {
+    if (!owner || [objc_getAssociatedObject(owner,
+                                             kLGSettingsSliderInstallingKey) boolValue]) {
+        return;
+    }
+    objc_setAssociatedObject(owner,
+                             kLGSettingsSliderInstallingKey,
+                             @YES,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    @try {
+        LGInstallSettingsSliderImpl(owner);
+    } @finally {
+        objc_setAssociatedObject(owner,
+                                 kLGSettingsSliderInstallingKey,
+                                 nil,
+                                 OBJC_ASSOCIATION_ASSIGN);
+    }
 }
 
 static UIView *LGDescendantNamed(UIView *root, NSString *name) {
@@ -1574,6 +1597,10 @@ static void LGProfiledInstallSettingsSlider(UISlider *owner) {
 }
 
 static void LGProfiledLayoutSettingsSlider(UISlider *owner) {
+    if (!owner.window || !gLGSliderControlsEnabled || LGInsideLiquidAssPrefs(owner)) {
+        LGRemoveSettingsSlider(owner);
+        return;
+    }
     LGPrefsLiquidSlider *overlay =
         objc_getAssociatedObject(owner, kLGSettingsSliderOverlayKey);
     if (!overlay) {
@@ -2394,7 +2421,7 @@ static void LGUpdateSettingsSidebar(UIView *container) {
     if (gLGControlsDiagnosticsEnabled) gLGControlsSliderVisualLayouts++;
     objc_setAssociatedObject(owner, kLGSettingsSliderVisualHostKey, self,
                              OBJC_ASSOCIATION_ASSIGN);
-    LGProfiledInstallSettingsSlider(owner);
+    LGProfiledLayoutSettingsSlider(owner);
 }
 %end
 
