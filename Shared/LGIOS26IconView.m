@@ -18,14 +18,6 @@
 @property (nonatomic) BOOL matchesTransform;
 @end
 
-typedef struct {
-    float r1, r2, r3, r4;
-    float g1, g2, g3, g4;
-    float b1, b2, b3, b4;
-    float a1, a2, a3, a4;
-    float biasR, biasG, biasB, biasA;
-} LGIOS26CAColorMatrix;
-
 static CGFloat LGIOS26Clamp(CGFloat value, CGFloat minimum, CGFloat maximum) {
     return MIN(MAX(value, minimum), maximum);
 }
@@ -53,18 +45,6 @@ static void LGIOS26SetFilterValue(id filter, id value, NSString *key) {
         [filter setValue:value forKey:key];
     } @catch (__unused NSException *exception) {
     }
-}
-
-static id LGIOS26IdentityColorFilter(void) {
-    id filter = LGIOS26NewFilter(@"colorMatrix");
-    SEL selector = NSSelectorFromString(@"valueWithCAColorMatrix:");
-    if (!filter || ![NSValue respondsToSelector:selector]) return filter;
-    LGIOS26CAColorMatrix matrix = { .r1 = 1.0f, .g2 = 1.0f, .b3 = 1.0f, .a4 = 1.0f };
-    typedef id (*LGIOS26MatrixValueFunction)(id, SEL, LGIOS26CAColorMatrix);
-    id value = ((LGIOS26MatrixValueFunction)objc_msgSend)(NSValue.class, selector, matrix);
-    LGIOS26SetFilterValue(filter, value, @"inputColorMatrix");
-    LGIOS26SetFilterValue(filter, @YES, @"inputPremultipliedValues");
-    return filter;
 }
 
 static NSArray *LGIOS26RefractionFilters(void) {
@@ -623,13 +603,16 @@ UIImage *LGIOS26AppleMitigatedIconImage(UIImage *image,
     LGIOS26ReferencePalette reference = LGIOS26ReferencePaletteForPixels(
         sourcePixels, width, height, rowBytes);
     BOOL drawByReference = reference.coherentSamples;
+    // Keep the bevel visible at normal icon size, including 2x/3x artwork.
+    size_t edgeRadius = MAX((size_t)1, MIN(width, height) / 80);
+    size_t interiorRadius = MAX((size_t)1, MIN(width, height) / 24);
 
     for (size_t y = 0; y < height; y++) {
-        size_t upperY = y > 0 ? y - 1 : y;
-        size_t lowerY = y + 1 < height ? y + 1 : y;
+        size_t upperY = y > edgeRadius ? y - edgeRadius : 0;
+        size_t lowerY = MIN(y + edgeRadius, height - 1);
         for (size_t x = 0; x < width; x++) {
-            size_t leftX = x > 0 ? x - 1 : x;
-            size_t rightX = x + 1 < width ? x + 1 : x;
+            size_t leftX = x > edgeRadius ? x - edgeRadius : 0;
+            size_t rightX = MIN(x + edgeRadius, width - 1);
             const uint8_t *center = sourcePixels + y * rowBytes + x * 4;
             CGFloat red, green, blue, sourceAlpha;
             LGIOS26ReadPixel(center, &red, &green, &blue, &sourceAlpha);
@@ -674,35 +657,59 @@ UIImage *LGIOS26AppleMitigatedIconImage(UIImage *image,
                 reference.secondaryG,
                 reference.secondaryB,
                 reference.secondaryLuminance);
-            CGFloat referenceSubject = LGIOS26Smoothstep(0.055,
-                                                          0.28,
+            CGFloat referenceSubject = LGIOS26Smoothstep(0.02,
+                                                          0.22,
                                                           referenceDetail);
             CGFloat neighborLuminance = (leftLuminance + rightLuminance
                 + upperLuminance + lowerLuminance) * 0.25;
             CGFloat localSubject = LGIOS26Smoothstep(
                 0.02, 0.14, MAX(fabs(luminance - neighborLuminance), edge * 0.12));
-            CGFloat subject = drawByReference ? referenceSubject : localSubject;
-            subject = MAX(subject, edge * 0.62);
+            // A flat glyph interior has no local edge. Even when the border
+            // palette is uncertain, retain its broad contrast with that palette.
+            CGFloat subject = referenceSubject;
+            if (!drawByReference) {
+                // In a textured/multicolor bitmap, border color distance alone
+                // also selects the background. Admit broad fills only where a
+                // larger neighborhood supports a coherent interior.
+                size_t sampleX[] = {x > interiorRadius ? x - interiorRadius : 0,
+                    MIN(x + interiorRadius, width - 1), x, x};
+                size_t sampleY[] = {y, y,
+                    y > interiorRadius ? y - interiorRadius : 0,
+                    MIN(y + interiorRadius, height - 1)};
+                CGFloat centerColor[] = {red, green, blue};
+                CGFloat variation = 0.0;
+                for (size_t neighbor = 0; neighbor < 4; neighbor++) {
+                    CGFloat color[3];
+                    LGIOS26ReadPixel(sourcePixels + sampleY[neighbor] * rowBytes
+                        + sampleX[neighbor] * 4, &color[0], &color[1], &color[2], NULL);
+                    variation = MAX(variation,
+                        LGIOS26ColorDistanceSquared(centerColor, color));
+                }
+                CGFloat interior = 1.0 - LGIOS26Smoothstep(0.045, 0.24,
+                                                           sqrt(variation));
+                subject = MAX(localSubject * 0.20, referenceSubject * 0.85 * interior);
+            }
+            subject = MAX(subject, edge * (drawByReference ? 0.62 : 0.18));
 
-            // Apple's mitigated legacy path keeps the simulated-glass chiclet
-            // separate from the flattened source. Leave coherent background
-            // pixels mostly transparent here so the backdrop layer remains the
-            // substrate, then retain the detected glyph as its own pass.
-            CGFloat subjectCoverage = LGIOS26Smoothstep(0.08, 0.92, subject);
+            // This is a bitmap fallback for older systems, not an input to
+            // Apple's clearIconBlendMode. Keep coverage separate from material
+            // opacity; a second threshold used to erase low-contrast details.
+            CGFloat subjectCoverage = sqrt(LGIOS26Clamp(subject, 0.0, 1.0));
             CGFloat substrateAlpha = darkAppearance ? 0.10 : 0.055;
             CGFloat glyphAlpha = preservesSubjectColor
-                ? (darkAppearance ? 0.76 : 0.72) : 0.58;
+                ? (darkAppearance ? 0.90 : 0.88) : 0.84;
             CGFloat resolvedAlpha;
             if (drawByReference) {
                 resolvedAlpha = substrateAlpha
                     + (glyphAlpha - substrateAlpha) * subjectCoverage;
             } else {
-                resolvedAlpha = (darkAppearance ? 0.16 : 0.12)
-                    + (darkAppearance ? 0.48 : 0.44) * subjectCoverage;
+                CGFloat fallbackAlpha = darkAppearance ? 0.26 : 0.22;
+                resolvedAlpha = fallbackAlpha
+                    + (glyphAlpha - fallbackAlpha) * subjectCoverage;
             }
             resolvedAlpha += edge * (darkAppearance ? 0.035 : 0.03);
             CGFloat outputAlpha = sourceAlpha
-                * LGIOS26Clamp(resolvedAlpha, 0.0, 0.80);
+                * LGIOS26Clamp(resolvedAlpha, 0.0, 0.94);
 
             CGFloat sourceTone = darkAppearance
                 ? 0.34 + 0.42 * pow(luminance, 0.82)
@@ -718,9 +725,7 @@ UIImage *LGIOS26AppleMitigatedIconImage(UIImage *image,
             }
             CGFloat highlight = edge * MAX(directionalEdge, 0.0);
             CGFloat darklight = edge * MAX(-directionalEdge, 0.0);
-            CGFloat neutralTone = sourceTone
-                + 0.055 * highlight
-                - 0.075 * darklight;
+            CGFloat neutralTone = sourceTone;
             neutralTone = LGIOS26Clamp(neutralTone,
                                        darkAppearance ? 0.18 : 0.26,
                                        0.90);
@@ -736,13 +741,20 @@ UIImage *LGIOS26AppleMitigatedIconImage(UIImage *image,
                 outputBlue = neutralTone
                     + (blue - neutralTone) * subjectColorWeight;
             } else {
-                // iOS 27 changes the glass/chiclet between Light and Dark while
-                // keeping clear-mode glyphs on the same restrained white axis.
-                CGFloat softWhite = 0.96;
+                // Retain the bitmap's internal tonal structure. A constant
+                // white fill made dark markings identical to their white base.
+                CGFloat softWhite = 0.66 + 0.30 * pow(luminance, 0.75);
                 CGFloat outputTone = neutralTone
                     + (softWhite - neutralTone) * subjectColorWeight;
                 outputRed = outputGreen = outputBlue = outputTone;
             }
+            // Shade after the subject fill so full-coverage pixels do not
+            // overwrite their own bevel. Bake both sides into the image: the
+            // iOS 15-17 lifecycle does not use the separate highlight layer.
+            CGFloat relief = 0.10 * highlight - 0.28 * darklight;
+            outputRed += relief;
+            outputGreen += relief;
+            outputBlue += relief;
             uint8_t *output = outputPixels + y * rowBytes + x * 4;
             output[0] = (uint8_t)llround(255.0
                 * LGIOS26Clamp(outputRed, 0.0, 1.0) * outputAlpha);
@@ -1335,13 +1347,13 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity) 
                 (id)[UIColor colorWithWhite:0.0 alpha:0.032].CGColor,
             ];
         if (self.basePortal) {
-            id identityFilter = LGIOS26IdentityColorFilter();
-            self.basePortal.filters = identityFilter ? @[identityFilter] : @[];
+            // The CPU image is already premultiplied RGBA. No matrix is needed.
+            self.basePortal.filters = @[];
             self.basePortal.compositingFilter = nil;
-            self.basePortal.opacity = appleMitigated ? 0.85f : 0.90f;
+            self.basePortal.opacity = appleMitigated ? 1.0f : 0.90f;
         } else {
             self.sourceLayer.hidden = NO;
-            self.sourceLayer.opacity = appleMitigated ? 0.85f : 0.90f;
+            self.sourceLayer.opacity = appleMitigated ? 1.0f : 0.90f;
         }
         self.rimLayer.opacity = appleMitigated ? 0.42f : 0.72f;
         self.rimBloomLayer.opacity = appleMitigated ? 0.22f : 0.38f;
@@ -1386,8 +1398,7 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity) 
             (id)[darkTint colorWithAlphaComponent:0.05 + 0.28 * tintIntensity].CGColor,
         ];
         if (self.basePortal) {
-            id identityFilter = LGIOS26IdentityColorFilter();
-            self.basePortal.filters = identityFilter ? @[identityFilter] : @[];
+            self.basePortal.filters = @[];
             self.basePortal.compositingFilter = nil;
             self.basePortal.opacity = 0.84f;
         } else {
