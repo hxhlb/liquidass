@@ -82,6 +82,11 @@ def fixture(name, size):
         for x in range(size):
             u, v = x / size, y / size
             rgb = [30, 120, 210]
+            if name == "gradient":
+                rgb = [round(30 + 22 * v), round(110 + 28 * v), round(200 + 30 * v)]
+            elif name == "diagonal-gradient":
+                t = (u + v) * 0.5
+                rgb = [round(30 + 22 * t), round(110 + 28 * t), round(200 + 30 * t)]
             if name == "complex":
                 rgb = [int(127 + 115 * math.sin(u * 22.8 + v * 13.2 + c * 2.1))
                        for c in range(3)]
@@ -130,6 +135,10 @@ def check(name, size, dark, fresh, source, output):
         errors.append(f"glyph interior too faint: alpha {center[3]}")
     if name != "complex" and background[3] > 30:
         errors.append(f"coherent background became opaque: alpha {background[3]}")
+    if name in ("gradient", "diagonal-gradient"):
+        background_alpha = [pixel(output, size, 0.15, y / size)[3] for y in range(size)]
+        if max(background_alpha) - min(background_alpha) > 8 or max(background_alpha) > 30:
+            errors.append("background gradient became visible stripes")
     if name == "complex" and center[3] - background[3] < 60:
         errors.append("glyph interior does not stand out from textured background")
     if name == "internal" and body[0] / body[3] - center[0] / max(1, center[3]) < 0.14:
@@ -164,7 +173,7 @@ def main():
                     "-o", str(binary)], check=True)
     failures, cases = [], 0
     for size in (60, 120, 180):
-        for name in ("solid", "complex", "internal", "lowcontrast", "alpha",
+        for name in ("solid", "complex", "internal", "lowcontrast", "alpha", "gradient", "diagonal-gradient",
                      "red", "green", "blue", "transparent"):
             source = fixture(name, size)
             source_path = output / f"{name}-{size}.rgba"

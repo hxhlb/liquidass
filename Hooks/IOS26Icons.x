@@ -381,6 +381,13 @@ static CGImageRef LGIOS26ProviderProcessedCGImage(id imageObject,
     if ((__bridge CGImageRef)cachedOriginal == original
         && cachedProcessed.CGImage
         && [cachedSignature isEqualToString:signature]) {
+        // The provider retains this result longer than the shared NSCache may.
+        // Restore its provenance before a consumer can process it a second time.
+        if (!LGIOS26ProviderOriginalImageForImage(cachedProcessed).CGImage) {
+            UIImage *source = [UIImage imageWithCGImage:original
+                scale:LGIOS26ProviderScale(imageObject) orientation:UIImageOrientationUp];
+            LGIOS26RegisterProviderImage(source, cachedProcessed, signature);
+        }
         return cachedProcessed.CGImage;
     }
 
@@ -1173,7 +1180,9 @@ static void LGApplyIOS26Effect(SBIconImageView *iconView, UIImage *image) {
         [iconView sendSubviewToBack:effectView];
     }
 
-    effectView.frame = iconView.bounds;
+    if (!CGRectEqualToRect(effectView.frame, iconView.bounds)) {
+        effectView.frame = iconView.bounds;
+    }
     [effectView updateWithImage:effectiveImage
                    cornerRadius:LGIOS26CornerRadiusForIconView(iconView)
                             mode:sLGIOS26Mode
@@ -1192,7 +1201,7 @@ static void LGApplyIOS26Effect(SBIconImageView *iconView, UIImage *image) {
                                      @(contentsLayer.opacity),
                                      OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
-        contentsLayer.opacity = 0.0f;
+        if (contentsLayer.opacity != 0.0f) contentsLayer.opacity = 0.0f;
     } else {
         id hostContents = iconView.layer.contents;
         if (hostContents) {

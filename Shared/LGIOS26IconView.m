@@ -11,13 +11,6 @@
 @property (nonatomic, strong) id compositingFilter;
 @end
 
-@interface CAPortalLayer : CALayer
-@property (nonatomic, strong) CALayer *sourceLayer;
-@property (nonatomic) BOOL hidesSourceLayer;
-@property (nonatomic) BOOL matchesPosition;
-@property (nonatomic) BOOL matchesTransform;
-@end
-
 static CGFloat LGIOS26Clamp(CGFloat value, CGFloat minimum, CGFloat maximum) {
     return MIN(MAX(value, minimum), maximum);
 }
@@ -205,6 +198,8 @@ typedef struct {
     CGFloat secondaryLuminance;
     BOOL hasSecondary;
     BOOL coherentSamples;
+    BOOL hasBackgroundPlane;
+    CGFloat cornerColors[4][3];
 } LGIOS26ReferencePalette;
 
 static LGIOS26ReferencePalette LGIOS26ReferencePaletteForPixels(
@@ -314,6 +309,22 @@ static LGIOS26ReferencePalette LGIOS26ReferencePaletteForPixels(
         && backgroundCoverage >= 0.58
         && primary.variance < 0.006
         && (!palette.hasSecondary || secondary.variance < 0.006));
+    // A constant palette turns a mild background gradient into foreground bands.
+    // Fit only when all four corners agree with the coherent background palette.
+    palette.hasBackgroundPlane = palette.coherentSamples;
+    CGFloat backgroundColor[] = {palette.primaryR, palette.primaryG, palette.primaryB};
+    for (size_t corner = 0; corner < 4 && palette.hasBackgroundPlane; corner++) {
+        size_t cx = (size_t)llround((width - 1) * ((corner & 1) ? 0.84 : 0.16));
+        size_t cy = (size_t)llround((height - 1) * ((corner & 2) ? 0.84 : 0.16));
+        CGFloat alpha;
+        LGIOS26ReadPixel(pixels + cy * rowBytes + cx * 4,
+            &palette.cornerColors[corner][0], &palette.cornerColors[corner][1],
+            &palette.cornerColors[corner][2], &alpha);
+        if (alpha < 0.95 || LGIOS26ColorDistanceSquared(
+                palette.cornerColors[corner], backgroundColor) > 0.13 * 0.13) {
+            palette.hasBackgroundPlane = NO;
+        }
+    }
     free(samples);
     return palette;
 }
@@ -657,6 +668,24 @@ UIImage *LGIOS26AppleMitigatedIconImage(UIImage *image,
                 reference.secondaryG,
                 reference.secondaryB,
                 reference.secondaryLuminance);
+            if (reference.hasBackgroundPlane && width > 1 && height > 1) {
+                CGFloat u = ((CGFloat)x / (width - 1) - 0.16) / 0.68;
+                CGFloat v = ((CGFloat)y / (height - 1) - 0.16) / 0.68;
+                CGFloat background[3];
+                for (size_t channel = 0; channel < 3; channel++) {
+                    CGFloat top = reference.cornerColors[0][channel]
+                        + u * (reference.cornerColors[1][channel]
+                               - reference.cornerColors[0][channel]);
+                    CGFloat bottom = reference.cornerColors[2][channel]
+                        + u * (reference.cornerColors[3][channel]
+                               - reference.cornerColors[2][channel]);
+                    background[channel] = LGIOS26Clamp(top + v * (bottom - top), 0.0, 1.0);
+                }
+                CGFloat backgroundLuminance = 0.2126 * background[0]
+                    + 0.7152 * background[1] + 0.0722 * background[2];
+                referenceDetail = LGIOS26PixelDetail(center, background[0],
+                    background[1], background[2], backgroundLuminance);
+            }
             CGFloat referenceSubject = LGIOS26Smoothstep(0.02,
                                                           0.22,
                                                           referenceDetail);
@@ -1036,7 +1065,7 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity) 
 @property (nonatomic, strong) CAGradientLayer *glassLayer;
 @property (nonatomic, strong) CALayer *sourceLayer;
 @property (nonatomic, strong) CALayer *glyphHighlightLayer;
-@property (nonatomic, strong) CAPortalLayer *basePortal;
+@property (nonatomic, strong) UIImage *currentInputImage;
 @property (nonatomic, strong) CAGradientLayer *rimBloomLayer;
 @property (nonatomic, strong) CAShapeLayer *rimBloomMask;
 @property (nonatomic, strong) CAGradientLayer *rimLayer;
@@ -1156,8 +1185,6 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity) 
 - (void)configureMaterial {
     if (self.hasMaterialConfiguration) return;
 
-    [self.basePortal removeFromSuperlayer];
-    self.basePortal = nil;
     [self.backdropLayer removeFromSuperlayer];
     self.backdropLayer = nil;
     self.refractionMask = nil;
@@ -1190,17 +1217,6 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity) 
     self.backdropLayer.mask = self.refractionMask;
     [self.layer insertSublayer:self.backdropLayer atIndex:0];
 
-    Class portalClass = NSClassFromString(@"CAPortalLayer");
-    if (portalClass) {
-        self.basePortal = [portalClass layer];
-        self.sourceLayer.opacity = 1.0f;
-        self.basePortal.sourceLayer = self.sourceLayer;
-        self.basePortal.hidesSourceLayer = YES;
-        self.basePortal.matchesPosition = YES;
-        self.basePortal.matchesTransform = YES;
-        [self.layer insertSublayer:self.basePortal above:self.sourceLayer];
-    }
-
     self.hasMaterialConfiguration = YES;
     self.laidOutBounds = CGRectNull;
     self.laidOutCornerRadius = -1.0;
@@ -1222,7 +1238,6 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity) 
     self.refractionMask.frame = bounds;
     self.glassLayer.frame = bounds;
     self.sourceLayer.frame = bounds;
-    self.basePortal.frame = bounds;
     self.glyphHighlightLayer.frame = bounds;
     self.rimBloomLayer.frame = bounds;
     self.rimLayer.frame = bounds;
@@ -1269,6 +1284,15 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity) 
     if (!image.CGImage) return;
     tintHue = tintHue - floor(tintHue);
     tintIntensity = LGIOS26Clamp(tintIntensity, 0.0, 1.0);
+    // Layout callbacks must be a no-op for the same retained input/settings,
+    // including when the shared processed-image cache has evicted its entry.
+    if (self.hasConfiguration && self.currentInputImage.CGImage == image.CGImage
+        && self.currentMode == mode && self.currentAlgorithm == algorithm
+        && self.currentDarkAppearance == darkAppearance
+        && self.currentPreservesSubjectColor == preservesSubjectColor
+        && fabs(self.currentTintHue - tintHue) <= 0.0005
+        && fabs(self.currentTintIntensity - tintIntensity) <= 0.0005
+        && fabs(self.layer.cornerRadius - cornerRadius) < 0.01) return;
     [self configureMaterial];
     UIImage *sourceImage;
     if (imageIsProcessed) {
@@ -1298,7 +1322,10 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity) 
         self.sourceLayer.contents = (__bridge id)sourceImage.CGImage;
         self.sourceLayer.contentsScale = sourceImage.scale > 0.0
             ? sourceImage.scale : UIScreen.mainScreen.scale;
-        UIImage *contourImage = LGIOS26ContourHighlightImage(image);
+        // AppleMitigated already bakes relief into its bitmap. Deriving another
+        // contour from a globally processed image outlines those outlines again.
+        UIImage *contourImage = algorithm == LGIOS26IconAlgorithmAppleMitigated
+            ? nil : LGIOS26ContourHighlightImage(image);
         self.glyphHighlightLayer.contents = contourImage.CGImage
             ? (__bridge id)contourImage.CGImage : nil;
         self.glyphHighlightLayer.contentsScale = contourImage.scale > 0.0
@@ -1320,6 +1347,7 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity) 
     if (!appearanceChanged) return;
 
     self.currentImageIdentity = identity;
+    self.currentInputImage = image;
     self.currentMode = mode;
     self.currentAlgorithm = algorithm;
     self.currentDarkAppearance = darkAppearance;
@@ -1346,15 +1374,8 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity) 
                 (id)[UIColor colorWithWhite:1.0 alpha:0.018].CGColor,
                 (id)[UIColor colorWithWhite:0.0 alpha:0.032].CGColor,
             ];
-        if (self.basePortal) {
-            // The CPU image is already premultiplied RGBA. No matrix is needed.
-            self.basePortal.filters = @[];
-            self.basePortal.compositingFilter = nil;
-            self.basePortal.opacity = appleMitigated ? 1.0f : 0.90f;
-        } else {
-            self.sourceLayer.hidden = NO;
-            self.sourceLayer.opacity = appleMitigated ? 1.0f : 0.90f;
-        }
+        self.sourceLayer.hidden = NO;
+        self.sourceLayer.opacity = appleMitigated ? 1.0f : 0.90f;
         self.rimLayer.opacity = appleMitigated ? 0.42f : 0.72f;
         self.rimBloomLayer.opacity = appleMitigated ? 0.22f : 0.38f;
         self.glossLayer.opacity = appleMitigated ? 0.28f : 0.42f;
@@ -1397,14 +1418,8 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity) 
             (id)[tint colorWithAlphaComponent:0.06 + 0.34 * tintIntensity].CGColor,
             (id)[darkTint colorWithAlphaComponent:0.05 + 0.28 * tintIntensity].CGColor,
         ];
-        if (self.basePortal) {
-            self.basePortal.filters = @[];
-            self.basePortal.compositingFilter = nil;
-            self.basePortal.opacity = 0.84f;
-        } else {
-            self.sourceLayer.hidden = NO;
-            self.sourceLayer.opacity = 0.84f;
-        }
+        self.sourceLayer.hidden = NO;
+        self.sourceLayer.opacity = 0.84f;
         self.rimLayer.colors = @[
             (id)UIColor.clearColor.CGColor,
             (id)UIColor.clearColor.CGColor,
