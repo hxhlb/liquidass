@@ -14,8 +14,10 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <signal.h>
 #include <unistd.h>
 #include <sys/sysctl.h>
+#include <math.h>
 
 #if __has_include(<roothide.h>)
 #include <roothide.h>
@@ -294,32 +296,6 @@ typedef struct {
     simd_float4 tintColor;
 } LGUniforms;
 
-// Matches the banana29 shader ABI. Enhanced-only shape fields deliberately do
-// not cross this boundary.
-typedef struct {
-    simd_float2 resolution;
-    simd_float2 outputResolution;
-    simd_float2 screenResolution;
-    simd_float2 cardOrigin;
-    simd_float2 wallpaperResolution;
-    simd_float2 lensOrigin;
-    float       radius;
-    float       bezelWidth;
-    float       glassThickness;
-    float       refractionScale;
-    float       refractiveIndex;
-    simd_float2 wallpaperOrigin;
-    simd_float2 samplingTransformX;
-    simd_float2 samplingTransformY;
-    simd_float2 samplingTransformOffset;
-    float       samplingOrientation;
-    float       backdropZoom;
-    float       useGlyphMask;
-    float       dispersionStrength;
-    float       fresnelGlareStrength;
-    simd_float4 tintColor;
-} LGClassicUniforms;
-
 typedef void (*Render13Fn)(void*,
                            void*,
                            void*,
@@ -401,6 +377,8 @@ static uint64_t                    g_clockMaskGeneration = 0;
 static uint64_t                    g_clockMaskUploadedGeneration = 0;
 static void                       *g_clockSharedMaskMapping = MAP_FAILED;
 static size_t                      g_clockSharedMaskMappingSize = 0;
+static void                       *g_spatialClockColorMapping = MAP_FAILED;
+static size_t                      g_spatialClockColorMappingSize = 0;
 
 static os_unfair_lock g_pipelineLock = OS_UNFAIR_LOCK_INIT;
 static os_unfair_lock g_clockMaskLock = OS_UNFAIR_LOCK_INIT;
@@ -410,6 +388,8 @@ static NSInteger      g_osMajorVersion = 0;
 
 static const char *kClockSharedMaskPath =
     "/var/mobile/Library/Accessibility/liquidglass-clock-mask-shared.bin";
+static const char *kSpatialClockColorPath =
+    "/var/mobile/Library/Application Support/SpatialScene/liquidass-clock-color.bin";
 
 typedef struct __attribute__((packed)) {
     uint32_t magic;
@@ -433,6 +413,31 @@ typedef struct {
     float bezelWidthPoints;
 } LGClockSharedMaskHeader;
 
+typedef struct {
+    uint32_t magic;
+    uint32_t version;
+    uint64_t sequence;
+    int32_t writerPID;
+    uint32_t valid;
+    uint32_t appearance;
+    uint32_t depthActive;
+    uint32_t reserved;
+    uint64_t sceneGeneration;
+    uint32_t foregroundColorCount;
+    uint32_t clockAreaColorCount;
+    float medianLuminance;
+    float contrast;
+    float sampleX;
+    float sampleY;
+    float sampleWidth;
+    float sampleHeight;
+    float foregroundColors[3][4];
+    float clockAreaColors[3][4];
+} LGSpatialClockColorState;
+
+static_assert(sizeof(LGSpatialClockColorState) == 176,
+              "LGSpatialClockColorState layout changed");
+
 // clear arc globals before cxa finalization
 __attribute__((destructor))
 static void liquidGlassShutdown(void) {
@@ -447,6 +452,11 @@ static void liquidGlassShutdown(void) {
         munmap(g_clockSharedMaskMapping, g_clockSharedMaskMappingSize);
         g_clockSharedMaskMapping = MAP_FAILED;
         g_clockSharedMaskMappingSize = 0;
+    }
+    if (g_spatialClockColorMapping != MAP_FAILED) {
+        munmap(g_spatialClockColorMapping, g_spatialClockColorMappingSize);
+        g_spatialClockColorMapping = MAP_FAILED;
+        g_spatialClockColorMappingSize = 0;
     }
 }
 
@@ -949,28 +959,28 @@ static void ensurePipeline(__unsafe_unretained id<MTLDevice> device) {
     if (!g_pipelineInit) {
         g_pipelineInit = true; // set first so a compile failure doesnt spin
 
-        NSError *err = nil;
-        NSString *src = [NSString stringWithUTF8String:kShaderSrc];
-        id<MTLLibrary> lib = [device newLibraryWithSource:src options:nil error:&err];
-        if (!lib) {
-            lglog("Metal compile failed: %s", err.localizedDescription.UTF8String);
-            os_unfair_lock_unlock(&g_pipelineLock);
-            return;
-        }
-        g_shaderLibrary = lib;
-        if (!g_enhancedRenderer) {
-            NSError *classicError = nil;
+        NSError *error = nil;
+        if (g_enhancedRenderer) {
+            NSString *source = [NSString stringWithUTF8String:kShaderSrc];
+            g_shaderLibrary =
+                [device newLibraryWithSource:source options:nil error:&error];
+            if (!g_shaderLibrary) {
+                lglog("Enhanced Metal compile failed: %s",
+                      error.localizedDescription.UTF8String);
+            }
+        } else {
             NSString *classicSource = [NSString stringWithUTF8String:kClassicShaderSrc];
             g_classicShaderLibrary =
-                [device newLibraryWithSource:classicSource options:nil error:&classicError];
+                [device newLibraryWithSource:classicSource options:nil error:&error];
             if (!g_classicShaderLibrary) {
                 lglog("Classic Metal compile failed: %s; stock pass will remain",
-                      classicError.localizedDescription.UTF8String);
+                      error.localizedDescription.UTF8String);
             }
         }
-        lglog("shader libraries ready profile=%s classic=%s",
+        lglog("shader library ready profile=%s status=%s",
               g_enhancedRenderer ? "enhanced" : "classic",
-              g_classicShaderLibrary ? "ready" : "unused/unavailable");
+              (g_enhancedRenderer ? g_shaderLibrary : g_classicShaderLibrary)
+                  ? "ready" : "unavailable");
     }
     os_unfair_lock_unlock(&g_pipelineLock);
 }
@@ -980,8 +990,9 @@ renderPipelineForFormat(__unsafe_unretained id<MTLDevice> device,
                         MTLPixelFormat format,
                         bool enhancedPipeline) {
     ensurePipeline(device);
-    if (!g_shaderLibrary || !g_renderPipelines ||
-        (!enhancedPipeline && !g_classicShaderLibrary)) return nil;
+    id<MTLLibrary> library = enhancedPipeline
+        ? g_shaderLibrary : g_classicShaderLibrary;
+    if (!library || !g_renderPipelines) return nil;
 
     os_unfair_lock_lock(&g_pipelineLock);
     NSUInteger pipelineKey = ((NSUInteger)format << 1) | (enhancedPipeline ? 1u : 0u);
@@ -992,8 +1003,6 @@ renderPipelineForFormat(__unsafe_unretained id<MTLDevice> device,
         return pipeline;
     }
 
-    id<MTLLibrary> library = enhancedPipeline
-        ? g_shaderLibrary : g_classicShaderLibrary;
     id<MTLFunction> vertex = [library newFunctionWithName:@"liquidGlassVertex"];
     id<MTLFunction> fragment = [library newFunctionWithName:@"liquidGlassFragment"];
     MTLRenderPipelineDescriptor *descriptor = [MTLRenderPipelineDescriptor new];
@@ -1194,6 +1203,194 @@ static void lgRefreshClockMaskFromSharedMemory(void) {
     }
 }
 
+static bool lgEnsureSpatialClockColorMapping(void) {
+    if (g_spatialClockColorMapping != MAP_FAILED) return true;
+    int fd = open(kSpatialClockColorPath, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+    struct stat info = {};
+    if (fstat(fd, &info) != 0 ||
+        info.st_size < (off_t)sizeof(LGSpatialClockColorState)) {
+        close(fd);
+        return false;
+    }
+    size_t mappingSize = (size_t)info.st_size;
+    void *mapping = mmap(NULL, mappingSize, PROT_READ, MAP_SHARED, fd, 0);
+    close(fd);
+    if (mapping == MAP_FAILED) return false;
+    g_spatialClockColorMapping = mapping;
+    g_spatialClockColorMappingSize = mappingSize;
+    return true;
+}
+
+static bool lgReadSpatialClockColor(LGSpatialClockColorState *result) {
+    if (!result || !lgEnsureSpatialClockColorMapping()) return false;
+    LGSpatialClockColorState *shared =
+        (LGSpatialClockColorState *)g_spatialClockColorMapping;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        uint64_t firstSequence = __atomic_load_n(&shared->sequence, __ATOMIC_ACQUIRE);
+        if (!firstSequence || (firstSequence & 1)) return false;
+        LGSpatialClockColorState snapshot = {};
+        memcpy(&snapshot, shared, sizeof(snapshot));
+        uint64_t secondSequence = __atomic_load_n(&shared->sequence, __ATOMIC_ACQUIRE);
+        if (firstSequence != secondSequence || (secondSequence & 1)) continue;
+        if (snapshot.magic != 0x53534343 || snapshot.version != 2 ||
+            !snapshot.valid || snapshot.writerPID <= 0 ||
+            (kill(snapshot.writerPID, 0) != 0 && errno != EPERM) ||
+            snapshot.appearance < 1 || snapshot.appearance > 2 ||
+            snapshot.foregroundColorCount > 3 ||
+            snapshot.clockAreaColorCount > 3 ||
+            !isfinite(snapshot.medianLuminance) ||
+            !isfinite(snapshot.contrast)) {
+            return false;
+        }
+        for (uint32_t group = 0; group < 2; group++) {
+            uint32_t count = group == 0
+                ? snapshot.foregroundColorCount : snapshot.clockAreaColorCount;
+            float (*colors)[4] = group == 0
+                ? snapshot.foregroundColors : snapshot.clockAreaColors;
+            for (uint32_t index = 0; index < count; index++) {
+                for (uint32_t component = 0; component < 4; component++) {
+                    if (!isfinite(colors[index][component]) ||
+                        colors[index][component] < 0.0f ||
+                        colors[index][component] > 1.0f) {
+                        return false;
+                    }
+                }
+            }
+        }
+        *result = snapshot;
+        return true;
+    }
+    return false;
+}
+
+typedef struct {
+    float lightness;
+    float a;
+    float b;
+} LGLabColor;
+
+typedef struct {
+    simd_float3 color;
+    float vibrancy;
+    bool valid;
+} LGClockColorSelection;
+
+static float lgSRGBToLinear(float value) {
+    return value <= 0.04045f
+        ? value / 12.92f
+        : powf((value + 0.055f) / 1.055f, 2.4f);
+}
+
+static float lgLabPivot(float value) {
+    return value > 0.008856f
+        ? cbrtf(value)
+        : (7.787f * value) + (16.0f / 116.0f);
+}
+
+static LGLabColor lgRGBToLab(simd_float3 color) {
+    float red = lgSRGBToLinear(color.x);
+    float green = lgSRGBToLinear(color.y);
+    float blue = lgSRGBToLinear(color.z);
+    float x = (0.4124564f * red + 0.3575761f * green + 0.1804375f * blue) /
+              0.95047f;
+    float y = 0.2126729f * red + 0.7151522f * green + 0.0721750f * blue;
+    float z = (0.0193339f * red + 0.1191920f * green + 0.9503041f * blue) /
+              1.08883f;
+    float fx = lgLabPivot(x);
+    float fy = lgLabPivot(y);
+    float fz = lgLabPivot(z);
+    return (LGLabColor){116.0f * fy - 16.0f,
+                        500.0f * (fx - fy),
+                        200.0f * (fy - fz)};
+}
+
+static float lgDeltaE94(simd_float3 first, simd_float3 second) {
+    LGLabColor lhs = lgRGBToLab(first);
+    LGLabColor rhs = lgRGBToLab(second);
+    float deltaLightness = lhs.lightness - rhs.lightness;
+    float lhsChroma = hypotf(lhs.a, lhs.b);
+    float rhsChroma = hypotf(rhs.a, rhs.b);
+    float deltaChroma = lhsChroma - rhsChroma;
+    float deltaA = lhs.a - rhs.a;
+    float deltaB = lhs.b - rhs.b;
+    float deltaHueSquared = fmaxf(0.0f,
+        deltaA * deltaA + deltaB * deltaB - deltaChroma * deltaChroma);
+    float chromaScale = 1.0f + 0.045f * lhsChroma;
+    float hueScale = 1.0f + 0.015f * lhsChroma;
+    return sqrtf(deltaLightness * deltaLightness +
+                 (deltaChroma / chromaScale) * (deltaChroma / chromaScale) +
+                 deltaHueSquared / (hueScale * hueScale));
+}
+
+static float lgRGBHueDegrees(simd_float3 color) {
+    float maximum = fmaxf(color.x, fmaxf(color.y, color.z));
+    float minimum = fminf(color.x, fminf(color.y, color.z));
+    float chroma = maximum - minimum;
+    if (chroma < 0.0001f) return 0.0f;
+    float hue = 0.0f;
+    if (maximum == color.x) {
+        hue = fmodf((color.y - color.z) / chroma, 6.0f);
+    } else if (maximum == color.y) {
+        hue = ((color.z - color.x) / chroma) + 2.0f;
+    } else {
+        hue = ((color.x - color.y) / chroma) + 4.0f;
+    }
+    hue *= 60.0f;
+    return hue < 0.0f ? hue + 360.0f : hue;
+}
+
+static float lgRGBLuminance(simd_float3 color) {
+    return color.x * 0.2126f + color.y * 0.7152f + color.z * 0.0722f;
+}
+
+static LGClockColorSelection
+lgSelectSpatialClockColor(const LGSpatialClockColorState *state) {
+    LGClockColorSelection selection = {};
+    if (!state || !state->foregroundColorCount) return selection;
+    bool hasClockArea = state->clockAreaColorCount > 0;
+    simd_float3 clockArea = hasClockArea
+        ? simd_make_float3(state->clockAreaColors[0][0],
+                           state->clockAreaColors[0][1],
+                           state->clockAreaColors[0][2])
+        : simd_make_float3(0.0f);
+    float bestDistance = -1.0f;
+    for (uint32_t index = 0; index < state->foregroundColorCount; index++) {
+        simd_float3 candidate = simd_make_float3(
+            state->foregroundColors[index][0],
+            state->foregroundColors[index][1],
+            state->foregroundColors[index][2]);
+        float maximum = fmaxf(candidate.x, fmaxf(candidate.y, candidate.z));
+        float minimum = fminf(candidate.x, fminf(candidate.y, candidate.z));
+        float chroma = maximum - minimum;
+        float hue = lgRGBHueDegrees(candidate);
+        if (!((hue < 30.0f || hue > 100.0f) &&
+              chroma > 0.30f && lgRGBLuminance(candidate) > 0.25f)) {
+            continue;
+        }
+        float distance = hasClockArea ? lgDeltaE94(candidate, clockArea) : 0.0f;
+        if (!selection.valid || distance > bestDistance) {
+            selection.color = candidate;
+            selection.valid = true;
+            bestDistance = distance;
+        }
+    }
+    if (!selection.valid) return selection;
+    if (!hasClockArea) {
+        selection.vibrancy = 0.8f;
+    } else if (bestDistance < 2.0f) {
+        selection.vibrancy = 0.0f;
+    } else if (bestDistance < 4.0f) {
+        selection.vibrancy = 0.1f;
+    } else if (bestDistance < 30.0f) {
+        selection.vibrancy = 0.6f;
+    } else {
+        selection.vibrancy = lgRGBLuminance(selection.color) < 0.5f
+            ? 1.0f : 0.85f;
+    }
+    return selection;
+}
+
 static id<MTLTexture>
 lgClockMaskTexture(__unsafe_unretained id<MTLDevice> device) {
     lgRefreshClockMaskFromSharedMemory();
@@ -1291,6 +1488,7 @@ typedef struct {
     float       refractionScale;
     float       refractiveIndex;
     float       blur;
+    float       specularOpacity;
     float       dispersionStrength;
     float       tintR, tintG, tintB, tintStrength;
     float       darkTintR, darkTintG, darkTintB, darkTintStrength;
@@ -1298,7 +1496,7 @@ typedef struct {
 
 static const LGHostParams kHostDefaults[] = {
 #define LG_BACKBOARDD_HOST(identifier, type, prefix, radius, bezel, thickness, refraction, index, blurValue, specular, dispersion, lightTint, darkTint) \
-    { type, prefix, 0, radius, bezel, thickness, refraction, index, blurValue, dispersion },
+    { type, prefix, 0, radius, bezel, thickness, refraction, index, blurValue, specular, dispersion },
     LG_HOST_REGISTRY(LG_BACKBOARDD_HOST)
 #undef LG_BACKBOARDD_HOST
 };
@@ -1315,6 +1513,7 @@ struct LGRadiusRoute { int host; float radiusRatio; bool dark; };
 static std::unordered_map<uint32_t, LGRadiusRoute> g_radiusRoutes;
 struct LGHostRoute { int host; bool dark; };
 static std::unordered_map<uint32_t, LGHostRoute> g_refreshRoutes;
+static std::unordered_set<uint32_t> g_nativeClockMaskAtoms;
 static const int kDynamicRadiusSteps = 32;
 
 static bool lgUsesDynamicRadiusRoute(int host) {
@@ -1426,6 +1625,7 @@ static void lgReloadHostPrefs(void) {
         LG_OVR(refractiveIndex,    @"RefractiveIndex");
         LG_OVR(dispersionStrength, @"DispersionStrength");
         LG_OVR(blur,               @"Blur");
+        LG_OVR(specularOpacity,    @"SpecularOpacity");
         LG_OVR(tintR,           @"TintR");
         LG_OVR(tintG,           @"TintG");
         LG_OVR(tintB,           @"TintB");
@@ -1449,6 +1649,23 @@ static void lgReloadHostPrefs(void) {
             overrides++;
         }
     }
+    LGHostParams *clock = &g_hostParams[LGHostIdentifierClock];
+    const LGHostParams *notification = &g_hostParams[LGHostIdentifierNotification];
+    clock->bezelRatio = notification->bezelRatio;
+    clock->glassThickness = notification->glassThickness;
+    clock->refractionScale = notification->refractionScale;
+    clock->refractiveIndex = notification->refractiveIndex;
+    clock->blur = notification->blur;
+    clock->specularOpacity = notification->specularOpacity;
+    clock->dispersionStrength = notification->dispersionStrength;
+    clock->tintR = notification->tintR;
+    clock->tintG = notification->tintG;
+    clock->tintB = notification->tintB;
+    clock->tintStrength = notification->tintStrength;
+    clock->darkTintR = notification->darkTintR;
+    clock->darkTintG = notification->darkTintG;
+    clock->darkTintB = notification->darkTintB;
+    clock->darkTintStrength = notification->darkTintStrength;
     g_hostParamsInit = true;
 
     lglog("lgReloadHostPrefs: %s (%d hosts, %d overrides) banner.bezel=%.3f refr=%.2f",
@@ -1528,7 +1745,10 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
     R13TRACE("R13[%llu] cmdBuf=%p origTex=%p device=%p dims=%llux%llu", callN, rawCmdBuf, rawOrigTex, (__bridge void *)device, w, h);
 
     ensurePipeline(device);
-    if (!g_shaderLibrary) { lglog("ourCustomRender13: no shader library"); return; }
+    if (!(g_enhancedRenderer ? g_shaderLibrary : g_classicShaderLibrary)) {
+        lglog("ourCustomRender13: selected shader library unavailable");
+        return;
+    }
 
     ensureUniforms(device, w, h);
     if (!g_uniformsBuf) { lglog("ourCustomRender13: no uniforms buf"); return; }
@@ -1549,9 +1769,7 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
     float maxBezel = !strcmp(hp->prefPrefix, "CoverSheet")
         ? shortestF * 0.5f : kMaxBezelPx;
     lu.bezelWidth      = fminf(hp->bezelRatio * shortestF, maxBezel);
-    bool enhancedPipeline = g_enhancedRenderer ||
-        !strcmp(hp->prefPrefix, "PrefsSegment") ||
-        !strcmp(hp->prefPrefix, "TabBarSelection");
+    bool enhancedPipeline = g_enhancedRenderer;
     float canonicalThickness = hp->glassThickness > 60.0f
         ? hp->glassThickness / 6.0f : hp->glassThickness;
     lu.glassThickness     = enhancedPipeline
@@ -1560,9 +1778,38 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
     lu.refractiveIndex    = hp->refractiveIndex;
     lu.dispersionStrength = hp->dispersionStrength;
     lu.fresnelGlareStrength = !strcmp(hp->prefPrefix, "Clock")
-        ? g_fresnelGlareStrength : 0.0f;
+        ? g_fresnelGlareStrength *
+              g_hostParams[LGHostIdentifierNotification].specularOpacity
+        : 0.0f;
     lu.tintColor          = darkTint ? simd_make_float4(hp->darkTintR, hp->darkTintG, hp->darkTintB, hp->darkTintStrength)
                                   : simd_make_float4(hp->tintR, hp->tintG, hp->tintB, hp->tintStrength);
+    if (!strcmp(hp->prefPrefix, "Clock")) {
+        LGSpatialClockColorState spatialColor = {};
+        bool matchingSpatialColor = lgReadSpatialClockColor(&spatialColor) &&
+            spatialColor.appearance == (darkTint ? 2u : 1u);
+        if (matchingSpatialColor) {
+            LGClockColorSelection selection =
+                lgSelectSpatialClockColor(&spatialColor);
+            if (selection.valid) {
+                float whiteMix = darkTint ? 0.30f : 0.38f;
+                simd_float3 adaptiveTint = selection.color * (1.0f - whiteMix) +
+                    simd_make_float3(whiteMix);
+                float fillStrength = fminf(0.20f, fmaxf(0.12f,
+                    0.13f + spatialColor.contrast * 0.22f +
+                    (spatialColor.depthActive ? 0.01f : 0.0f)));
+                lu.tintColor = simd_make_float4(adaptiveTint.x,
+                                                 adaptiveTint.y,
+                                                 adaptiveTint.z,
+                                                 fillStrength);
+            } else {
+                lu.tintColor = simd_make_float4(1.0f, 1.0f, 1.0f,
+                                                 darkTint ? 0.12f : 0.14f);
+            }
+        } else {
+            lu.tintColor = simd_make_float4(1.0f, 1.0f, 1.0f,
+                                             darkTint ? 0.12f : 0.14f);
+        }
+    }
 
     lu.backdropZoom    = !strcmp(hp->prefPrefix, "PrefsSwitch") ? 0.75f : 1.0f;
     lu.shapeScale      = 1.0f;
@@ -1604,9 +1851,11 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
 
     id<MTLTexture> clockMask = nil;
     if (!strcmp(hp->prefPrefix, "Clock")) {
-        clockMask = lgClockMaskTexture(device);
+        bool usesNativeClockMask =
+            g_nativeClockMaskAtoms.find(ftype) != g_nativeClockMaskAtoms.end();
+        clockMask = usesNativeClockMask ? nil : lgClockMaskTexture(device);
         lu.useGlyphMask = clockMask ? 1.f : 0.f;
-        if (clockMask) {
+        if (clockMask && !usesNativeClockMask) {
             float maskPointWidth = (float)clockMask.width / g_clockMaskImageScale;
             float maskPointHeight = (float)clockMask.height / g_clockMaskImageScale;
             float pixelsPerPointX = maskPointWidth > 0.0f ? (float)w / maskPointWidth : 1.0f;
@@ -1777,33 +2026,7 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
     [enc setRenderPipelineState:renderPipeline];
     [enc setFragmentTexture:glassSourceTexture atIndex:0];
     [enc setFragmentTexture:clockMask atIndex:1];
-    if (enhancedPipeline) {
-        [enc setFragmentBytes:&lu length:sizeof(lu) atIndex:0];
-    } else {
-        LGClassicUniforms classic = {};
-        classic.resolution = lu.resolution;
-        classic.outputResolution = lu.outputResolution;
-        classic.screenResolution = lu.screenResolution;
-        classic.cardOrigin = lu.cardOrigin;
-        classic.wallpaperResolution = lu.wallpaperResolution;
-        classic.lensOrigin = lu.lensOrigin;
-        classic.radius = lu.radius;
-        classic.bezelWidth = lu.bezelWidth;
-        classic.glassThickness = canonicalThickness;
-        classic.refractionScale = lu.refractionScale;
-        classic.refractiveIndex = lu.refractiveIndex;
-        classic.wallpaperOrigin = lu.wallpaperOrigin;
-        classic.samplingTransformX = lu.samplingTransformX;
-        classic.samplingTransformY = lu.samplingTransformY;
-        classic.samplingTransformOffset = lu.samplingTransformOffset;
-        classic.samplingOrientation = lu.samplingOrientation;
-        classic.backdropZoom = lu.backdropZoom;
-        classic.useGlyphMask = lu.useGlyphMask;
-        classic.dispersionStrength = lu.dispersionStrength;
-        classic.fresnelGlareStrength = lu.fresnelGlareStrength;
-        classic.tintColor = lu.tintColor;
-        [enc setFragmentBytes:&classic length:sizeof(classic) atIndex:0];
-    }
+    [enc setFragmentBytes:&lu length:sizeof(lu) atIndex:0];
     [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
     [enc endEncoding];
 
@@ -2244,6 +2467,24 @@ static bool registerCustomFilter(void) {
             g_refreshRoutes[darkRefreshAtom] = { i, true };
             lgRegisterCustomAtom(darkRefreshAtom, registrationDescriptor);
         }
+        if (i == LGHostIdentifierClock) {
+            NSString *nativeName = [[NSString stringWithUTF8String:kHostDefaults[i].typeName]
+                stringByAppendingString:@".nativeMask"];
+            for (int dark = 0; dark <= 1; dark++) {
+                NSString *appearanceName = dark
+                    ? [nativeName stringByAppendingString:@".dark"] : nativeName;
+                for (int refresh = 0; refresh <= 1; refresh++) {
+                    NSString *variantName = refresh
+                        ? [appearanceName stringByAppendingString:@".refresh"]
+                        : appearanceName;
+                    uint32_t nativeAtom = g_internAtom(variantName.UTF8String);
+                    if (!nativeAtom) continue;
+                    g_refreshRoutes[nativeAtom] = { i, dark != 0 };
+                    g_nativeClockMaskAtoms.insert(nativeAtom);
+                    lgRegisterCustomAtom(nativeAtom, registrationDescriptor);
+                }
+            }
+        }
         if (lgUsesDynamicRadiusRoute(i)) {
             for (int step = 0; step <= kDynamicRadiusSteps / 2; step++) {
                 NSString *radiusName = [[NSString stringWithUTF8String:kHostDefaults[i].typeName]
@@ -2372,7 +2613,8 @@ static void tweakInit(void) {
 
     g_renderPipelines =
         new std::unordered_map<NSUInteger, id<MTLRenderPipelineState>>();
-    g_blurTextures = [NSMutableDictionary dictionary];
+    g_blurTextures = g_enhancedRenderer
+        ? [NSMutableDictionary dictionary] : nil;
     registerCustomFilter();
 
     lglog("ready");

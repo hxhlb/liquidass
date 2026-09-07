@@ -20,6 +20,9 @@ struct Uniforms {
     float2 samplingTransformOffset;
     float  samplingOrientation;
     float  backdropZoom;
+    float  shapeScale;
+    float2 shapeOrigin;
+    float2 shapeSize;
     float  useGlyphMask;
     float  dispersionStrength;
     float  fresnelGlareStrength;
@@ -195,6 +198,7 @@ float4 liquidGlassPixel(texture2d<float, access::sample> src,
     float distFromSide;
     float2 dir;
     float edgeOpacity;
+    bool subShape = false;
     if (u.useGlyphMask > 0.5) {
 
         float bestDistance = bezel + 1.0;
@@ -238,7 +242,25 @@ float4 liquidGlassPixel(texture2d<float, access::sample> src,
 
         R = clamp(R, 0.0, shortest * 0.5);
 
-        float2 lensPx = px - (isCoverSheet ? u.lensOrigin : float2(0.0));
+        float shapeScale = clamp(u.shapeScale, 0.05, 1.0);
+        float2 shapeInset = float2(0.0);
+        if (u.shapeSize.x > 0.5 && u.shapeSize.y > 0.5) {
+            subShape = true;
+            shapeInset = u.shapeOrigin;
+            fw = u.shapeSize.x;
+            fh = u.shapeSize.y;
+            shortest = min(fw, fh);
+            R = clamp(R, 0.0, shortest * 0.5);
+        } else if (shapeScale < 0.999) {
+            subShape = true;
+            shapeInset = float2(fw, fh) * (1.0 - shapeScale) * 0.5;
+            fw *= shapeScale;
+            fh *= shapeScale;
+            shortest = min(fw, fh);
+            R = clamp(R, 0.0, shortest * 0.5);
+        }
+
+        float2 lensPx = px - (isCoverSheet ? u.lensOrigin : shapeInset);
         float2 halfSize = float2(fw, fh) * 0.5;
         float2 p = lensPx - halfSize;
         float2 core;
@@ -270,7 +292,9 @@ float4 liquidGlassPixel(texture2d<float, access::sample> src,
                 signedDistance = (superLength - 1.0) * min(extent.x, extent.y);
             }
         }
-        if (signedDistance > 1.0) return src.sample(s, captureUV);
+        if (signedDistance > 1.0) {
+            return subShape ? float4(0.0) : src.sample(s, captureUV);
+        }
 
         distFromSide = max(0.0, -signedDistance);
         float2 cornerDelta = max(abs(p) - core, float2(0.0));
@@ -307,7 +331,7 @@ float4 liquidGlassPixel(texture2d<float, access::sample> src,
         edgeOpacity = clamp(1.0 - max(0.0, signedDistance), 0.0, 1.0);
     }
 
-    if (R < shortest * 0.45 && distFromSide >= bezel) {
+    if ((R < shortest * 0.45 || subShape) && distFromSide >= bezel) {
         float4 flat = src.sample(s, captureUV);
         flat.rgb = mix(flat.rgb, u.tintColor.rgb, u.tintColor.a);
         return flat;

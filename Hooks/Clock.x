@@ -2,6 +2,7 @@
 #import <CoreText/CoreText.h>
 #import <QuartzCore/QuartzCore.h>
 #import <TargetConditionals.h>
+#import <objc/message.h>
 #import <objc/runtime.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -285,6 +286,136 @@ static UIView *LGClockFindDescendantNamed(UIView *root, NSString *className) {
         if (match) return match;
     }
     return nil;
+}
+
+static UIView *LGClockVibrancyEffectView(UIView *view) {
+    for (UIView *cursor = view; cursor; cursor = cursor.superview) {
+        if ([NSStringFromClass(cursor.class)
+                isEqualToString:@"BSUIVibrancyEffectView"]) {
+            return cursor;
+        }
+    }
+    return nil;
+}
+
+static CALayer *LGClockBackdropPortalLayer(UIView *backdropView) {
+    CALayer *rootMask = backdropView.layer.mask;
+    if ([NSStringFromClass(rootMask.class) isEqualToString:@"CAPortalLayer"]) {
+        return rootMask;
+    }
+    for (CALayer *sublayer in rootMask.sublayers) {
+        if ([NSStringFromClass(sublayer.class) isEqualToString:@"CAPortalLayer"]) {
+            return sublayer;
+        }
+    }
+    return nil;
+}
+
+static void LGClockExpandPortalAperture(UIView *timeLabel) {
+    UIView *effectView = LGClockVibrancyEffectView(timeLabel);
+    if (!effectView || CGRectIsEmpty(timeLabel.bounds)) return;
+    UIView *portalView = LGClockFindDescendantNamed(
+        effectView, @"BSUIVibrancyAnimatingPortalView");
+    UIView *backdropView = LGClockFindDescendantNamed(
+        effectView, @"BSUIVibrancyBackdropView");
+    portalView.layer.borderColor = nil;
+    portalView.layer.borderWidth = 0.0;
+    backdropView.layer.borderColor = nil;
+    backdropView.layer.borderWidth = 0.0;
+
+    CGRect labelRect = [timeLabel convertRect:timeLabel.bounds toView:effectView];
+    CGFloat requiredHeight = ceil(MAX(CGRectGetHeight(effectView.bounds),
+                                      CGRectGetMaxY(labelRect) + 8.0));
+    if (requiredHeight <= CGRectGetHeight(effectView.bounds) + 0.5) return;
+
+    CGFloat originalWidth = CGRectGetWidth(effectView.bounds);
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    CGRect effectFrame = effectView.frame;
+    effectFrame.size.height = requiredHeight;
+    effectView.frame = effectFrame;
+    effectView.clipsToBounds = NO;
+    effectView.layer.masksToBounds = NO;
+    for (UIView *subview in effectView.subviews) {
+        CGRect frame = subview.frame;
+        BOOL fillsEffectWidth = fabs(CGRectGetMinX(frame)) < 1.0
+            && fabs(CGRectGetWidth(frame) - originalWidth) < 2.0;
+        if (!fillsEffectWidth) continue;
+        frame.origin.y = 0.0;
+        frame.size.height = requiredHeight;
+        subview.frame = frame;
+        subview.clipsToBounds = NO;
+        subview.layer.masksToBounds = NO;
+    }
+    CALayer *steadyPortalLayer = LGClockBackdropPortalLayer(backdropView);
+    if ([NSStringFromClass(steadyPortalLayer.class)
+            isEqualToString:@"CAPortalLayer"]) {
+        steadyPortalLayer.frame = backdropView.bounds;
+        SEL sourceSelector = NSSelectorFromString(@"sourceLayer");
+        if ([steadyPortalLayer respondsToSelector:sourceSelector]) {
+            CALayer *sourceLayer = ((id (*)(id, SEL))objc_msgSend)(
+                steadyPortalLayer, sourceSelector);
+            if (sourceLayer) {
+                sourceLayer.frame = steadyPortalLayer.bounds;
+                sourceLayer.bounds = steadyPortalLayer.bounds;
+            }
+        }
+    }
+    [CATransaction commit];
+}
+
+static NSString *LGClockFilterObjectType(id filter) {
+    if (!filter) return nil;
+    @try {
+        id value = [filter valueForKey:@"type"];
+        return [value isKindOfClass:NSString.class] ? value : nil;
+    } @catch (__unused NSException *exception) {
+        return nil;
+    }
+}
+
+static BOOL LGClockFilterTypeIsOurs(NSString *type) {
+    NSString *base = LGFilterTypeForHostPrefix(@"Clock");
+    return base.length && type.length &&
+        ([type isEqualToString:base] ||
+         [type hasPrefix:[base stringByAppendingString:@"."]]);
+}
+
+static NSArray *LGClockFiltersByRemovingOurs(NSArray *filters) {
+    if (!filters.count) return @[];
+    NSMutableArray *kept = [NSMutableArray arrayWithCapacity:filters.count];
+    for (id filter in filters) {
+        if (!LGClockFilterTypeIsOurs(LGClockFilterObjectType(filter))) {
+            [kept addObject:filter];
+        }
+    }
+    return kept.copy;
+}
+
+static BOOL LGClockFilterIsSystemFrosting(id filter) {
+    NSString *type = LGClockFilterObjectType(filter);
+    return [type isEqualToString:@"colorMatrix"] ||
+           [type isEqualToString:@"gaussianBlur"];
+}
+
+static BOOL LGClockLayerHasOurFilter(CALayer *layer) {
+    for (id filter in layer.filters ?: @[]) {
+        if (LGClockFilterTypeIsOurs(LGClockFilterObjectType(filter))) return YES;
+    }
+    return NO;
+}
+
+static UIView *LGClockSystemBackdropView(UILabel *label) {
+    if (!label || LGClockIsLegacySystem()) return nil;
+    UIView *effectView = LGClockVibrancyEffectView(label);
+    UIView *backdropView = LGClockFindDescendantNamed(
+        effectView, @"BSUIVibrancyBackdropView");
+    Class backdropLayerClass = NSClassFromString(@"CABackdropLayer");
+    if (!backdropView || !backdropLayerClass ||
+        ![backdropView.layer isKindOfClass:backdropLayerClass]) {
+        return nil;
+    }
+    return backdropView;
 }
 
 static UIView *LGClockFindLegacyHostInView(UIView *root) {
@@ -696,6 +827,12 @@ static NSString *LGClockVariableFontPath(void) {
 @property (nonatomic, strong) LGLiveBackdropView *glassView;
 @property (nonatomic, strong) UIView *glyphMaskView;
 @property (nonatomic, strong) CAShapeLayer *glyphMaskLayer;
+@property (nonatomic, weak) CALayer *systemBackdropLayer;
+@property (nonatomic, strong) NSArray *systemBackdropBaseFilters;
+@property (nonatomic, weak) UIView *systemAnimatingPortalView;
+@property (nonatomic) float originalSystemPortalOpacity;
+@property (nonatomic) BOOL hasOriginalSystemPortalOpacity;
+@property (nonatomic) BOOL systemFilterRefreshVariant;
 @property (nonatomic, weak) UIView *renderContainer;
 @property (nonatomic) CGRect originalLabelFrame;
 @property (nonatomic) CGRect lastAppliedLabelFrame;
@@ -1009,6 +1146,97 @@ static void LGClockRestoreDirectFontState(LGClockState *state) {
     });
 }
 
+- (void)restoreSystemClockRendering {
+    CALayer *layer = self.systemBackdropLayer;
+    if (layer) {
+        NSArray *currentBase = LGClockFiltersByRemovingOurs(layer.filters ?: @[]);
+        NSArray *restored = currentBase.count
+            ? currentBase : (self.systemBackdropBaseFilters ?: @[]);
+        @try {
+            layer.filters = restored;
+        } @catch (NSException *exception) {
+            LGClockLog(@"system material restore failed layer=%@ reason=%@",
+                       NSStringFromClass(layer.class), exception.reason);
+        }
+    }
+    if (self.systemAnimatingPortalView && self.hasOriginalSystemPortalOpacity) {
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        self.systemAnimatingPortalView.layer.opacity = self.originalSystemPortalOpacity;
+        [CATransaction commit];
+    }
+    self.systemBackdropLayer = nil;
+    self.systemBackdropBaseFilters = nil;
+    self.systemAnimatingPortalView = nil;
+    self.hasOriginalSystemPortalOpacity = NO;
+}
+
+- (BOOL)installSystemClockFilterOnView:(UIView *)backdropView {
+    CALayer *layer = backdropView.layer;
+    if (!layer) return NO;
+    if (self.systemBackdropLayer && self.systemBackdropLayer != layer) {
+        [self restoreSystemClockRendering];
+    }
+    NSArray *currentBase = LGClockFiltersByRemovingOurs(layer.filters ?: @[]);
+    if (currentBase.count) {
+        self.systemBackdropBaseFilters = currentBase;
+    }
+
+    NSString *type = [LGFilterTypeForHostPrefix(@"Clock")
+        stringByAppendingString:@".nativeMask"];
+    if (backdropView.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark) {
+        type = [type stringByAppendingString:@".dark"];
+    }
+    self.systemFilterRefreshVariant = !self.systemFilterRefreshVariant;
+    if (self.systemFilterRefreshVariant) {
+        type = [type stringByAppendingString:@".refresh"];
+    }
+
+    Class filterClass = NSClassFromString(@"CAFilter");
+    id filter = filterClass && type.length
+        ? ((id (*)(Class, SEL, NSString *))objc_msgSend)(
+              filterClass, NSSelectorFromString(@"filterWithType:"), type)
+        : nil;
+    if (!filter) {
+        LGClockLog(@"system filter unavailable type=%@ layer=%@",
+                   type, NSStringFromClass(layer.class));
+        return NO;
+    }
+
+    NSMutableArray *filters = [NSMutableArray array];
+    for (id existing in currentBase) {
+        if (!LGClockFilterIsSystemFrosting(existing)) [filters addObject:existing];
+    }
+    [filters addObject:filter];
+    @try {
+        layer.filters = filters.copy;
+    } @catch (NSException *exception) {
+        LGClockLog(@"system filter attach failed type=%@ layer=%@ reason=%@",
+                   type, NSStringFromClass(layer.class), exception.reason);
+        return NO;
+    }
+    self.systemBackdropLayer = layer;
+    UIView *effectView = backdropView.superview;
+    UIView *portalView = LGClockFindDescendantNamed(
+        effectView, @"BSUIVibrancyAnimatingPortalView");
+    if (self.systemAnimatingPortalView != portalView) {
+        if (self.systemAnimatingPortalView && self.hasOriginalSystemPortalOpacity) {
+            self.systemAnimatingPortalView.layer.opacity =
+                self.originalSystemPortalOpacity;
+        }
+        self.systemAnimatingPortalView = portalView;
+        self.originalSystemPortalOpacity = portalView.layer.opacity;
+        self.hasOriginalSystemPortalOpacity = portalView != nil;
+    }
+    if (portalView) {
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        portalView.layer.opacity = 0.0;
+        [CATransaction commit];
+    }
+    return LGClockLayerHasOurFilter(layer);
+}
+
 - (void)applyReason:(NSString *)reason {
     UIView *host = self.host;
     if (!host.window) return;
@@ -1061,9 +1289,10 @@ static void LGClockRestoreDirectFontState(LGClockState *state) {
         if (directFont) {
             BOOL previousApplying = self.applying;
             self.applying = YES;
-            LGClockApplyFontToSourceLabel(label, directFont, YES);
             CGRect directFrame = LGClockDirectFrame(self, label, directFont);
+            LGClockApplyFontToSourceLabel(label, directFont, YES);
             label.frame = directFrame;
+            LGClockExpandPortalAperture(label);
             self.lastAppliedLabelFrame = directFrame;
             self.directFontApplied = YES;
             LGClockOpenDirectClipChain(self, label, host);
@@ -1071,6 +1300,11 @@ static void LGClockRestoreDirectFontState(LGClockState *state) {
         }
     } else {
         LGClockRestoreDirectFontState(self);
+    }
+    UIView *systemBackdropView = LGClockSystemBackdropView(label);
+    CALayer *systemBackdropLayer = systemBackdropView.layer;
+    if (!systemBackdropView && self.systemBackdropLayer) {
+        [self restoreSystemClockRendering];
     }
     CGRect sourceRect = [label convertRect:label.bounds toView:renderContainer];
     UIView *nearestObstacle = nil;
@@ -1088,7 +1322,7 @@ static void LGClockRestoreDirectFontState(LGClockState *state) {
     }
     CFTimeInterval profileObstacleEnd = CACurrentMediaTime();
     if (nearestTop != CGFLOAT_MAX) nearestTop = round(nearestTop * 2.0) * 0.5;
-    NSString *signature = [NSString stringWithFormat:@"%d|%d|%@|%.2f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f",
+    NSString *signature = [NSString stringWithFormat:@"%d|%d|%@|%.2f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%@|%@|%ld",
                            enabled, variableFontEnabled, label.text ?: label.attributedText.string,
                            self.originalFont.pointSize,
                            variableFontEnabled ? LGClockAxisValue(@"weight") : 0.0,
@@ -1097,9 +1331,15 @@ static void LGClockRestoreDirectFontState(LGClockState *state) {
                            variableFontEnabled ? LGClockAxisValue(@"softness") : 0.0,
                            nearestTop, LGClockBezelWidth(),
                            CGRectGetMinX(sourceRect), CGRectGetMinY(sourceRect),
-                           CGRectGetWidth(sourceRect), CGRectGetHeight(sourceRect)];
+                           CGRectGetWidth(sourceRect), CGRectGetHeight(sourceRect),
+                           NSStringFromClass(systemBackdropLayer.class),
+                           NSStringFromCGRect(systemBackdropView.bounds),
+                           (long)systemBackdropView.traitCollection.userInterfaceStyle];
     BOOL directFontMatches = !variableFontEnabled || LGClockLabelUsesOurFont(label);
-    BOOL fontStateMatches = enabled ? (self.glassView != nil && directFontMatches)
+    BOOL renderPathReady = systemBackdropView
+        ? LGClockLayerHasOurFilter(systemBackdropLayer)
+        : self.glassView != nil;
+    BOOL fontStateMatches = enabled ? (renderPathReady && directFontMatches)
                                     : !LGClockLabelUsesOurFont(label);
     if ([signature isEqualToString:self.lastSignature] && fontStateMatches) {
         self.skippedChanges++;
@@ -1232,90 +1472,137 @@ static void LGClockRestoreDirectFontState(LGClockState *state) {
             }
             CGRect labelFrame = CGRectMake(CGRectGetMidX(sourceRect) - canvasWidth * 0.5,
                                            surfaceTop, canvasWidth, surfaceHeight);
-            LGLiveBackdropView *glass = self.glassView;
-            if (!glass) {
-                glass = [[LGLiveBackdropView alloc] initWithFrame:labelFrame
-                                                       groupName:nil
-                                                      filterType:LGFilterTypeForHostPrefix(@"Clock")];
-                glass.userInteractionEnabled = NO;
-                glass.backgroundColor = UIColor.clearColor;
-                self.glassView = glass;
-            }
-            if (glass.superview != renderContainer) {
-                [glass removeFromSuperview];
-                [renderContainer addSubview:glass];
-            }
-            if (self.renderContainer != renderContainer || !self.hasRenderContainerState) {
+            BOOL usesSystemBackdrop = systemBackdropView != nil;
+            LGLiveBackdropView *glass = nil;
+            if (usesSystemBackdrop) {
+                self.glassView.maskView = nil;
+                [self.glassView removeFromSuperview];
+                self.glassView = nil;
+                self.glyphMaskView = nil;
+                self.glyphMaskLayer = nil;
                 if (self.renderContainer && self.hasRenderContainerState) {
                     self.renderContainer.clipsToBounds =
                         self.originalRenderContainerClipsToBounds;
                     self.renderContainer.layer.masksToBounds =
                         self.originalRenderContainerMasksToBounds;
                 }
-                self.renderContainer = renderContainer;
-                self.originalRenderContainerClipsToBounds = renderContainer.clipsToBounds;
-                self.originalRenderContainerMasksToBounds = renderContainer.layer.masksToBounds;
-                self.hasRenderContainerState = YES;
+                self.renderContainer = nil;
+                self.hasRenderContainerState = NO;
+            } else {
+                glass = self.glassView;
+                if (!glass) {
+                    glass = [[LGLiveBackdropView alloc] initWithFrame:labelFrame
+                                                           groupName:nil
+                                                          filterType:LGFilterTypeForHostPrefix(@"Clock")];
+                    glass.userInteractionEnabled = NO;
+                    glass.backgroundColor = UIColor.clearColor;
+                    self.glassView = glass;
+                }
+                if (glass.superview != renderContainer) {
+                    [glass removeFromSuperview];
+                    [renderContainer addSubview:glass];
+                }
+                if (self.renderContainer != renderContainer || !self.hasRenderContainerState) {
+                    if (self.renderContainer && self.hasRenderContainerState) {
+                        self.renderContainer.clipsToBounds =
+                            self.originalRenderContainerClipsToBounds;
+                        self.renderContainer.layer.masksToBounds =
+                            self.originalRenderContainerMasksToBounds;
+                    }
+                    self.renderContainer = renderContainer;
+                    self.originalRenderContainerClipsToBounds = renderContainer.clipsToBounds;
+                    self.originalRenderContainerMasksToBounds =
+                        renderContainer.layer.masksToBounds;
+                    self.hasRenderContainerState = YES;
+                }
             }
             [CATransaction begin];
             [CATransaction setDisableActions:YES];
-            [glass.layer removeAllAnimations];
-            glass.layer.bounds = (CGRect){ CGPointZero, labelFrame.size };
-            glass.layer.position = CGPointMake(CGRectGetMidX(labelFrame), CGRectGetMidY(labelFrame));
-            glass.clipsToBounds = NO;
-            glass.layer.masksToBounds = NO;
-            UIView *maskView = self.glyphMaskView;
-            CAShapeLayer *maskLayer = self.glyphMaskLayer;
-            if (!maskView) {
-                maskView = [[UIView alloc] initWithFrame:glass.bounds];
-                maskView.backgroundColor = UIColor.clearColor;
-                maskLayer = [CAShapeLayer layer];
-                maskLayer.fillColor = UIColor.whiteColor.CGColor;
-                maskLayer.actions = @{ @"path": NSNull.null, @"bounds": NSNull.null,
-                                       @"position": NSNull.null };
-                [maskView.layer addSublayer:maskLayer];
-                self.glyphMaskView = maskView;
-                self.glyphMaskLayer = maskLayer;
+            UIView *maskView = nil;
+            CAShapeLayer *maskLayer = nil;
+            if (!usesSystemBackdrop) {
+                [glass.layer removeAllAnimations];
+                glass.layer.bounds = (CGRect){ CGPointZero, labelFrame.size };
+                glass.layer.position = CGPointMake(CGRectGetMidX(labelFrame),
+                                                   CGRectGetMidY(labelFrame));
+                glass.clipsToBounds = NO;
+                glass.layer.masksToBounds = NO;
+                maskView = self.glyphMaskView;
+                maskLayer = self.glyphMaskLayer;
+                if (!maskView) {
+                    maskView = [[UIView alloc] initWithFrame:glass.bounds];
+                    maskView.backgroundColor = UIColor.clearColor;
+                    maskLayer = [CAShapeLayer layer];
+                    maskLayer.fillColor = UIColor.whiteColor.CGColor;
+                    maskLayer.actions = @{ @"path": NSNull.null, @"bounds": NSNull.null,
+                                           @"position": NSNull.null };
+                    [maskView.layer addSublayer:maskLayer];
+                    self.glyphMaskView = maskView;
+                    self.glyphMaskLayer = maskLayer;
+                }
+                maskView.layer.bounds = glass.bounds;
+                maskView.layer.position = CGPointMake(CGRectGetMidX(glass.bounds),
+                                                      CGRectGetMidY(glass.bounds));
+                maskLayer.frame = maskView.bounds;
             }
-            maskView.layer.bounds = glass.bounds;
-            maskView.layer.position = CGPointMake(CGRectGetMidX(glass.bounds),
-                                                  CGRectGetMidY(glass.bounds));
-            maskLayer.frame = maskView.bounds;
-            if (glyphPath) {
+            BOOL filterReady = NO;
+            if (usesSystemBackdrop) {
+                profilePrepareEnd = CACurrentMediaTime();
+                CFTimeInterval profilePublishStart = profilePrepareEnd;
+                filterReady = [self installSystemClockFilterOnView:systemBackdropView];
+                profilePublishEnd = CACurrentMediaTime();
+                profilePublishDuration = profilePublishEnd - profilePublishStart;
+                if (glyphPath) CGPathRelease(glyphPath);
+            } else if (glyphPath) {
                 CGFloat left = floor((canvasWidth - CGRectGetWidth(glyphBounds)) * 0.5);
                 CGAffineTransform transform = CGAffineTransformMake(1.0, 0.0, 0.0, -1.0,
                     left - CGRectGetMinX(glyphBounds),
                     glyphOriginY + verticalPadding + CGRectGetMaxY(glyphBounds));
                 CGPathRef normalizedPath = CGPathCreateCopyByTransformingPath(glyphPath, &transform);
-                maskLayer.path = normalizedPath;
                 profilePrepareEnd = CACurrentMediaTime();
                 CFTimeInterval profilePublishStart = profilePrepareEnd;
-                BOOL published = LGClockPublishPath(normalizedPath, glass.bounds.size, 1.0);
+                maskLayer.path = normalizedPath;
+                CGSize publishSize = glass.bounds.size;
+                BOOL published = normalizedPath &&
+                    LGClockPublishPath(normalizedPath, publishSize, 1.0);
                 profilePublishEnd = CACurrentMediaTime();
                 profilePublishDuration = profilePublishEnd - profilePublishStart;
                 if (!published)
-                    LGClockLog(@"mask publish failed reason=%@ text=%@ glass=%@ path=%@",
-                               reason, text, NSStringFromCGRect(glass.bounds),
-                               NSStringFromCGRect(CGPathGetBoundingBox(normalizedPath)));
+                    LGClockLog(@"mask publish failed reason=%@ text=%@ system=0 surface=%@ path=%@",
+                               reason, text,
+                               NSStringFromCGSize(publishSize),
+                               normalizedPath
+                                   ? NSStringFromCGRect(CGPathGetBoundingBox(normalizedPath))
+                                   : @"nil");
                 [glass lgInvalidateFilterContents];
+                filterReady = glass.lgFilterAttached;
                 CGPathRelease(normalizedPath);
                 CGPathRelease(glyphPath);
             }
-            glass.maskView = maskView;
+            if (!usesSystemBackdrop) glass.maskView = maskView;
             [CATransaction commit];
-            BOOL filterReady = glass.lgFilterAttached;
-            label.alpha = filterReady ? 0.0 : self.originalLabelAlpha;
+            label.alpha = usesSystemBackdrop
+                ? self.originalLabelAlpha
+                : (filterReady ? 0.0 : self.originalLabelAlpha);
             label.hidden = self.originalLabelHidden;
             if (visibleSourceView && visibleSourceView != label) {
-                visibleSourceView.hidden = filterReady ? YES : self.originalVisibleSourceHidden;
-                visibleSourceView.alpha = filterReady ? 0.0 : self.originalVisibleSourceAlpha;
-                visibleSourceView.layer.opacity = filterReady ? 0.0 : self.originalVisibleSourceLayerOpacity;
+                visibleSourceView.hidden = usesSystemBackdrop
+                    ? self.originalVisibleSourceHidden
+                    : (filterReady ? YES : self.originalVisibleSourceHidden);
+                visibleSourceView.alpha = usesSystemBackdrop
+                    ? self.originalVisibleSourceAlpha
+                    : (filterReady ? 0.0 : self.originalVisibleSourceAlpha);
+                visibleSourceView.layer.opacity = usesSystemBackdrop
+                    ? self.originalVisibleSourceLayerOpacity
+                    : (filterReady ? 0.0 : self.originalVisibleSourceLayerOpacity);
             }
-            renderContainer.clipsToBounds = NO;
-            renderContainer.layer.masksToBounds = NO;
-            [renderContainer bringSubviewToFront:glass];
+            if (!usesSystemBackdrop) {
+                renderContainer.clipsToBounds = NO;
+                renderContainer.layer.masksToBounds = NO;
+                [renderContainer bringSubviewToFront:glass];
+            }
             if (LGDebugLoggingEnabled()) {
-            CGRect glassWindowFrame = glass.window
+            CGRect glassWindowFrame = glass && glass.window
                 ? [glass convertRect:glass.bounds toView:glass.window] : CGRectNull;
             BOOL obstacleChanged = nearestObstacle != self.lastNearestObstacle;
             BOOL nearestJumped = self.lastNearestTop != 0.0 && nearestTop != CGFLOAT_MAX &&
@@ -1343,7 +1630,7 @@ static void LGClockRestoreDirectFontState(LGClockState *state) {
             self.lastNearestObstacle = nearestObstacle;
             self.lastNearestTop = nearestTop == CGFLOAT_MAX ? 0.0 : nearestTop;
             self.lastRetractionPhase = retractionPhase;
-            if (!CGRectIsNull(glassWindowFrame) &&
+            if (!usesSystemBackdrop && !CGRectIsNull(glassWindowFrame) &&
                 fabs(CGRectGetMinY(glassWindowFrame) - CGRectGetMinY(glass.frame)) > 12.0) {
                 NSMutableArray<NSString *> *chain = [NSMutableArray array];
                 for (UIView *ancestor = glass; ancestor; ancestor = ancestor.superview) {
@@ -1405,6 +1692,10 @@ static void LGClockRestoreDirectFontState(LGClockState *state) {
     if (self.sourceLabel && !self.applying) {
         self.applying = YES;
         LGClockRestoreDirectFontState(self);
+        objc_setAssociatedObject(self.sourceLabel,
+                                 kLGClockOriginalFontKey,
+                                 nil,
+                                 OBJC_ASSOCIATION_ASSIGN);
         self.sourceLabel.alpha = self.originalLabelAlpha;
         self.sourceLabel.hidden = self.originalLabelHidden;
         self.applying = NO;
@@ -1419,6 +1710,7 @@ static void LGClockRestoreDirectFontState(LGClockState *state) {
         self.visibleSourceView.alpha = self.originalVisibleSourceAlpha;
         self.visibleSourceView.layer.opacity = self.originalVisibleSourceLayerOpacity;
     }
+    [self restoreSystemClockRendering];
     self.glassView.maskView = nil;
     [self.glassView removeFromSuperview];
     if (self.renderContainer && self.hasRenderContainerState) {
@@ -1494,6 +1786,14 @@ static void LGClockSourceFontDidChange(UILabel *label, UIFont *candidate, NSStri
                        LGClockFontSummary(font));
         return;
     }
+    if (associatedFont || (state.sourceLabel == label && state.originalFont)) {
+        if (LGDebugLoggingEnabled())
+            LGClockLog(@"font capture retained reason=%@ label=%p cached={%@} supplied={%@}",
+                       reason, label,
+                       LGClockFontSummary(associatedFont ?: state.originalFont),
+                       LGClockFontSummary(font));
+        return;
+    }
 
     UIFont *previous = state.originalFont;
     state.originalFont = font;
@@ -1558,7 +1858,9 @@ static void LGClockHostDidMove(UIView *host) {
 
 static void LGClockHostDidLayout(UIView *host) {
     if (!LGClockEnabled()) return;
-    [LGClockStateForHost(host, YES) scheduleApply:@"layout"];
+    LGClockState *state = LGClockStateForHost(host, YES);
+    if (state.applying) return;
+    [state applyReason:@"layout"];
 }
 
 static void LGClockRefreshWindows(void) {
@@ -1743,6 +2045,19 @@ static void LGPublishArtworkRect(UIView *artworkView) {
 %hook CSProminentTimeView
 - (void)didMoveToWindow { %orig; LGClockHostDidMove((UIView *)self); }
 - (void)layoutSubviews { %orig; LGClockHostDidLayout((UIView *)self); }
+%end
+
+%hook CSProminentDisplayView
+- (void)layoutSubviews {
+    %orig;
+    if (!LGClockEnabled()) return;
+    UIView *timeView = LGClockFindDescendantNamed(
+        (UIView *)self, @"CSProminentTimeView");
+    if (!timeView) return;
+    LGClockHostDidLayout(timeView);
+    UILabel *label = LGClockFindSourceLabel(timeView);
+    if (label) LGClockExpandPortalAperture(label);
+}
 %end
 
 %hook SBFLockScreenDateView
