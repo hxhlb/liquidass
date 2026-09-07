@@ -614,8 +614,8 @@ UIImage *LGIOS26AppleMitigatedIconImage(UIImage *image,
     LGIOS26ReferencePalette reference = LGIOS26ReferencePaletteForPixels(
         sourcePixels, width, height, rowBytes);
     BOOL drawByReference = reference.coherentSamples;
-    // Keep the bevel visible at normal icon size, including 2x/3x artwork.
-    size_t edgeRadius = MAX((size_t)1, MIN(width, height) / 80);
+    // Relief is a fine surface cue, not a second outline around the bitmap.
+    size_t edgeRadius = 1;
     size_t interiorRadius = MAX((size_t)1, MIN(width, height) / 24);
 
     for (size_t y = 0; y < height; y++) {
@@ -718,7 +718,7 @@ UIImage *LGIOS26AppleMitigatedIconImage(UIImage *image,
                                                            sqrt(variation));
                 subject = MAX(localSubject * 0.20, referenceSubject * 0.85 * interior);
             }
-            subject = MAX(subject, edge * (drawByReference ? 0.62 : 0.18));
+            if (!drawByReference) subject = MAX(subject, edge * 0.18);
 
             // This is a bitmap fallback for older systems, not an input to
             // Apple's clearIconBlendMode. Keep coverage separate from material
@@ -736,7 +736,6 @@ UIImage *LGIOS26AppleMitigatedIconImage(UIImage *image,
                 resolvedAlpha = fallbackAlpha
                     + (glyphAlpha - fallbackAlpha) * subjectCoverage;
             }
-            resolvedAlpha += edge * (darkAppearance ? 0.035 : 0.03);
             CGFloat outputAlpha = sourceAlpha
                 * LGIOS26Clamp(resolvedAlpha, 0.0, 0.94);
 
@@ -772,7 +771,9 @@ UIImage *LGIOS26AppleMitigatedIconImage(UIImage *image,
             } else {
                 // Retain the bitmap's internal tonal structure. A constant
                 // white fill made dark markings identical to their white base.
-                CGFloat softWhite = 0.66 + 0.30 * pow(luminance, 0.75);
+                CGFloat softWhite = darkAppearance
+                    ? 0.66 + 0.30 * pow(luminance, 0.75)
+                    : 0.54 + 0.38 * pow(luminance, 0.75);
                 CGFloat outputTone = neutralTone
                     + (softWhite - neutralTone) * subjectColorWeight;
                 outputRed = outputGreen = outputBlue = outputTone;
@@ -780,7 +781,7 @@ UIImage *LGIOS26AppleMitigatedIconImage(UIImage *image,
             // Shade after the subject fill so full-coverage pixels do not
             // overwrite their own bevel. Bake both sides into the image: the
             // iOS 15-17 lifecycle does not use the separate highlight layer.
-            CGFloat relief = 0.10 * highlight - 0.28 * darklight;
+            CGFloat relief = subjectCoverage * (0.025 * highlight - 0.055 * darklight);
             outputRed += relief;
             outputGreen += relief;
             outputBlue += relief;

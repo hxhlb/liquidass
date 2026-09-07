@@ -135,6 +135,14 @@ def check(name, size, dark, fresh, source, output):
         errors.append(f"glyph interior too faint: alpha {center[3]}")
     if name != "complex" and background[3] > 30:
         errors.append(f"coherent background became opaque: alpha {background[3]}")
+    if name in ("solid", "internal", "red", "green", "blue"):
+        outside = pixel(output, size, (math.ceil(0.29 * size) - 1) / size, 0.50)
+        if outside[3] > 30:
+            errors.append(f"edge detection painted an opaque outer halo: alpha {outside[3]}")
+    if name == "solid":
+        inside = pixel(output, size, math.ceil(0.29 * size) / size, 0.50)
+        if abs(inside[0] / max(1, inside[3]) - body[0] / max(1, body[3])) > 0.10:
+            errors.append("subject bevel is an excessively dark second outline")
     if name in ("gradient", "diagonal-gradient"):
         background_alpha = [pixel(output, size, 0.15, y / size)[3] for y in range(size)]
         if max(background_alpha) - min(background_alpha) > 8 or max(background_alpha) > 30:
