@@ -213,6 +213,15 @@ static BOOL LGClockIsLegacySystem(void) {
     return YES;
 }
 
+static BOOL LGClockNeedsFullResolutionCapture(void) {
+#if !__has_include(<roothide.h>)
+    // iOS 18 composites the native clock into a full-size destination even
+    // when its backdrop capture is downsampled. Our pass needs matching sizes.
+    if (@available(iOS 18.0, *)) return YES;
+#endif
+    return NO;
+}
+
 static BOOL LGClockIsLegacyHost(UIView *view) {
     return [NSStringFromClass(view.class) isEqualToString:@"SBFLockScreenDateView"];
 }
@@ -838,6 +847,7 @@ static NSString *LGClockVariableFontPath(void) {
 @property (nonatomic) float originalSystemPortalOpacity;
 @property (nonatomic) BOOL hasOriginalSystemPortalOpacity;
 @property (nonatomic) BOOL systemFilterRefreshVariant;
+@property (nonatomic, strong) NSNumber *originalSystemBackdropScale;
 @property (nonatomic, weak) UIView *renderContainer;
 @property (nonatomic) CGRect originalLabelFrame;
 @property (nonatomic) CGRect lastAppliedLabelFrame;
@@ -1159,6 +1169,9 @@ static void LGClockRestoreDirectFontState(LGClockState *state) {
             ? currentBase : (self.systemBackdropBaseFilters ?: @[]);
         @try {
             layer.filters = restored;
+            if (self.originalSystemBackdropScale) {
+                [layer setValue:self.originalSystemBackdropScale forKey:@"scale"];
+            }
         } @catch (NSException *exception) {
             LGClockLog(@"system material restore failed layer=%@ reason=%@",
                        NSStringFromClass(layer.class), exception.reason);
@@ -1172,6 +1185,7 @@ static void LGClockRestoreDirectFontState(LGClockState *state) {
     }
     self.systemBackdropLayer = nil;
     self.systemBackdropBaseFilters = nil;
+    self.originalSystemBackdropScale = nil;
     self.systemAnimatingPortalView = nil;
     self.hasOriginalSystemPortalOpacity = NO;
 }
@@ -1215,6 +1229,12 @@ static void LGClockRestoreDirectFontState(LGClockState *state) {
     [filters addObject:filter];
     @try {
         layer.filters = filters.copy;
+        if (LGClockNeedsFullResolutionCapture()) {
+            if (!self.originalSystemBackdropScale) {
+                self.originalSystemBackdropScale = [layer valueForKey:@"scale"];
+            }
+            [layer setValue:@1.0 forKey:@"scale"];
+        }
     } @catch (NSException *exception) {
         LGClockLog(@"system filter attach failed type=%@ layer=%@ reason=%@",
                    type, NSStringFromClass(layer.class), exception.reason);
@@ -1344,7 +1364,10 @@ static void LGClockRestoreDirectFontState(LGClockState *state) {
     BOOL renderPathReady = systemBackdropView
         ? LGClockLayerHasOurFilter(systemBackdropLayer)
         : self.glassView != nil;
-    BOOL fontStateMatches = enabled ? (renderPathReady && directFontMatches)
+    BOOL captureScaleMatches = !systemBackdropLayer ||
+        !LGClockNeedsFullResolutionCapture() ||
+        fabs([[systemBackdropLayer valueForKey:@"scale"] doubleValue] - 1.0) < 0.001;
+    BOOL fontStateMatches = enabled ? (renderPathReady && directFontMatches && captureScaleMatches)
                                     : !LGClockLabelUsesOurFont(label);
     if ([signature isEqualToString:self.lastSignature] && fontStateMatches) {
         self.skippedChanges++;
