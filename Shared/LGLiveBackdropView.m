@@ -73,6 +73,20 @@ static CGFloat sLGMotionSensitivity = 2.0;
 static CGFloat sLGMotionLoggedSensitivity = -1.0;
 static CFStringRef const kLGMotionPrefsReloadNotification = CFSTR("dylv.liquidassprefs/Reload");
 
+// Subpixel angle changes must not invalidate every glass layer on every frame.
+static const CGFloat kLGMotionAngleEpsilon = 0.001;
+static const NSInteger kLGMotionActiveFPS = 30;
+static const NSInteger kLGMotionIdleFPS = 5;
+
+static CGFloat LGSpecularAngleDelta(CGFloat target, CGFloat current) {
+    return atan2(sin(target - current), cos(target - current));
+}
+
+static NSInteger LGMotionFrameRate(CGFloat target, CGFloat current) {
+    return fabs(LGSpecularAngleDelta(target, current)) > kLGMotionAngleEpsilon
+        ? kLGMotionActiveFPS : kLGMotionIdleFPS;
+}
+
 static void LGApplyMotionHighlightAngle(void);
 static void LGRefreshMotionHighlights(void);
 static void LGEnsureFilterRefreshObserver(void);
@@ -203,9 +217,25 @@ static void LGEnsureFilterRefreshObserver(void) {
                                     CFNotificationSuspensionBehaviorDeliverImmediately);
 }
 
+static BOOL LGGlassVisibleForMotion(LGLiveBackdropView *glass) {
+    UIWindow *window = glass.window;
+    if (!window || CGRectIsEmpty(glass.bounds)) return NO;
+    CGRect visible = CGRectIntersection(window.bounds,
+        [glass convertRect:glass.bounds toView:window]);
+    for (UIView *ancestor = glass; ancestor; ancestor = ancestor.superview) {
+        if (ancestor.hidden || ancestor.alpha <= 0.001) return NO;
+        if (ancestor.clipsToBounds) {
+            visible = CGRectIntersection(visible,
+                [ancestor convertRect:ancestor.bounds toView:window]);
+        }
+        if (CGRectIsNull(visible) || CGRectIsEmpty(visible)) return NO;
+    }
+    return YES;
+}
+
 static void LGApplyMotionHighlightAngle(void) {
     for (LGLiveBackdropView *glass in sLGMotionGlasses.allObjects) {
-        if (!glass.window || glass.hidden || glass.alpha <= 0.001) continue;
+        if (!LGGlassVisibleForMotion(glass)) continue;
         [glass applySpecularAngle:sLGSpecularAngle];
     }
 }
@@ -214,11 +244,16 @@ static void LGApplyMotionHighlightAngle(void) {
 - (void)tick:(CADisplayLink *)displayLink {
     CGFloat dt = displayLink.targetTimestamp > displayLink.timestamp
         ? displayLink.targetTimestamp - displayLink.timestamp : 1.0 / 60.0;
-    CGFloat delta = atan2(sin(sLGTargetSpecularAngle - sLGSpecularAngle),
-                          cos(sLGTargetSpecularAngle - sLGSpecularAngle));
+    CGFloat delta = LGSpecularAngleDelta(sLGTargetSpecularAngle, sLGSpecularAngle);
+    NSInteger frameRate = LGMotionFrameRate(sLGTargetSpecularAngle, sLGSpecularAngle);
+    if (displayLink.preferredFramesPerSecond != frameRate) {
+        displayLink.preferredFramesPerSecond = frameRate;
+    }
     CGFloat response = 1.0 - exp(-14.0 * dt);
     sLGSpecularAngle += delta * response;
-    if (fabs(delta) < 0.0005) sLGSpecularAngle = sLGTargetSpecularAngle;
+    if (frameRate == kLGMotionIdleFPS) sLGSpecularAngle = sLGTargetSpecularAngle;
+    // Low-rate idle checks also synchronize glass newly revealed by scrolling.
+    // Each glass independently skips writes when its applied angle is unchanged.
     LGApplyMotionHighlightAngle();
 }
 @end
@@ -239,12 +274,13 @@ static void LGRefreshMotionHighlights(void) {
 
     CMAttitudeReferenceFrame frame = CMAttitudeReferenceFrameXArbitraryZVertical;
 
-    sLGMotionManager.deviceMotionUpdateInterval = 1.0 / 60.0;
+    sLGMotionManager.deviceMotionUpdateInterval = 1.0 / kLGMotionActiveFPS;
     static LGMotionDisplayLinkTarget *displayLinkTarget;
     if (!displayLinkTarget) displayLinkTarget = [LGMotionDisplayLinkTarget new];
     if (!sLGMotionDisplayLink) {
         sLGMotionDisplayLink = [CADisplayLink displayLinkWithTarget:displayLinkTarget
                                                            selector:@selector(tick:)];
+        sLGMotionDisplayLink.preferredFramesPerSecond = kLGMotionIdleFPS;
         [sLGMotionDisplayLink addToRunLoop:NSRunLoop.mainRunLoop
                                    forMode:NSRunLoopCommonModes];
     }
@@ -257,8 +293,14 @@ static void LGRefreshMotionHighlights(void) {
 
         CGFloat baseMotion = attitude.roll * 0.5 + attitude.pitch * 0.5;
         CGFloat target = baseMotion * (sLGMotionSensitivity / 1.5);
+        if (!isfinite(target)) return;
 
         sLGTargetSpecularAngle = target;
+        // Resume promptly on real motion instead of waiting for the next idle tick.
+        if (LGMotionFrameRate(target, sLGSpecularAngle) == kLGMotionActiveFPS
+            && sLGMotionDisplayLink.preferredFramesPerSecond != kLGMotionActiveFPS) {
+            sLGMotionDisplayLink.preferredFramesPerSecond = kLGMotionActiveFPS;
+        }
     }];
     LGLog(@"motion highlights started reference=tilt");
 }
@@ -299,6 +341,8 @@ static const CGFloat kLGGlassEdgeWidth = 1.0;
     CGFloat          _appliedBackdropZoom;
     BOOL             _parameterRefreshVariant;
     NSInteger        _lastRadiusStep;
+    BOOL             _hasAppliedSpecularAngle;
+    CGFloat          _appliedSpecularAngle;
 }
 
 - (NSString *)lgEffectiveFilterType {
@@ -510,7 +554,9 @@ static const CGFloat kLGGlassEdgeWidth = 1.0;
 }
 
 - (void)applySpecularAngle:(CGFloat)angle {
-    if (!_specular) return;
+    if (!_specular || _specular.hidden || !isfinite(angle)) return;
+    if (_hasAppliedSpecularAngle
+        && fabs(LGSpecularAngleDelta(angle, _appliedSpecularAngle)) < kLGMotionAngleEpsilon) return;
     CGFloat dx = cos(angle) * 0.5;
     CGFloat dy = sin(angle) * 0.5;
     [CATransaction begin];
@@ -522,6 +568,8 @@ static const CGFloat kLGGlassEdgeWidth = 1.0;
     _specularDark.startPoint = _specular.startPoint;
     _specularDark.endPoint = _specular.endPoint;
     [CATransaction commit];
+    _appliedSpecularAngle = angle;
+    _hasAppliedSpecularAngle = YES;
 }
 
 - (void)applyFilters {

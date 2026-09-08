@@ -21,6 +21,8 @@
 "prefs.control.variable_font_height" = "Height";
 "prefs.control.variable_font_softness" = "Softness";
 "prefs.control.motion_highlights" = "Motion Highlights";
+"prefs.motion_highlights_warning.title" = "Motion Highlights Enabled";
+"prefs.motion_highlights_warning.body" = "Motion highlights update as you tilt your device and may increase processing load, cause lag or heat, and use more battery, especially with many glass surfaces. Turn this option off if you notice these issues.";
 "prefs.control.motion_highlights_sensitivity" = "Motion Sensitivity";
 "prefs.notification.label_color.title" = "Label Color";
 "prefs.notification.label_color.subtitle" = "Choose white or black notification text.";

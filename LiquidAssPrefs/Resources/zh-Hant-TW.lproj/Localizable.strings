@@ -17,6 +17,8 @@
 "prefs.control.variable_font_height" = "高度";
 "prefs.control.variable_font_softness" = "柔和度";
 "prefs.control.motion_highlights" = "動態高光";
+"prefs.motion_highlights_warning.title" = "動態高光已開啟";
+"prefs.motion_highlights_warning.body" = "動態高光會隨裝置姿態更新，可能增加處理負載，造成卡頓、發熱及耗電；玻璃表面較多時更明顯。如遇到這些情況，請關閉此選項。";
 "prefs.control.motion_highlights_sensitivity" = "動態靈敏度";
 
 "prefs.subtitle.enabled" = "啟用或關閉此玻璃視圖";

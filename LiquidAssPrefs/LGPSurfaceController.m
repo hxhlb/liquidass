@@ -1133,6 +1133,10 @@ static void LGRefreshCoverSheetBezelRatioControl(UIView *root, CGFloat cornerRad
                     self,
                     LGLocalized(@"prefs.icon_provider.restart_required.title"),
                     LGLocalized(@"prefs.icon_provider.restart_required.body"));
+            } else if (sender.isOn && [item[@"key"] isEqualToString:@"Specular.Motion.Enabled"]) {
+                LGPresentInfoSheet(self,
+                    LGLocalized(@"prefs.motion_highlights_warning.title"),
+                    LGLocalized(@"prefs.motion_highlights_warning.body"));
             }
             [self handleRespringStateChanged:nil];
         }

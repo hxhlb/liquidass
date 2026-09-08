@@ -17,6 +17,8 @@
 "prefs.control.variable_font_height" = "字高";
 "prefs.control.variable_font_softness" = "柔和度";
 "prefs.control.motion_highlights" = "运动高光";
+"prefs.motion_highlights_warning.title" = "运动高光已开启";
+"prefs.motion_highlights_warning.body" = "运动高光会随设备姿态更新，可能增加处理负载，造成卡顿、发热和耗电；玻璃表面较多时更明显。如遇到这些情况，请关闭此选项。";
 "prefs.control.motion_highlights_sensitivity" = "运动灵敏度";
 
 "prefs.subtitle.enabled" = "启用或停用此玻璃视图。";
