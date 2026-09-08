@@ -113,6 +113,18 @@ static BOOL LGIOS26UsesLegacyIconLifecycle(void) {
     return NSProcessInfo.processInfo.operatingSystemVersion.majorVersion < 18;
 }
 
+static BOOL LGIOS26SharesDockMaterial(UIView *view) {
+    if (sLGIOS26Mode != LGIOS26IconModeClear
+        || sLGIOS26Algorithm != LGIOS26IconAlgorithmAppleMitigated) return NO;
+    UIView *ancestor = view.superview;
+    for (NSUInteger depth = 0; ancestor && depth < 12; depth++, ancestor = ancestor.superview) {
+        NSString *name = NSStringFromClass(ancestor.class);
+        if ([name isEqualToString:@"SBDockView"]
+            || [name isEqualToString:@"SBFloatingDockPlatterView"]) return YES;
+    }
+    return NO;
+}
+
 static BOOL LGIOS26UsesLegacyClockLifecycle(void) {
     NSInteger majorVersion = NSProcessInfo.processInfo.operatingSystemVersion.majorVersion;
     return majorVersion >= 15 && majorVersion < 18;
@@ -1124,6 +1136,14 @@ static void LGApplyIOS26LegacyGlass(SBIconImageView *iconView, UIImage *image) {
     UIView *parent = iconView.superview;
     if (!parent) return;
     LGLiveBackdropView *glass = objc_getAssociatedObject(iconView, kLGIOS26LegacyGlassKey);
+    if (LGIOS26SharesDockMaterial(iconView)) {
+        // Retain the finished glyph and its restore state; only remove the
+        // redundant individual plate on top of the Dock's shared material.
+        [glass removeFromSuperview];
+        objc_setAssociatedObject(iconView, kLGIOS26LegacyGlassKey,
+                                 nil, OBJC_ASSOCIATION_ASSIGN);
+        return;
+    }
     if (!glass) {
         glass = LGCreateRegisteredGlass(iconView.frame, nil, @"AppIcons");
         if (!glass) return;
@@ -1192,6 +1212,7 @@ static void LGApplyIOS26Effect(SBIconImageView *iconView, UIImage *image) {
     if (!CGRectEqualToRect(effectView.frame, iconView.bounds)) {
         effectView.frame = iconView.bounds;
     }
+    effectView.usesSharedBackdrop = LGIOS26SharesDockMaterial(iconView);
     [effectView updateWithImage:effectiveImage
                    cornerRadius:LGIOS26CornerRadiusForIconView(iconView)
                             mode:sLGIOS26Mode

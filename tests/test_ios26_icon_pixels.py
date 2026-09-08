@@ -87,12 +87,16 @@ def fixture(name, size):
             elif name == "diagonal-gradient":
                 t = (u + v) * 0.5
                 rgb = [round(30 + 22 * t), round(110 + 28 * t), round(200 + 30 * t)]
+            elif name in ("wide-gradient", "gear-gradient"):
+                rgb = [round(235 - 90 * v), round(236 - 90 * v), round(240 - 90 * v)]
             if name == "complex":
                 rgb = [int(127 + 115 * math.sin(u * 22.8 + v * 13.2 + c * 2.1))
                        for c in range(3)]
             elif name in ("red", "green", "blue"):
                 rgb = [240, 240, 240]
-            inside = 0.29 <= u < 0.71 and 0.25 <= v < 0.75
+            radius = math.hypot(u - 0.5, v - 0.5)
+            inside = (radius < 0.44 if name == "gear-gradient"
+                      else 0.29 <= u < 0.71 and 0.25 <= v < 0.75)
             alpha = 255
             if inside:
                 rgb = [240, 240, 240]
@@ -105,6 +109,8 @@ def fixture(name, size):
                 elif name in ("red", "green", "blue"):
                     rgb = [20, 20, 20]
                     rgb[("red", "green", "blue").index(name)] = 230
+                elif name == "gear-gradient":
+                    rgb = [45, 45, 46] if radius < 0.28 or radius > 0.36 else [170, 170, 172]
             if name == "transparent":
                 alpha = 0
             offset = (y * size + x) * 4
@@ -121,6 +127,8 @@ def check(name, size, dark, fresh, source, output):
     center = pixel(output, size, 0.50, 0.50)
     body = pixel(output, size, 0.36, 0.50)
     background = pixel(output, size, 0.15, 0.50)
+    if name == "gear-gradient":
+        background = pixel(output, size, 0.025, 0.50)
     errors = []
     if len(source) != len(output):
         return ["dimensions changed"]
@@ -143,10 +151,14 @@ def check(name, size, dark, fresh, source, output):
         inside = pixel(output, size, math.ceil(0.29 * size) / size, 0.50)
         if abs(inside[0] / max(1, inside[3]) - body[0] / max(1, body[3])) > 0.10:
             errors.append("subject bevel is an excessively dark second outline")
-    if name in ("gradient", "diagonal-gradient"):
+    if name in ("gradient", "diagonal-gradient", "wide-gradient"):
         background_alpha = [pixel(output, size, 0.15, y / size)[3] for y in range(size)]
         if max(background_alpha) - min(background_alpha) > 8 or max(background_alpha) > 30:
             errors.append("background gradient became visible stripes")
+    if name == "gear-gradient":
+        for x, y in ((0.12, 0.12), (0.88, 0.12), (0.12, 0.88), (0.88, 0.88)):
+            if pixel(output, size, x, y)[3] > 30:
+                errors.append("bright/dark corners of a gear background were retained as foreground")
     if name == "complex" and center[3] - background[3] < 60:
         errors.append("glyph interior does not stand out from textured background")
     if name == "internal" and body[0] / body[3] - center[0] / max(1, center[3]) < 0.14:
@@ -182,6 +194,7 @@ def main():
     failures, cases = [], 0
     for size in (60, 120, 180):
         for name in ("solid", "complex", "internal", "lowcontrast", "alpha", "gradient", "diagonal-gradient",
+                     "wide-gradient", "gear-gradient",
                      "red", "green", "blue", "transparent"):
             source = fixture(name, size)
             source_path = output / f"{name}-{size}.rgba"

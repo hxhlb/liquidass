@@ -21,6 +21,8 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity);
 
 @interface LGIOS26IconView : UIView
 
+@property (nonatomic) BOOL usesSharedBackdrop;
+
 - (void)updateWithImage:(UIImage *)image
            cornerRadius:(CGFloat)cornerRadius
                     mode:(LGIOS26IconMode)mode

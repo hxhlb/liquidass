@@ -202,6 +202,19 @@ typedef struct {
     CGFloat cornerColors[4][3];
 } LGIOS26ReferencePalette;
 
+static void LGIOS26BackgroundPlaneColor(const LGIOS26ReferencePalette *palette,
+                                         CGFloat x, CGFloat y, CGFloat *color) {
+    CGFloat u = (x - 0.16) / 0.68;
+    CGFloat v = (y - 0.16) / 0.68;
+    for (size_t channel = 0; channel < 3; channel++) {
+        CGFloat top = palette->cornerColors[0][channel]
+            + u * (palette->cornerColors[1][channel] - palette->cornerColors[0][channel]);
+        CGFloat bottom = palette->cornerColors[2][channel]
+            + u * (palette->cornerColors[3][channel] - palette->cornerColors[2][channel]);
+        color[channel] = LGIOS26Clamp(top + v * (bottom - top), 0.0, 1.0);
+    }
+}
+
 static LGIOS26ReferencePalette LGIOS26ReferencePaletteForPixels(
     const uint8_t *pixels,
     size_t width,
@@ -309,10 +322,10 @@ static LGIOS26ReferencePalette LGIOS26ReferencePaletteForPixels(
         && backgroundCoverage >= 0.58
         && primary.variance < 0.006
         && (!palette.hasSecondary || secondary.variance < 0.006));
-    // A constant palette turns a mild background gradient into foreground bands.
-    // Fit only when all four corners agree with the coherent background palette.
-    palette.hasBackgroundPlane = palette.coherentSamples;
-    CGFloat backgroundColor[] = {palette.primaryR, palette.primaryG, palette.primaryB};
+    // A strong gradient can fail constant-color clustering (Settings is one
+    // example). Validate the plane against the outer border instead of requiring
+    // its bright and dark corners to belong to the same color cluster.
+    palette.hasBackgroundPlane = YES;
     for (size_t corner = 0; corner < 4 && palette.hasBackgroundPlane; corner++) {
         size_t cx = (size_t)llround((width - 1) * ((corner & 1) ? 0.84 : 0.16));
         size_t cy = (size_t)llround((height - 1) * ((corner & 2) ? 0.84 : 0.16));
@@ -320,10 +333,30 @@ static LGIOS26ReferencePalette LGIOS26ReferencePaletteForPixels(
         LGIOS26ReadPixel(pixels + cy * rowBytes + cx * 4,
             &palette.cornerColors[corner][0], &palette.cornerColors[corner][1],
             &palette.cornerColors[corner][2], &alpha);
-        if (alpha < 0.95 || LGIOS26ColorDistanceSquared(
-                palette.cornerColors[corner], backgroundColor) > 0.13 * 0.13) {
-            palette.hasBackgroundPlane = NO;
+        if (alpha < 0.95) palette.hasBackgroundPlane = NO;
+    }
+    if (palette.hasBackgroundPlane) {
+        static const CGFloat borderPoints[][2] = {
+            {0.025, 0.25}, {0.025, 0.50}, {0.025, 0.75},
+            {0.975, 0.25}, {0.975, 0.50}, {0.975, 0.75},
+            {0.25, 0.025}, {0.50, 0.025}, {0.75, 0.025},
+            {0.25, 0.975}, {0.50, 0.975}, {0.75, 0.975},
+        };
+        size_t valid = 0, matching = 0;
+        for (size_t index = 0; index < sizeof(borderPoints) / sizeof(borderPoints[0]); index++) {
+            CGFloat x = borderPoints[index][0], y = borderPoints[index][1];
+            size_t px = (size_t)llround((width - 1) * x);
+            size_t py = (size_t)llround((height - 1) * y);
+            CGFloat color[3], expected[3], alpha;
+            LGIOS26ReadPixel(pixels + py * rowBytes + px * 4,
+                &color[0], &color[1], &color[2], &alpha);
+            if (alpha < 0.95) continue;
+            valid++;
+            LGIOS26BackgroundPlaneColor(&palette, x, y, expected);
+            if (LGIOS26ColorDistanceSquared(color, expected) <= 0.04 * 0.04) matching++;
         }
+        palette.hasBackgroundPlane = valid >= 8 && matching * 4 >= valid * 3;
+        if (palette.hasBackgroundPlane) palette.coherentSamples = YES;
     }
     free(samples);
     return palette;
@@ -669,18 +702,9 @@ UIImage *LGIOS26AppleMitigatedIconImage(UIImage *image,
                 reference.secondaryB,
                 reference.secondaryLuminance);
             if (reference.hasBackgroundPlane && width > 1 && height > 1) {
-                CGFloat u = ((CGFloat)x / (width - 1) - 0.16) / 0.68;
-                CGFloat v = ((CGFloat)y / (height - 1) - 0.16) / 0.68;
                 CGFloat background[3];
-                for (size_t channel = 0; channel < 3; channel++) {
-                    CGFloat top = reference.cornerColors[0][channel]
-                        + u * (reference.cornerColors[1][channel]
-                               - reference.cornerColors[0][channel]);
-                    CGFloat bottom = reference.cornerColors[2][channel]
-                        + u * (reference.cornerColors[3][channel]
-                               - reference.cornerColors[2][channel]);
-                    background[channel] = LGIOS26Clamp(top + v * (bottom - top), 0.0, 1.0);
-                }
+                LGIOS26BackgroundPlaneColor(&reference, (CGFloat)x / (width - 1),
+                    (CGFloat)y / (height - 1), background);
                 CGFloat backgroundLuminance = 0.2126 * background[0]
                     + 0.7152 * background[1] + 0.0722 * background[2];
                 referenceDetail = LGIOS26PixelDetail(center, background[0],
@@ -1089,6 +1113,19 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity) 
 
 @implementation LGIOS26IconView
 
+@synthesize usesSharedBackdrop = _usesSharedBackdrop;
+
+- (void)setUsesSharedBackdrop:(BOOL)usesSharedBackdrop {
+    if (_usesSharedBackdrop == usesSharedBackdrop) return;
+    _usesSharedBackdrop = usesSharedBackdrop;
+    self.hasConfiguration = NO;
+    self.hasMaterialConfiguration = NO;
+    self.glassLayer.hidden = usesSharedBackdrop;
+    self.rimLayer.hidden = usesSharedBackdrop;
+    self.rimBloomLayer.hidden = usesSharedBackdrop;
+    self.glossLayer.hidden = usesSharedBackdrop;
+}
+
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (!self) return nil;
@@ -1190,6 +1227,12 @@ UIImage *LGIOS26TintedIconImage(UIImage *image, CGFloat hue, CGFloat intensity) 
     self.backdropLayer = nil;
     self.refractionMask = nil;
     self.sourceLayer.hidden = NO;
+    if (self.usesSharedBackdrop) {
+        self.hasMaterialConfiguration = YES;
+        self.laidOutBounds = CGRectNull;
+        [self setNeedsLayout];
+        return;
+    }
 
     Class backdropClass = NSClassFromString(@"CABackdropLayer");
     if (backdropClass) {
