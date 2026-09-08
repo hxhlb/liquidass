@@ -270,7 +270,11 @@ static UIImage *LGIOS26StaticImageForCurrentMode(UIImage *image) {
     // IFConcreteImage owns conversion in global mode. UIKit/SnowBoard may copy
     // its CGImage, so pointer registries cannot reliably identify every result.
     // Consumers must not turn an already shaded bitmap into another input.
-    if (LGIOS26ProviderProcessingEnabled()) return image;
+    if (LGIOS26ProviderProcessingEnabled()) {
+        // Legacy Dock caches can still hand out the provider's original image.
+        // Reuse its finished result without processing unknown/copied images.
+        return LGIOS26CachedProviderImage(image, LGIOS26StaticImageSignature()) ?: image;
+    }
     return LGIOS26RenderImageForCurrentMode(image);
 }
 

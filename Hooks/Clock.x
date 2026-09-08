@@ -1824,7 +1824,9 @@ static void LGClockSourceFontDidChange(UILabel *label, UIFont *candidate, NSStri
     }
 
     UIFont *previous = state.originalFont;
-    state.originalFont = font;
+    // Legacy date/time labels share a host. A date label must not replace the
+    // selected time label's font; keep each label's original in its own cache.
+    if (state.sourceLabel == label) state.originalFont = font;
     objc_setAssociatedObject(label, kLGClockOriginalFontKey,
                              font, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     LGClockLog(@"font capture accepted reason=%@ enabled=%d label=%p previous={%@} selected={%@} direct={%@} attributed={%@}",
