@@ -220,7 +220,7 @@ static void LGIOS26RegisterProviderImage(UIImage *original,
            forKey:[NSValue valueWithPointer:processed.CGImage]];
 }
 
-static UIImage *LGIOS26StaticImageForCurrentMode(UIImage *image) {
+static UIImage *LGIOS26RenderImageForCurrentMode(UIImage *image) {
     if (!image.CGImage) return image;
     if (LGIOS26ProviderOriginalImageForImage(image)) return image;
     NSString *signature = LGIOS26StaticImageSignature();
@@ -252,6 +252,14 @@ static UIImage *LGIOS26StaticImageForCurrentMode(UIImage *image) {
                              signature,
                              OBJC_ASSOCIATION_COPY_NONATOMIC);
     return processed;
+}
+
+static UIImage *LGIOS26StaticImageForCurrentMode(UIImage *image) {
+    // IFConcreteImage owns conversion in global mode. UIKit/SnowBoard may copy
+    // its CGImage, so pointer registries cannot reliably identify every result.
+    // Consumers must not turn an already shaded bitmap into another input.
+    if (LGIOS26ProviderProcessingEnabled()) return image;
+    return LGIOS26RenderImageForCurrentMode(image);
 }
 
 static UIImage *LGIOS26OriginalStaticImage(UIImage *image) {
@@ -397,7 +405,7 @@ static CGImageRef LGIOS26ProviderProcessedCGImage(id imageObject,
                                     orientation:UIImageOrientationUp];
     UIImage *processed = LGIOS26CachedProviderImage(source, signature);
     if (!processed.CGImage) {
-        processed = LGIOS26StaticImageForCurrentMode(source);
+        processed = LGIOS26RenderImageForCurrentMode(source);
     }
     if (!processed.CGImage) return original;
     objc_setAssociatedObject(imageObject,
@@ -1150,7 +1158,8 @@ static void LGApplyIOS26Effect(SBIconImageView *iconView, UIImage *image) {
 
     UIImage *effectiveImage = image ?: iconView.displayedImage;
     UIImage *providerOriginal = LGIOS26ProviderOriginalImageForImage(effectiveImage);
-    BOOL imageIsProcessed = providerOriginal.CGImage != nil;
+    BOOL imageIsProcessed = LGIOS26ProviderProcessingEnabled()
+        || providerOriginal.CGImage != nil;
     BOOL libraryIcon = LGIsIOS26LibraryIconImageView(iconView);
     if (!LGIOS26Enabled() || !iconView.window || !effectiveImage.CGImage) {
         LGRemoveIOS26Effect(iconView);
