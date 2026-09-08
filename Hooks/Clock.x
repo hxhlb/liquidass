@@ -2,6 +2,9 @@
 #import <CoreText/CoreText.h>
 #import <QuartzCore/QuartzCore.h>
 #import <TargetConditionals.h>
+#if !__has_include(<roothide.h>)
+#import <rootless.h>
+#endif
 #import <objc/message.h>
 #import <objc/runtime.h>
 #include <errno.h>
@@ -659,8 +662,10 @@ static CGFloat LGClockNearestObstacleTop(UIView *container, CGRect clockFrame,
 static NSString *LGClockVariableFontPath(void) {
 #if TARGET_OS_SIMULATOR
     return @"/opt/simject/PreferenceBundles/LiquidAssPrefs.bundle/SFAdaptiveSoftNumeric-VF.otf";
-#else
+#elif __has_include(<roothide.h>)
     return jbroot(@"/Library/PreferenceBundles/LiquidAssPrefs.bundle/SFAdaptiveSoftNumeric-VF.otf");
+#else
+    return ROOT_PATH_NS(@"/Library/PreferenceBundles/LiquidAssPrefs.bundle/SFAdaptiveSoftNumeric-VF.otf");
 #endif
 }
 

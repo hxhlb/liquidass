@@ -318,6 +318,9 @@ typedef void (*Render14Fn)(void*,
                            void*,
                            void*,
                            float*);
+// iOS 18 adds a second Shape pointer before the final output pointer.
+typedef void (*Render18Fn)(void*, void*, void*, void*, float, void*, float,
+                           bool, void*, void*, void*, float*);
 typedef void     (*StopEncodersFn)(void*);
 typedef uint32_t (*InternAtomFn)(const char*);
 typedef void     (*AddFilterFn)(uint32_t, void*);
@@ -330,6 +333,7 @@ static InternAtomFn    g_internAtom     = nullptr;
 static AddFilterFn     g_addFilter      = nullptr;
 static Render13Fn      g_origGaussR13   = nullptr; // original render we call after our pass
 static Render14Fn      g_origGaussR14   = nullptr;
+static Render18Fn      g_origGaussR18   = nullptr;
 static IdentityFn      g_origGaussIdentity = nullptr;
 static EdgeInfoFn      g_origGaussEdgeInfo = nullptr;
 static void           *g_gaussCtxValue  = nullptr; // raw gaussian vtable ptr (stripped)
@@ -342,11 +346,14 @@ typedef void (*MSHookFunctionFn)(void *, void *, void **);
 static MSHookFunctionFn g_hookFunction = nullptr;
 static bool             g_useHookPath = false;
 static bool             g_legacyRenderABI = false;
+static bool             g_extendedRenderABI = false;
 static bool             g_skipGaussianIdentityHook = false;
 static bool             g_skipGaussianEdgeHook = false;
 static bool             g_skipGaussianRenderHook = false;
 static thread_local bool g_inLegacyRender = false;
 static thread_local simd_float2 g_legacyRenderOffset = { 0.0f, 0.0f };
+static thread_local bool g_inExtendedRender = false;
+static thread_local void *g_extendedRenderShape = nullptr;
 static std::unordered_set<uint32_t> g_customAtoms;
 static os_unfair_lock g_customAtomsLock = OS_UNFAIR_LOCK_INIT;
 static std::unordered_set<uint32_t> g_loggedRenderAtoms;
@@ -1544,14 +1551,21 @@ static const LGHostParams *lgHostParamsForAtom(uint32_t atom, bool *dark) {
     return &g_hostParams[0];
 }
 
-static NSString *lgPrefsPath(void) {
-    static NSString *cached = nil;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        // Mobile preferences are shared data, not part of the jailbreak root.
-        cached = @"/var/mobile/Library/Preferences/dylv.liquidassprefs.plist";
-    });
-    return cached;
+static NSDictionary *lgReadHostPreferences(void) {
+#if __has_include(<roothide.h>)
+    // Preserve the existing RootHide shared-data path.
+    return [NSDictionary dictionaryWithContentsOfFile:
+        @"/var/mobile/Library/Preferences/dylv.liquidassprefs.plist"];
+#else
+    // Use the same preference service as the settings UI. Rootless jailbreaks
+    // may redirect this domain into /var/jb/var/mobile instead of /var/mobile.
+    CFStringRef domain = CFSTR("dylv.liquidassprefs");
+    CFPreferencesAppSynchronize(domain);
+    CFDictionaryRef values = CFPreferencesCopyMultiple(NULL, domain,
+        kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    NSDictionary *prefs = CFBridgingRelease(values);
+    return [prefs isKindOfClass:NSDictionary.class] ? prefs : @{};
+#endif
 }
 static NSString * const kLGPrefsReloadNote = @"dylv.liquidassprefs/Reload";
 static CFStringRef const kLGRestartBackboarddNote =
@@ -1587,7 +1601,7 @@ static bool lgDecodeTintColor(NSString *hex, simd_float4 *out) {
 }
 
 static void lgReloadHostPrefs(void) {
-    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:lgPrefsPath()];
+    NSDictionary *prefs = lgReadHostPreferences();
     NSNumber *debugLogging = prefs[@"Debug.Logging.Enabled"];
     gLGBackboardDebugLogging = [debugLogging isKindOfClass:NSNumber.class]
         ? debugLogging.boolValue : false;
@@ -1675,7 +1689,7 @@ static void lgReloadHostPrefs(void) {
 
 static void lgPrefsReloadCallback(CFNotificationCenterRef c, void *o, CFStringRef n,
                                    const void *obj, CFDictionaryRef info) {
-    lglog("prefs Reload received; re-reading %s", lgPrefsPath().UTF8String);
+    lglog("prefs Reload received; re-reading host preferences");
     lgReloadHostPrefs();
 
     CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
@@ -1934,16 +1948,19 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
         }
     }
 
-    R13TRACE("R13[%llu] before g_origGaussR13(%p)", callN, (void *)g_origGaussR13);
+    R13TRACE("R13[%llu] before original Gaussian render", callN);
     if (g_inLegacyRender && g_origGaussR14) {
         g_origGaussR14(self, filter, layer, ctx, opacity, surface,
                        0.0f, g_legacyRenderOffset, cm, shape, out);
+    } else if (g_inExtendedRender && g_origGaussR18) {
+        g_origGaussR18(self, filter, layer, ctx, opacity, surface,
+                       0.0f, flag, cm, shape, g_extendedRenderShape, out);
     } else if (g_origGaussR13) {
         g_origGaussR13(self, filter, layer, ctx, opacity, surface,
                        0.0f, flag, cm, shape, out);
     }
     uint64_t t_afterGauss = mach_absolute_time();
-    R13TRACE("R13[%llu] after g_origGaussR13", callN);
+    R13TRACE("R13[%llu] after original Gaussian render", callN);
 
     rawCmdBuf = *(void **)(metalCtx + g_cmdBufOffset);
     cmdBuf = rawCmdBuf ? (__bridge id<MTLCommandBuffer>)rawCmdBuf : nil;
@@ -2114,6 +2131,29 @@ static void ourGaussianRenderHook(void *self, void *filter, void *layer, void *c
     }
 }
 
+static void ourGaussianRender18Hook(void *self, void *filter, void *layer, void *ctx,
+                                    float opacity, void *surface, float scale,
+                                    bool flag, void *cm, void *shape,
+                                    void *additionalShape, float *out) {
+    uint32_t atom = filter
+        ? *(uint32_t *)((uint8_t *)filter + g_filterAtomOffset) : 0;
+    if (lgIsCustomAtom(atom)) {
+        bool previousExtended = g_inExtendedRender;
+        void *previousShape = g_extendedRenderShape;
+        g_inExtendedRender = true;
+        g_extendedRenderShape = additionalShape;
+        ourCustomRender13(self, filter, layer, ctx, opacity, surface,
+                          scale, flag, cm, shape, out);
+        g_extendedRenderShape = previousShape;
+        g_inExtendedRender = previousExtended;
+        return;
+    }
+    if (g_origGaussR18) {
+        g_origGaussR18(self, filter, layer, ctx, opacity, surface,
+                       scale, flag, cm, shape, additionalShape, out);
+    }
+}
+
 static void ourGaussianRender14Hook(void *self, void *filter, void *layer, void *ctx,
                                     float opacity, void *surface, float scale,
                                     simd_float2 offset, void *cm, void *shape,
@@ -2270,6 +2310,8 @@ static bool lgInstallGaussianHooks(void *identityEntry, void *edgeInfoEntry,
     if (g_skipGaussianRenderHook) {
         if (g_legacyRenderABI)
             g_origGaussR14 = (Render14Fn)LGSymMakeCallable(renderEntry);
+        else if (g_extendedRenderABI)
+            g_origGaussR18 = (Render18Fn)LGSymMakeCallable(renderEntry);
         else
             g_origGaussR13 = (Render13Fn)LGSymMakeCallable(renderEntry);
         lglog("hook: skipping Gaussian render hook after capability probe");
@@ -2279,29 +2321,35 @@ static bool lgInstallGaussianHooks(void *identityEntry, void *edgeInfoEntry,
         g_skipGaussianRenderHook = true;
         if (g_legacyRenderABI)
             g_origGaussR14 = (Render14Fn)LGSymMakeCallable(renderEntry);
+        else if (g_extendedRenderABI)
+            g_origGaussR18 = (Render18Fn)LGSymMakeCallable(renderEntry);
         else
             g_origGaussR13 = (Render13Fn)LGSymMakeCallable(renderEntry);
         lglog("hook: render probe state unavailable; skipping hook");
     } else {
         void *replacement = LGSymStripCode(g_legacyRenderABI
             ? (void *)&ourGaussianRender14Hook
-            : (void *)&ourGaussianRenderHook);
+            : (g_extendedRenderABI ? (void *)&ourGaussianRender18Hook
+                                   : (void *)&ourGaussianRenderHook));
         lglog("hook: installing Gaussian render target=%p replacement=%p",
               target, replacement);
         g_hookFunction(target, replacement, &trampoline);
         lgRemoveGaussianIdentityState();
         if (g_legacyRenderABI)
             g_origGaussR14 = (Render14Fn)LGSymMakeCallable(trampoline);
+        else if (g_extendedRenderABI)
+            g_origGaussR18 = (Render18Fn)LGSymMakeCallable(trampoline);
         else
             g_origGaussR13 = (Render13Fn)LGSymMakeCallable(trampoline);
     }
     lglog("hook: Gaussian trampolines identity=%p edge=%p renderRaw=%p render=%p ABI=%s",
           (void *)g_origGaussIdentity, (void *)g_origGaussEdgeInfo,
           trampoline,
-          g_legacyRenderABI ? (void *)g_origGaussR14 : (void *)g_origGaussR13,
-          g_legacyRenderABI ? "Vec2" : "bool");
+          g_legacyRenderABI ? (void *)g_origGaussR14
+              : (g_extendedRenderABI ? (void *)g_origGaussR18 : (void *)g_origGaussR13),
+          g_legacyRenderABI ? "Vec2" : (g_extendedRenderABI ? "bool+two-shapes" : "bool"));
     return g_legacyRenderABI ? g_origGaussR14 != nullptr
-                             : g_origGaussR13 != nullptr;
+        : (g_extendedRenderABI ? g_origGaussR18 != nullptr : g_origGaussR13 != nullptr);
 }
 
 static void lgRegisterCustomAtom(uint32_t atom, void *descriptor) {
@@ -2541,8 +2589,7 @@ static void tweakInit(void) {
                                     CFNotificationSuspensionBehaviorDeliverImmediately);
     if (lgShouldEnterSafeMode()) return;
     {
-        NSDictionary *bootPrefs =
-            [NSDictionary dictionaryWithContentsOfFile:lgPrefsPath()];
+        NSDictionary *bootPrefs = lgReadHostPreferences();
         NSNumber *debugLogging = bootPrefs[@"Debug.Logging.Enabled"];
         gLGBackboardDebugLogging = [debugLogging isKindOfClass:NSNumber.class]
             ? debugLogging.boolValue : false;
@@ -2560,6 +2607,7 @@ static void tweakInit(void) {
     g_skipGaussianRenderHook = false;
     g_osMajorVersion = osv.majorVersion;
     g_legacyRenderABI = osv.majorVersion <= 14;
+    g_extendedRenderABI = osv.majorVersion >= 18;
     lglog("===== LiquidGlass (backboardd) on iOS %ld.%ld.%ld =====",
           (long)osv.majorVersion, (long)osv.minorVersion, (long)osv.patchVersion);
 

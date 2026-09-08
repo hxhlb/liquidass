@@ -152,6 +152,10 @@ static void LGAlertInstallNativeGlass(UIAlertController *controller) {
     glass.layer.masksToBounds = YES;
     [glass applyFilters];
 
+    if (![glass lgFilterAttached]) {
+        LGAlertRestoreStockBackdrops(controller);
+        return;
+    }
     LGAlertSuppressStockBackdrops(controller, chrome);
 }
 

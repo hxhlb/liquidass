@@ -581,7 +581,9 @@ int LGResolve_EdgeInfoVtableSlot(void * const *vtable, int maxSlots) {
             uint32_t ins = fn[k];
             if (ins == 0xAA0503F7u) savesEdge = true;
             if (ins == 0xAA0603F4u) savesFlag = true;
-            if (ins == 0x2D0002E1u) writesEdge = true;
+            // Same Vec2<float> output: older builds use STP S1,S0,[X23],
+            // iOS 18.5 (22F76) emits a single STR D0,[X23].
+            if (ins == 0x2D0002E1u || ins == 0xFD0002E0u) writesEdge = true;
             if (ins == 0x39000288u) writesFlag = true;
             if (ins == 0xD65F03C0u || ins == 0xD65F0FFFu) break;
         }
