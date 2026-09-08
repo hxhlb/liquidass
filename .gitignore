@@ -1,5 +1,6 @@
 .theos/
 packages/
+tests/__pycache__/
 .DS_Store
 .git-pr/*
 install.exp
