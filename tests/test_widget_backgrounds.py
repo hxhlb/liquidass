@@ -1,5 +1,5 @@
 #!/usr/bin/env python3.11
-"""Test native widget material restoration and Maps policy in both processes."""
+"""Test native widget material restoration and the renderer rollback."""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -72,52 +72,16 @@ int main(void) { @autoreleasepool {
     material.superview = [UIView new]; updateWidgetContentBackground(material);
     CHECK(!material.hidden, "moving out of widget failed to restore material");
     material.superview = container;
-    vc.widget = widget(@"com.apple.Maps.GeneralMapsWidget");
-    updateWidgetContentBackground(material);
-    CHECK(!material.hidden, "Maps native material was removed");
-    CHECK(!widgetBackgroundRemovalEnabledForIdentifier(vc.widget.extensionBundleIdentifier),
-          "SpringBoard did not exclude Maps");
-    UIView *cachedMap = [SBHWidgetContainerView new];
-    cachedMap.frame = CGRectMake(0,-155,155,155); cachedMap.superview = scroll;
-    CHUISWidgetHostViewController *mapVC = [CHUISWidgetHostViewController new];
-    mapVC.widget = widget(@"com.apple.Maps.GeneralMapsWidget"); cachedMap.nextResponder = mapVC;
-    vc.widget = widget(@"com.apple.weather.widget");
-    scroll.subviews = @[cachedMap,container];
-    CHECK([widgetIdentifierInView(root) isEqualToString:@"com.apple.weather.widget"],
-          "offscreen Maps entry disabled current weather glass");
-    scroll.bounds = cachedMap.frame;
-    CHECK(LGWidgetRequiresSystemBackground(widgetIdentifierInView(root)),
-          "active Maps entry was not selected");
-    UIWindow *window = [UIWindow new]; window.rwb_shouldHideBackground = @YES;
-    CHUISWidgetScene *scene = [CHUISWidgetScene new]; window.windowScene = scene;
-    scene.widget = mapVC.widget;
-    CHECK(!RWBShouldHideWindowBackground(window), "renderer removed Maps drawing despite exclusion");
-    scene.widget = vc.widget;
-    CHECK(RWBShouldHideWindowBackground(window), "renderer stopped handling weather");
-    kIsEnabledForSystemWidgets = NO;
-    CHECK(!RWBShouldHideWindowBackground(window), "system widget preference ignored");
-    scene.widget = widget(@"org.example.widget");
-    CHECK(RWBShouldHideWindowBackground(window), "third-party widget incorrectly excluded");
-    scene.widget = nil;
-    CHECK(!RWBShouldHideWindowBackground(window), "unknown scene cleared before identification");
-    window.windowScene = nil;
-    CHECK(RWBShouldHideWindowBackground(window), "legacy window flag ignored");
-    kIsEnabled = NO;
-    CHECK(!RWBShouldHideWindowBackground(window), "disabled renderer still removes backgrounds");
-    CHECK(!LGWidgetRequiresSystemBackground(@"com.apple.MapsOther.widget"), "Maps prefix is too broad");
-    puts("PASS material lifecycle/restore, visible widget selection, Maps exclusion, renderer preferences");
+    puts("PASS native widget material lifecycle and restore");
     return 0;
 } }
 '''
 
 
 def main():
-    source = support + function((ROOT / "Shared/LGSharedSupport.m").read_text(),
-                                "BOOL LGWidgetRequiresSystemBackground(")
+    source = support
     widgets = (ROOT / "Hooks/Widgets.x").read_text()
-    for signature in ["static BOOL widgetBackgroundRemovalEnabledForIdentifier(",
-                      "static NSString *widgetIdentifierInView(",
-                      "static UIViewController *widgetNearestStackController(",
+    for signature in ["static UIViewController *widgetNearestStackController(",
                       "static BOOL widgetHasAncestorNamedWithinDepth(",
                       "static BOOL widgetSubtreeContainsClass(",
                       "static UIView *widgetFindDescendantNamed(",
@@ -126,9 +90,10 @@ def main():
                       "static BOOL isWidgetContentBackgroundMaterial(",
                       "static void updateWidgetContentBackground("]:
         source += function(widgets, signature)
-    rwb = (ROOT / "LiquidAssRWB/Tweak.x").read_text()
-    source += function(rwb, "static BOOL ShouldHandleWidget(")
-    source += function(rwb, "static BOOL RWBShouldHideWindowBackground(")
+    for path in ["LiquidAssRWB/Tweak.x", "Shared/LGSharedSupport.h", "Shared/LGSharedSupport.m"]:
+        baseline = subprocess.check_output(["git", "show", "3d237d6:" + path], cwd=ROOT)
+        assert (ROOT / path).read_bytes() == baseline, f"rollback mismatch: {path}"
+    print("PASS renderer and shared support exactly match widgets1")
     with tempfile.TemporaryDirectory(prefix="liquidass-widget-background-") as tmp:
         test, binary = Path(tmp)/"test.m", Path(tmp)/"test"
         test.write_text(source + checks)

@@ -25,7 +25,6 @@ BOOL LGBackboardSafeModeActive(void);
 void LGClearBackboardSafeMode(void);
 
 NSString *LGRWBDefaultWidgetBundleIDsText(void);
-BOOL LGWidgetRequiresSystemBackground(NSString *bundleIdentifier);
 
 #define LG_BOOL_PREF_FUNC(name, key, fallback) \
     static BOOL name(void) { return LG_prefBool(@key, fallback); }

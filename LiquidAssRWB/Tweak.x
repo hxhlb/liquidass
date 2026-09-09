@@ -175,20 +175,9 @@ static void RWBRestartChronodCallback(
 
 static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
     if (!kIsEnabled || bundleIdentifier.length == 0) return NO;
-    if (LGWidgetRequiresSystemBackground(bundleIdentifier)) return NO;
     if (!kIsEnabledForSystemWidgets && [bundleIdentifier hasPrefix:@"com.apple."])
         return NO;
     return YES;
-}
-
-static BOOL RWBShouldHideWindowBackground(UIWindow *window) {
-    if (!kIsEnabled || !window) return NO;
-    UIWindowScene *scene = window.windowScene;
-    if ([scene respondsToSelector:@selector(widget)]) {
-        CHSWidget *widget = [(CHUISWidgetScene *)scene widget];
-        return ShouldHandleWidget(widget.extensionBundleIdentifier);
-    }
-    return window.rwb_shouldHideBackground.boolValue;
 }
 
 %group RWBSpringBoard
@@ -361,7 +350,7 @@ static BOOL RWBShouldHideWindowBackground(UIWindow *window) {
     %orig;
     if ([NSStringFromClass([self class]) containsString:@"UIHostingView"]) return;
     id original = objc_getAssociatedObject(self, kRWBOriginalBackgroundColorKey);
-    if (RWBShouldHideWindowBackground(self.window)) {
+    if (kIsEnabled) {
         if (!original) {
             objc_setAssociatedObject(self, kRWBOriginalBackgroundColorKey,
                                      self.backgroundColor ?: NSNull.null,
@@ -382,7 +371,7 @@ static BOOL RWBShouldHideWindowBackground(UIWindow *window) {
 - (void)display {
     UIView *view = (UIView *)self.delegate;
 
-    if ([view isKindOfClass:[UIView class]] && RWBShouldHideWindowBackground(view.window)) {
+    if (kIsEnabled && [view isKindOfClass:[UIView class]] && view.window.rwb_shouldHideBackground.boolValue) {
         NSMutableDictionary *threadDict = [NSThread currentThread].threadDictionary;
         threadDict[@"rwb_shouldHideBackground"] = @YES;
         if (@available(iOS 17, *)) {

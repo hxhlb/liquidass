@@ -251,12 +251,6 @@ BOOL LGIsAtLeastiOS16(void) {
     return cached;
 }
 
-BOOL LGWidgetRequiresSystemBackground(NSString *bundleIdentifier) {
-    // Maps draws its map canvas as background content; removing it loses data.
-    return [bundleIdentifier isEqualToString:@"com.apple.Maps"] ||
-           [bundleIdentifier hasPrefix:@"com.apple.Maps."];
-}
-
 NSString *LGRWBDefaultWidgetBundleIDsText(void) {
     static NSString *text;
     static dispatch_once_t onceToken;
