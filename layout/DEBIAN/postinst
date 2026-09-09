@@ -4,6 +4,7 @@ if [ "${1:-}" = "configure" ]; then
     (
         sleep 1
         killall chronod >/dev/null 2>&1 || true
+        killall WidgetRenderer_Default WidgetRenderer_CarPlay >/dev/null 2>&1 || true
         killall backboardd >/dev/null 2>&1 || true
     ) &
 fi
