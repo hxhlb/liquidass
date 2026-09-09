@@ -80,7 +80,9 @@ static BOOL isWidgetGlassHostContainer(UIView *view) {
     if (!isExactClass(view, @"UIView")) return NO;
     if (view.bounds.size.width < 120.0 || view.bounds.size.height < 120.0) return NO;
     if (!widgetNearestStackController(view)) return NO;
-    if (!widgetHasAncestorNamedWithinDepth(view, @"SBFTouchPassThroughView", 8)) return NO;
+    // iOS 18 uses SBHTouchPassThroughView around Home Screen widget stacks.
+    if (!widgetHasAncestorNamedWithinDepth(view, @"SBFTouchPassThroughView", 8) &&
+        !widgetHasAncestorNamedWithinDepth(view, @"SBHTouchPassThroughView", 8)) return NO;
     if (!widgetHasAncestorNamedWithinDepth(view, @"SBIconView", 10)) return NO;
     for (UIView *sub in view.subviews) {
         if (!isExactClass(sub, @"UIView") && !isExactClass(sub, @"BSUIScrollView")) continue;
