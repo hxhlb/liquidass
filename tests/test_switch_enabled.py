@@ -12,7 +12,7 @@ SUPPORT = r'''
 #import <CoreGraphics/CoreGraphics.h>
 #import <objc/runtime.h>
 enum { UIViewAutoresizingFlexibleWidth=1, UIViewAutoresizingFlexibleHeight=2,
-       UIControlEventValueChanged=64, LGControlsDiagnosticSwitch=0 };
+       UIControlEventValueChanged=4096, LGControlsDiagnosticSwitch=0 };
 @interface Layer : NSObject
 @property BOOL masksToBounds;
 @end
