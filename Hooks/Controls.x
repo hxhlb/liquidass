@@ -2386,6 +2386,11 @@ static void LGUpdateSettingsSidebar(UIView *container) {
 %end
 
 %hook UISwitch
+- (void)setEnabled:(BOOL)enabled {
+    %orig;
+    if (![self isKindOfClass:LGPrefsLiquidSwitch.class])
+        LGProfiledInstallSettingsSwitch((UISwitch *)self);
+}
 - (void)didMoveToWindow {
     %orig;
     if (gLGControlsDiagnosticsEnabled) gLGControlsSwitchMoves++;
