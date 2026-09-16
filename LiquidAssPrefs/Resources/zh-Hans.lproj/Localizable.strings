@@ -268,3 +268,7 @@
 "prefs.clock.mode.native" = "原生修改";
 "prefs.clock.mode.custom" = "自定义层";
 "prefs.app_list.unavailable" = "无法加载 AltList。请重新安装 AltList 依赖并重新打开设置。";
+"prefs.renderer.blur_mode.title" = "模糊实现";
+"prefs.renderer.blur_mode.subtitle" = "仅限 Enhanced。作用于独立玻璃表面（含时钟自定义层）；时钟原生修改保持原有方式。可配合各表面的“模糊”强度对照。";
+"prefs.renderer.blur_mode.current" = "当前方式";
+"prefs.renderer.blur_mode.system" = "系统模糊层";

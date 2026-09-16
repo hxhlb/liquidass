@@ -47,6 +47,7 @@ NSDictionary *LGSliderSetting(NSString *key, NSString *title, NSString *subtitle
                               CGFloat fallback, CGFloat min, CGFloat max, NSInteger decimals);
 NSDictionary *LGGlassQualitySetting(NSString *key, CGFloat fallback, CGFloat min, CGFloat max, NSInteger decimals);
 NSDictionary *LGGlassEnabledSetting(NSString *key, BOOL fallback);
+BOOL LGPrefsItemIsEnabled(NSDictionary *item);
 BOOL LGPrefsItemIsVisible(NSDictionary *item);
 
 NSArray<NSDictionary *> *LGDockItems(void);

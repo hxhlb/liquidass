@@ -40,10 +40,10 @@ an offscreen cover sheet retains a translated frame and window.
 
 ## Explicitly deferred renderer work
 
-`LiquidAssBackboardd/Tweak.mm` and `Shared/LGLiveBackdropView.m` remain identical
-to the Banana base. This stage does not merge the upstream blur-pass replacement,
-BezelRatio-to-BezelWidth migration, existing-host material retuning or specular
-motion rewrite. Classic/Enhanced modes and current frame/visibility limits stay.
+The current blur path remains the default. The follow-up below adds an optional
+system blur overlay; it does not replace the shader, change the material parameter
+units, retune existing host defaults or import the upstream specular motion rewrite.
+Classic/Enhanced modes and current motion frame/visibility limits stay.
 The new host registry entries use Banana ratio/thickness units provisionally;
 their visual tuning belongs to the renderer follow-up.
 
@@ -84,3 +84,35 @@ No DEBs built, no device changes, no GitHub push or release in this stage. Befor
 release, test both modes and switching/disable/lock/unlock on iOS 15–18, with
 LiquidAss alone, SpatialScene alone and both together. Verify depth ordering,
 notifications, date/font controls, pull transitions and AssistiveTouch toggles.
+
+## Optional blur comparison (Enhanced only)
+
+Settings > More Options > Blur implementation (`Renderer.BlurMode`):
+
+- `current` / 当前方式: default, preserving the existing Enhanced Metal blur pass.
+- `system` / 系统模糊层: upstream-style native Gaussian overlay, with the same
+  per-surface Blur controls. It uses the shared upstream `LGAdjustableBlurView`
+  so the preference bundle has the implementation too; shape frames and rounded
+  clipping follow the glass surface. Zero blur removes the overlay.
+
+The menu stays visible but disabled under Classic. Profile selection refreshes
+its enabled state, and stale menu actions also check eligibility. Switching back
+to Classic preserves the stored blur choice; it never activates that choice in
+Classic. Enhanced must be active after the normal renderer-profile restart before
+system blur runs. Once Enhanced is active, the two blur choices use the existing
+parameter-reload notification flow without an additional restart requirement.
+
+Each standalone glass filter uses an explicit `.systemBlur` variant while its
+view supplies the native overlay. Backboardd skips the owned Metal blur only for
+those variants, keeping host/radius/dark/refresh routing intact. This avoids using
+a global backend toggle which could disagree with a view in another process.
+Native clock `.nativeMask` filters never get the suffix and retain their current
+behavior; the custom clock layer supports the comparison. Existing independent
+material blur layers (for example AssistiveTouch/button materials) are preserved.
+
+Validation: production-code tests cover Enhanced UI/runtime gates, a pending
+profile restart, invalid/default selections, radius limits, overlay reuse/removal
+and geometry, all 2,092 standalone filter variants and native-clock isolation.
+Rootless arm64 and RootHide arm64e syntax checks passed for the four changed
+translation units. Existing motion, renderer ABI, clock and settings regressions
+passed. No DEB build or device visual/performance validation has been performed.

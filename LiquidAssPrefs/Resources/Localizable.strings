@@ -261,3 +261,7 @@
 "prefs.clock.mode.native" = "Native modification";
 "prefs.clock.mode.custom" = "Custom layer";
 "prefs.app_list.unavailable" = "AltList could not be loaded. Reinstall the AltList dependency and reopen Settings.";
+"prefs.renderer.blur_mode.title" = "Blur implementation";
+"prefs.renderer.blur_mode.subtitle" = "Enhanced only. Applies to standalone glass surfaces, including the custom clock layer. Native clock modification keeps its current behavior. Use each surface’s Blur control to compare.";
+"prefs.renderer.blur_mode.current" = "Current method";
+"prefs.renderer.blur_mode.system" = "System blur layer";

@@ -2,6 +2,7 @@
 #import "LGHostRegistry.h"
 #import "LGCoverSheetState.h"
 #import "LGSharedSupport.h"
+#import "LGFramework.h"
 #import <CoreMotion/CoreMotion.h>
 #import <QuartzCore/QuartzCore.h>
 #import <objc/message.h>
@@ -161,6 +162,26 @@ static BOOL LGEnhancedRendererProfileAtLaunch(void) {
     return enhanced;
 }
 
+// The filter variant tells backboardd which view owns blur. This avoids a
+// cross-process preference race applying both the Metal pass and native blur.
+static BOOL LGUsesSystemBlurOverlay(void) {
+    if (!LGEnhancedRendererProfileAtLaunch() ||
+        ![LGGlassPreferenceValue(@"Renderer.Profile") isEqual:@"enhanced"]) return NO;
+    id mode = LGGlassPreferenceValue(@"Renderer.BlurMode");
+    return [mode isKindOfClass:NSString.class] && [mode isEqualToString:@"system"];
+}
+
+static CGFloat LGNativeBlurRadiusForFilterType(NSString *filterType) {
+    if (!LGUsesSystemBlurOverlay()) return 0.0;
+    const LGHostDefinition *host = LGHostDefinitionForFilterType(filterType.UTF8String);
+    if (!host) return 0.0;
+    NSString *prefix = [NSString stringWithUTF8String:host->preferencePrefix];
+    id value = LGGlassPreferenceValue([prefix stringByAppendingString:@".Blur"]);
+    CGFloat radius = [value respondsToSelector:@selector(doubleValue)]
+        ? [value doubleValue] : host->blur;
+    return isfinite(radius) ? MAX(0.0, MIN(50.0, radius)) : host->blur;
+}
+
 static CGFloat LGQualityValue(void) {
     id value = LGGlassPreferenceValue(@"Global.Quality");
     CGFloat quality = [value respondsToSelector:@selector(doubleValue)]
@@ -185,6 +206,7 @@ static CGFloat LGScaleForSize(CGSize s) {
 - (void)updateSpecular;
 - (void)applySpecularAngle:(CGFloat)angle;
 - (void)reapplyFilterForParameterReload;
+- (void)updateNativeBlurOverlayWithRadius:(CGFloat)radius;
 @end
 
 static void LGParametersReloaded(CFNotificationCenterRef center, void *observer,
@@ -334,6 +356,7 @@ static const CGFloat kLGGlassEdgeWidth = 1.0;
     CAShapeLayer    *_specularDarkMask;
     CAShapeLayer    *_specularMask;
     CAShapeLayer    *_specularBoostMask;
+    LGAdjustableBlurView *_nativeBlurView;
     BOOL             _backdropConfigured;
     BOOL             _filterAttached;
     uint32_t         _lgId;
@@ -346,8 +369,10 @@ static const CGFloat kLGGlassEdgeWidth = 1.0;
 }
 
 - (NSString *)lgEffectiveFilterType {
-    if (!_lgFilterType.length)
-        return [NSString stringWithUTF8String:kLGHostRegistry[LGHostIdentifierDefault].filterType];
+    if (!_lgFilterType.length) {
+        NSString *type = [NSString stringWithUTF8String:kLGHostRegistry[LGHostIdentifierDefault].filterType];
+        return LGUsesSystemBlurOverlay() ? [type stringByAppendingString:@".systemBlur"] : type;
+    }
     NSString *base = _lgFilterType;
 
     if (LGUsesDynamicRadiusType(base) && !CGRectIsEmpty(self.bounds)) {
@@ -363,6 +388,7 @@ static const CGFloat kLGGlassEdgeWidth = 1.0;
     NSString *type = self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark
         ? [base stringByAppendingString:@".dark"] : base;
     if (_parameterRefreshVariant) type = [type stringByAppendingString:@".refresh"];
+    if (LGUsesSystemBlurOverlay()) type = [type stringByAppendingString:@".systemBlur"];
     return type;
 }
 
@@ -443,12 +469,14 @@ static const CGFloat kLGGlassEdgeWidth = 1.0;
 - (void)setLgShapeRect:(CGRect)rect {
     if (CGRectEqualToRect(_lgShapeRect, rect)) return;
     _lgShapeRect = rect;
+    if (_nativeBlurView) [self updateNativeBlurOverlayWithRadius:_nativeBlurView.blurRadius];
     [self updateSpecular];
 }
 
 - (void)setLgShapeCornerRadius:(CGFloat)radius {
     if (fabs(_lgShapeCornerRadius - radius) < 0.01) return;
     _lgShapeCornerRadius = radius;
+    if (_nativeBlurView) [self updateNativeBlurOverlayWithRadius:_nativeBlurView.blurRadius];
     [self updateSpecular];
 }
 
@@ -572,6 +600,36 @@ static const CGFloat kLGGlassEdgeWidth = 1.0;
     _hasAppliedSpecularAngle = YES;
 }
 
+- (void)updateNativeBlurOverlayWithRadius:(CGFloat)radius {
+    if (radius <= 0.0) {
+        [_nativeBlurView removeFromSuperview];
+        _nativeBlurView = nil;
+        return;
+    }
+    if (!_nativeBlurView) {
+        // The shared upstream blur class is available in both the tweak and
+        // preference bundle; LGSettingsLowBlurView only exists in the tweak.
+        _nativeBlurView = [[LGAdjustableBlurView alloc] initWithFrame:self.bounds blurRadius:0.0];
+        _nativeBlurView.qualityScale = 1.0;
+        [_nativeBlurView.layer setValue:NSUUID.UUID.UUIDString forKey:@"groupName"];
+        [self insertSubview:_nativeBlurView atIndex:0];
+    }
+    BOOL hasShape = !CGRectIsNull(_lgShapeRect) && !CGRectIsEmpty(_lgShapeRect);
+    CGRect shapeRect = hasShape ? _lgShapeRect : self.bounds;
+    CGFloat radiusForShape = hasShape ? _lgShapeCornerRadius : self.layer.cornerRadius;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    _nativeBlurView.frame = shapeRect;
+    _nativeBlurView.cornerRadius = radiusForShape;
+    _nativeBlurView.layer.cornerCurve = self.layer.cornerCurve;
+    _nativeBlurView.clipsToBounds = YES;
+    _nativeBlurView.blurRadius = radius;
+    [_nativeBlurView applyFilters];
+    for (id filter in _nativeBlurView.layer.filters)
+        [filter setValue:@YES forKey:@"inputNormalizeEdges"];
+    [CATransaction commit];
+}
+
 - (void)applyFilters {
     CALayer *layer = self.layer;
     Class backdropCls = NSClassFromString(@"CABackdropLayer");
@@ -622,6 +680,8 @@ static const CGFloat kLGGlassEdgeWidth = 1.0;
         NSString *wantType = [self lgEffectiveFilterType];
         NSArray *existing = layer.filters;
         Class filterCls = NSClassFromString(@"CAFilter");
+        [self updateNativeBlurOverlayWithRadius:
+            LGNativeBlurRadiusForFilterType(_lgFilterType ?: wantType)];
 
         if (_filterAttached && existing.count == 1) {
             NSString *type = nil;

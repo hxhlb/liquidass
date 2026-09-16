@@ -355,6 +355,7 @@ static thread_local simd_float2 g_legacyRenderOffset = { 0.0f, 0.0f };
 static thread_local bool g_inExtendedRender = false;
 static thread_local void *g_extendedRenderShape = nullptr;
 static std::unordered_set<uint32_t> g_customAtoms;
+static std::unordered_set<uint32_t> g_systemBlurAtoms;
 static os_unfair_lock g_customAtomsLock = OS_UNFAIR_LOCK_INIT;
 static std::unordered_set<uint32_t> g_loggedRenderAtoms;
 static os_unfair_lock g_loggedRenderAtomsLock = OS_UNFAIR_LOCK_INIT;
@@ -1716,6 +1717,14 @@ static void lgStartPrefsObserver(void) {
         NULL, CFNotificationSuspensionBehaviorCoalesce);
 }
 
+static bool lgUsesOwnedBlur(bool enhancedPipeline, uint32_t atom) {
+    if (!enhancedPipeline) return false;
+    os_unfair_lock_lock(&g_customAtomsLock);
+    bool systemBlur = g_systemBlurAtoms.find(atom) != g_systemBlurAtoms.end();
+    os_unfair_lock_unlock(&g_customAtomsLock);
+    return !systemBlur;
+}
+
 static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
                                float opacity, void *surface, float scale,
                                bool flag, void *cm, void *shape, float *out)
@@ -2023,7 +2032,7 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
         return;
     }
 
-    id<MTLTexture> glassSourceTexture = enhancedPipeline
+    id<MTLTexture> glassSourceTexture = lgUsesOwnedBlur(enhancedPipeline, ftype)
         ? encodeOwnedGaussianBlur(cmdBuf, origTex, hp->blur)
         : origTex;
 
@@ -2360,6 +2369,33 @@ static void lgRegisterCustomAtom(uint32_t atom, void *descriptor) {
     if (inserted) g_addFilter(atom, descriptor);
 }
 
+// Register an explicit blur-owner variant for every standalone glass route.
+// Native clock masks are intentionally excluded: they have no overlay view.
+static void lgRegisterSystemBlurVariants(void *descriptor) {
+    for (int host = 0; host < kHostCount; host++) {
+        NSString *base = [NSString stringWithUTF8String:kHostDefaults[host].typeName];
+        int lastStep = lgUsesDynamicRadiusRoute(host) ? kDynamicRadiusSteps / 2 : -1;
+        for (int step = -1; step <= lastStep; step++) {
+            NSString *geometry = step < 0 ? base : [base stringByAppendingFormat:@".r%d", step];
+            for (int dark = 0; dark <= 1; dark++) {
+                NSString *appearance = dark ? [geometry stringByAppendingString:@".dark"] : geometry;
+                for (int refresh = 0; refresh <= 1; refresh++) {
+                    NSString *name = refresh ? [appearance stringByAppendingString:@".refresh"] : appearance;
+                    name = [name stringByAppendingString:@".systemBlur"];
+                    uint32_t atom = g_internAtom(name.UTF8String);
+                    if (!atom) continue;
+                    if (step < 0) g_refreshRoutes[atom] = { host, dark != 0 };
+                    else g_radiusRoutes[atom] = { host, (float)step / kDynamicRadiusSteps, dark != 0 };
+                    os_unfair_lock_lock(&g_customAtomsLock);
+                    g_systemBlurAtoms.insert(atom);
+                    os_unfair_lock_unlock(&g_customAtomsLock);
+                    lgRegisterCustomAtom(atom, descriptor);
+                }
+            }
+        }
+    }
+}
+
 // registering before filter table exists breaks system blur, this became a tweak btw check out https://github.com/winaviation-tweaks/Blurless
 static bool registerCustomFilter(void) {
     void **filterTableSlot = (void **)LGResolve_FilterTableSlot();
@@ -2568,6 +2604,7 @@ static bool registerCustomFilter(void) {
         }
     }
 
+    lgRegisterSystemBlurVariants(registrationDescriptor);
     g_filterRegistered = true;
     lglog("registerCustomFilter: done mode=%s descriptor=%p renderSlot=%d atom=0x%x hosts=%d",
           g_useHookPath ? "hook" : "clone", registrationDescriptor,

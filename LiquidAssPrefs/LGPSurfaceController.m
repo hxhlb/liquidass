@@ -114,9 +114,12 @@ static void LGRefreshCoverSheetBezelRatioControl(UIView *root, CGFloat cornerRad
             NSDictionary *item = objc_getAssociatedObject(subview, kLGPanelItemKey);
             if (!item) continue;
             BOOL visible = LGPrefsItemIsVisible(item);
+            BOOL enabled = LGPrefsItemIsEnabled(item);
+            if ([item[@"requires_enhanced_renderer"] boolValue])
+                subview.userInteractionEnabled = enabled;
             void (^changes)(void) = ^{
                 subview.hidden = !visible;
-                subview.alpha = visible ? 1.0 : 0.0;
+                subview.alpha = visible ? (enabled ? 1.0 : 0.42) : 0.0;
             };
             if (animated) {
                 [UIView animateWithDuration:0.16
@@ -1334,6 +1337,7 @@ static void LGRestartAssistiveTouchDaemon(void) {
                                           identifier:nil
                                              handler:^(__kindof UIAction * _Nonnull actionObj) {
             (void)actionObj;
+            if (!LGPrefsItemIsEnabled(item)) return;
             if ([item[@"key"] isEqualToString:kLGPrefsLanguageKey]) {
                 LGSetCurrentPrefsLanguageCode(value);
                 selectedValue = [LGCurrentPrefsLanguageCode() copy];

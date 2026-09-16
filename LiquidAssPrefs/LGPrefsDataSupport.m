@@ -593,6 +593,11 @@ NSArray<NSDictionary *> *LGRendererItemsForHostPrefix(NSString *prefix) {
     return [items copy];
 }
 
+BOOL LGPrefsItemIsEnabled(NSDictionary *item) {
+    return ![item[@"requires_enhanced_renderer"] boolValue] ||
+        [LGReadPreferenceObject(@"Renderer.Profile", @"classic") isEqual:@"enhanced"];
+}
+
 BOOL LGPrefsItemIsVisible(NSDictionary *item) {
     NSString *visibleKey = item[@"visible_key"];
     NSArray *visibleValues = item[@"visible_values"];
@@ -1121,7 +1126,16 @@ NSArray<NSDictionary *> *LGMoreOptionsItems(void) {
             @{@"value": @"enhanced", @"title": LGLocalized(@"prefs.renderer.profile.enhanced")},
         ]) mutableCopy];
     rendererProfile[@"requires_backboard_restart"] = @YES;
+    rendererProfile[@"reload_on_change"] = @YES;
     [items addObject:[rendererProfile copy]];
+    NSMutableDictionary *blurMode = [LGMenuSetting(@"Renderer.BlurMode",
+        LGLocalized(@"prefs.renderer.blur_mode.title"),
+        LGLocalized(@"prefs.renderer.blur_mode.subtitle"), @"current", @[
+            @{ @"value": @"current", @"title": LGLocalized(@"prefs.renderer.blur_mode.current") },
+            @{ @"value": @"system", @"title": LGLocalized(@"prefs.renderer.blur_mode.system") },
+        ]) mutableCopy];
+    blurMode[@"requires_enhanced_renderer"] = @YES;
+    [items addObject:blurMode.copy];
     [items addObject:LGSliderSetting(@"Renderer.FresnelGlareStrength",
                                      LGLocalized(@"prefs.control.fresnel_glare"),
                                      LGLocalized(@"prefs.subtitle.fresnel_glare"),

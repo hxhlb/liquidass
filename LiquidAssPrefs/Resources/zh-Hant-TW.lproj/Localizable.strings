@@ -286,3 +286,7 @@
 "prefs.clock.mode.native" = "原生修改";
 "prefs.clock.mode.custom" = "自訂圖層";
 "prefs.app_list.unavailable" = "無法載入 AltList。請重新安裝 AltList 相依套件並重新開啟設定。";
+"prefs.renderer.blur_mode.title" = "模糊實作";
+"prefs.renderer.blur_mode.subtitle" = "僅限 Enhanced。作用於獨立玻璃表面（含時鐘自訂圖層）；時鐘原生修改維持原有方式。可搭配各表面的「模糊」強度比較。";
+"prefs.renderer.blur_mode.current" = "目前方式";
+"prefs.renderer.blur_mode.system" = "系統模糊圖層";
