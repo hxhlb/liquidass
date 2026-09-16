@@ -250,6 +250,98 @@ static void LGUpdateVolumeHUDGlass(SBElasticSliderMaterialWrapperView *self) {
     LGScheduleVolumeHUDProbe(self);
 }
 
+// iOS 17 (and earlier elastic HUDs) owns the materials directly on the
+// slider. The wrapper class used above does not exist on that hierarchy.
+static NSHashTable<UIView *> *sLGLegacyVolumeSliders;
+static const void * const kLGLegacyVolumeUpdatingKey = &kLGLegacyVolumeUpdatingKey;
+
+static UIView *LGVolumeHUDViewForKey(UIView *owner, NSString *key) {
+    @try {
+        id view = [owner valueForKey:key];
+        return [view isKindOfClass:UIView.class] ? view : nil;
+    } @catch (__unused NSException *exception) { return nil; }
+}
+
+static BOOL LGVolumeHUDIsVolumeSlider(UIView *view) {
+    Class controllerClass = NSClassFromString(@"SBElasticVolumeViewController");
+    if (!controllerClass) return NO;
+    for (UIResponder *responder = view; responder; responder = responder.nextResponder) {
+        if ([responder isKindOfClass:controllerClass]) return YES;
+        if ([responder isKindOfClass:UIViewController.class]) return NO;
+    }
+    return NO;
+}
+
+static void LGVolumeHUDSetNativeViewHidden(UIView *view, BOOL hidden) {
+    if (!view) return;
+    NSNumber *original = objc_getAssociatedObject(view, kLGVolumeHUDMaterialHiddenKey);
+    if (hidden) {
+        if (!original) objc_setAssociatedObject(view, kLGVolumeHUDMaterialHiddenKey,
+            @(view.hidden), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        view.hidden = YES;
+    } else if (original) {
+        view.hidden = original.boolValue;
+        objc_setAssociatedObject(view, kLGVolumeHUDMaterialHiddenKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    }
+}
+
+static void LGUpdateLegacyVolumeHUDGlass(UIView *slider) {
+    if (!slider || [objc_getAssociatedObject(slider, kLGLegacyVolumeUpdatingKey) boolValue]) return;
+    LGLiveBackdropView *glass = objc_getAssociatedObject(slider, kLGVolumeHUDGlassKey);
+    BOOL isVolume = LGVolumeHUDIsVolumeSlider(slider);
+    if (!isVolume && !glass) return;
+    [sLGLegacyVolumeSliders addObject:slider];
+    objc_setAssociatedObject(slider, kLGLegacyVolumeUpdatingKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    @try {
+        UIView *container = LGVolumeHUDViewForKey(slider, @"_elasticContentView");
+        UIView *background = LGVolumeHUDViewForKey(slider, @"_backgroundView");
+        BOOL enabled = isVolume && LGVolumeHUDEnabled() && slider.window &&
+                       container && background && !CGRectIsEmpty(container.bounds);
+        if (enabled) {
+            if (!glass) {
+                glass = LGCreateRegisteredGlass(container.bounds, nil, @"VolumeHUD");
+                objc_setAssociatedObject(slider, kLGVolumeHUDGlassKey, glass, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                if (glass) lgTrackGlass(glass, @"VolumeHUD", slider);
+            }
+            if (glass && glass.superview != container) {
+                [glass removeFromSuperview];
+                [container insertSubview:glass atIndex:0];
+            }
+            glass.frame = container.bounds;
+            glass.layer.cornerRadius = container.layer.cornerRadius;
+            glass.layer.cornerCurve = container.layer.cornerCurve;
+            glass.clipsToBounds = YES;
+            [glass applyFilters];
+        }
+        BOOL ready = enabled && glass.lgFilterAttached;
+        glass.hidden = !ready;
+        // Keep the value clipping view, fill material and glyphs untouched.
+        for (NSString *key in @[@"_baseMaterialView", @"_captureOnlyMaterialView",
+                                @"_backgroundView", @"_shadowView"]) {
+            LGVolumeHUDSetNativeViewHidden(LGVolumeHUDViewForKey(slider, key), ready);
+        }
+        if (!enabled) {
+            [glass removeFromSuperview];
+            objc_setAssociatedObject(slider, kLGVolumeHUDGlassKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        }
+    } @finally {
+        objc_setAssociatedObject(slider, kLGLegacyVolumeUpdatingKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    }
+}
+
+%group LGLegacyVolumeHUDHooks
+%hook SBElasticSliderView
+- (void)layoutElasticContentViews {
+    %orig;
+    LGUpdateLegacyVolumeHUDGlass((UIView *)self);
+}
+- (void)didMoveToWindow {
+    %orig;
+    LGUpdateLegacyVolumeHUDGlass((UIView *)self);
+}
+%end
+%end
+
 %group LGVolumeHUDHooks
 
 %hook SBElasticSliderMaterialWrapperView
@@ -304,9 +396,23 @@ static void LGUpdateVolumeHUDGlass(SBElasticSliderMaterialWrapperView *self) {
 
 %ctor {
     if (!LGIsSpringBoardProcess()) return;
-    %init(LGVolumeHUDHooks);
+    if (NSClassFromString(@"SBElasticSliderMaterialWrapperView")) {
+        %init(LGVolumeHUDHooks);
+    } else if (NSClassFromString(@"SBElasticSliderView")) {
+        sLGLegacyVolumeSliders = [NSHashTable weakObjectsHashTable];
+        %init(LGLegacyVolumeHUDHooks);
+        [[NSNotificationCenter defaultCenter]
+            addObserverForName:@"LGLiveBackdropViewFilterDidAttach" object:nil
+            queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+                for (UIView *slider in sLGLegacyVolumeSliders.allObjects) {
+                    if (objc_getAssociatedObject(slider, kLGVolumeHUDGlassKey) == note.object)
+                        LGUpdateLegacyVolumeHUDGlass(slider);
+                }
+            }];
+    }
     lgObservePreferenceReload(^{
-
+        for (UIView *slider in sLGLegacyVolumeSliders.allObjects)
+            LGUpdateLegacyVolumeHUDGlass(slider);
         LGLog(@"VolumeHUD: Preferences reloaded");
     });
 }

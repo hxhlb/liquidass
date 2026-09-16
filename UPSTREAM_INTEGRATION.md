@@ -132,3 +132,26 @@ and `packages/iya.iapple.liquidass_0.1.1b+banana34_iphoneos-arm64e.deb`.
 Validation records/checksums: `packages/release/v0.1.1b-banana34/`.
 Matching symbols: `packages/symbols/banana34/{rootless,roothide}/`.
 No GitHub push, tag, release or device installation has been performed.
+
+## banana35 HUD compatibility fix
+
+iOS 17.3.1 runtime capture showed that `SBElasticSliderMaterialWrapperView` and
+`SBElasticVolumeSliderView` do not exist. The actual view is `SBElasticSliderView`
+under `SBElasticVolumeViewController`, with `_elasticContentView`, base/capture
+materials, a separate `_backgroundView`, and a distinct `_backgroundFillView`.
+The fallback is registered only when the modern wrapper is absent, and checks the
+volume controller ancestry so brightness/Control Center sliders are excluded.
+Only the three background materials and shadow are suppressed, after filter
+attachment. The value clipping view, fill and glyphs remain intact. Native hidden
+states are restored on disable/detach.
+
+AssistiveTouch crash `assistivetouchd-2026-09-16-104258.ips` matched banana34's
+RootHide arm64e UUID `7F4DF39C-FC6F-320A-9622-E97EAD1DC730`: offsets `0xdea4` and
+`0x10be8` map to `ASSHeldGlassView initWithFrame:` and `HNDRocker didMoveToWindow`.
+The exception originates in `_UIGraphicsBeginImageContextWithOptions` when the
+initial glow diameter is zero. Invalid dimensions now return nil; usable layout
+creates the missing glow and subsequent unchanged layouts reuse it. The regression
+fixture fails on banana34 and passes on this fix.
+
+`test_assistive_glow.py` and `test_volume_hud.py` pass. Actual fixed-package
+visibility, touch behavior and glass appearance remain pending device validation.

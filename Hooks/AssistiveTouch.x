@@ -2,6 +2,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
+#import <math.h>
 #import "../Shared/LGLiveBackdropView.h"
 #import "../Shared/LGSharedSupport.h"
 #import "../Shared/LGGlassKit.h"
@@ -9,10 +10,16 @@
 #import "../Shared/LGFramework.h"
 
 static UIImage *CreateExposureGlowImage(CGFloat diameter) {
+    // HNDRocker can enter its window with zero bounds before its first layout.
+    // iOS 17 asserts before returning a bitmap context for a zero-sized image.
+    if (!isfinite(diameter) || diameter <= 0.0) return nil;
     CGSize size = CGSizeMake(diameter, diameter);
     UIGraphicsBeginImageContextWithOptions(size, NO, 0.0);
     CGContextRef ctx = UIGraphicsGetCurrentContext();
-    if (!ctx) return nil;
+    if (!ctx) {
+        UIGraphicsEndImageContext();
+        return nil;
+    }
 
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
     NSArray *colors = @[
@@ -105,6 +112,13 @@ static UIImage *CreateExposureGlowImage(CGFloat diameter) {
 
 - (void)updateShapeForBounds:(CGRect)bounds {
     self.frame = bounds;
+    CGFloat glowSize = CGRectGetWidth(self.bounds) * 1.55;
+    if (isfinite(glowSize) && glowSize > 0.0 &&
+        (!self.exposureGlowView.image ||
+         fabs(self.exposureGlowView.image.size.width - glowSize) > 1.0)) {
+        self.exposureGlowView.image = CreateExposureGlowImage(glowSize);
+        self.exposureGlowView.bounds = CGRectMake(0.0, 0.0, glowSize, glowSize);
+    }
     [self updateShapeWithScale:1.0 stretchX:1.0 stretchY:1.0 shiftX:0 shiftY:0];
 }
 
@@ -598,6 +612,8 @@ static __weak HNDRocker *sCurrentActiveRocker = nil;
 
 - (void)layoutSubviews {
     %orig;
+    if (![objc_getAssociatedObject(self, kAssIsHeldKey) boolValue])
+        [[self ass_glassView] updateShapeForBounds:self.bounds];
     if ([self isFullMenuVisible]) {
         UIVisualEffectView *backdrop = [self ass_backdropView];
         if (backdrop) {
