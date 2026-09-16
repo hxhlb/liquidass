@@ -80,8 +80,8 @@ upstream's explicit AssistiveTouch restart behavior.
 - Localization plist/duplicate-key checks and unchanged-file checks for deferred
   renderer, widget/icon/RWB and release/installer sources.
 
-No DEBs built, no device changes, no GitHub push or release in this stage. Before
-release, test both modes and switching/disable/lock/unlock on iOS 15–18, with
+The local banana34 test packages have now been built and validated (see below).
+No device changes or GitHub publication. Before release, test both modes and switching/disable/lock/unlock on iOS 15–18, with
 LiquidAss alone, SpatialScene alone and both together. Verify depth ordering,
 notifications, date/font controls, pull transitions and AssistiveTouch toggles.
 
@@ -115,4 +115,19 @@ profile restart, invalid/default selections, radius limits, overlay reuse/remova
 and geometry, all 2,092 standalone filter variants and native-clock isolation.
 Rootless arm64 and RootHide arm64e syntax checks passed for the four changed
 translation units. Existing motion, renderer ABI, clock and settings regressions
-passed. No DEB build or device visual/performance validation has been performed.
+passed. Rootless/RootHide DEBs are now available for testing; device visual and
+performance validation remains pending.
+
+## banana34 local test packages
+
+Version: `0.1.1b+banana34`. Both schemes built with `release.sh` and the matching
+Theos checkout, including arm64 and arm64e slices in all four Mach-O binaries.
+Package checks passed for identity/version, architecture, Rootless/RootHide
+layout and linkage, font resource, new localized selectors, changelog and POSIX
+postinst syntax. The installer still resolves commands through PATH for apt/dpkg.
+
+Artifacts: `packages/iya.iapple.liquidass_0.1.1b+banana34_iphoneos-arm64.deb`
+and `packages/iya.iapple.liquidass_0.1.1b+banana34_iphoneos-arm64e.deb`.
+Validation records/checksums: `packages/release/v0.1.1b-banana34/`.
+Matching symbols: `packages/symbols/banana34/{rootless,roothide}/`.
+No GitHub push, tag, release or device installation has been performed.
