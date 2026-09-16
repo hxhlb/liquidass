@@ -9,6 +9,54 @@
 
 static CGFloat sCCSmallModuleRadius = 0.0;
 
+typedef NS_ENUM(NSUInteger, CCProfileBucket) {
+    CCProfileFullscreen,
+    CCProfileDimSync,
+    CCProfileGlassRefresh,
+    CCProfileModuleRound,
+    CCProfileSliderRound,
+    CCProfileBucketCount,
+};
+
+typedef struct {
+    NSUInteger calls;
+    CFTimeInterval total;
+    CFTimeInterval peak;
+} CCProfileSample;
+
+static CCProfileSample sCCProfile[CCProfileBucketCount];
+static CFTimeInterval sCCProfileStarted;
+static NSString *const sCCProfileNames[CCProfileBucketCount] = {
+    @"fullscreen", @"dimSync", @"glassRefresh", @"moduleRound", @"sliderRound"
+};
+
+static void ccProfileReport(BOOL force) {
+    if (!LGDebugLoggingEnabled()) return;
+    CFTimeInterval now = CACurrentMediaTime();
+    if (!sCCProfileStarted) sCCProfileStarted = now;
+    if (!force && now - sCCProfileStarted < 0.5) return;
+    NSMutableString *summary = [NSMutableString stringWithString:@"[CCPROF]"];
+    for (NSUInteger index = 0; index < CCProfileBucketCount; index++) {
+        CCProfileSample sample = sCCProfile[index];
+        if (!sample.calls) continue;
+        [summary appendFormat:@" %@=%lu/%.3f/%.3fms", sCCProfileNames[index],
+            (unsigned long)sample.calls, sample.total * 1000.0 / sample.calls,
+            sample.peak * 1000.0];
+    }
+    LGLog(@"%@", summary);
+    memset(sCCProfile, 0, sizeof(sCCProfile));
+    sCCProfileStarted = now;
+}
+
+static void ccProfileRecord(CCProfileBucket bucket, CFTimeInterval started) {
+    if (!LGDebugLoggingEnabled()) return;
+    CFTimeInterval elapsed = CACurrentMediaTime() - started;
+    sCCProfile[bucket].calls++;
+    sCCProfile[bucket].total += elapsed;
+    sCCProfile[bucket].peak = MAX(sCCProfile[bucket].peak, elapsed);
+    ccProfileReport(NO);
+}
+
 static UIView *ccModuleAncestor(UIView *v) {
     for (UIView *a = v.superview; a; a = a.superview)
         if (isExactClass(a, @"CCUIContentModuleContainerView")) return a;
@@ -357,7 +405,7 @@ static UIView *ccFullscreenDimView(UIView *backdropMaterial, BOOL create) {
 
 #pragma mark - fullscreen backdrop diagnostics
 
-static void ccApplyFullscreenBackdropStyle(UIView *overlayRoot) {
+static void ccApplyFullscreenBackdropStyleImpl(UIView *overlayRoot) {
     if (!overlayRoot) return;
     [ccOverlayRoots() addObject:overlayRoot];
 
@@ -430,7 +478,13 @@ static void ccApplyFullscreenBackdropStyle(UIView *overlayRoot) {
     dimView.hidden = NO;
 }
 
-static void ccSyncFullscreenDimForRoot(UIView *overlayRoot) {
+static void ccApplyFullscreenBackdropStyle(UIView *overlayRoot) {
+    CFTimeInterval started = CACurrentMediaTime();
+    ccApplyFullscreenBackdropStyleImpl(overlayRoot);
+    ccProfileRecord(CCProfileFullscreen, started);
+}
+
+static void ccSyncFullscreenDimForRootImpl(UIView *overlayRoot) {
     if (!overlayRoot) return;
 
     UIView *backdropMaterial = objc_getAssociatedObject(overlayRoot, kCCFullscreenMaterialKey);
@@ -462,6 +516,12 @@ static void ccSyncFullscreenDimForRoot(UIView *overlayRoot) {
     }
 
     dimView.alpha = targetAlpha * progress;
+}
+
+static void ccSyncFullscreenDimForRoot(UIView *overlayRoot) {
+    CFTimeInterval started = CACurrentMediaTime();
+    ccSyncFullscreenDimForRootImpl(overlayRoot);
+    ccProfileRecord(CCProfileDimSync, started);
 }
 
 static void ccSetFullscreenDimAlpha(UIView *overlayRoot, CGFloat alpha) {
@@ -553,6 +613,7 @@ static void ccScheduleFullscreenBackdropStyle(UIView *overlayRoot) {
 static void *kCCRoundOriginalRadiusKey = &kCCRoundOriginalRadiusKey;
 static void *kCCRoundOriginalCurveKey = &kCCRoundOriginalCurveKey;
 static void *kCCRoundOriginalMasksKey = &kCCRoundOriginalMasksKey;
+static void *kCCRoundDesiredRadiusKey = &kCCRoundDesiredRadiusKey;
 static NSHashTable<UIView *> *sCCRoundedViews;
 
 static NSHashTable<UIView *> *ccRoundedViews(void) {
@@ -583,6 +644,8 @@ static void ccRestoreRoundState(UIView *view) {
     NSNumber *masks = objc_getAssociatedObject(view, kCCRoundOriginalMasksKey);
     if (!radius || !curve || !masks) return;
 
+    objc_setAssociatedObject(view.layer, kCCRoundDesiredRadiusKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
     view.layer.cornerRadius = radius.doubleValue;
     view.layer.cornerCurve = curve == [NSNull null] ? nil : curve;
     view.layer.masksToBounds = masks.boolValue;
@@ -610,6 +673,8 @@ static void lgRound(UIView *v, CGFloat r) {
     }
 
     ccRememberOriginalRoundState(v);
+    objc_setAssociatedObject(v.layer, kCCRoundDesiredRadiusKey, @(r),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     if (fabs(v.layer.cornerRadius - r) > 0.5) v.layer.cornerRadius = r;
     v.layer.cornerCurve   = kCACornerCurveContinuous;
     v.layer.masksToBounds = YES;
@@ -699,7 +764,7 @@ static void ccRoundMaterialsInSubtree(UIView *view, CGFloat radius,
     }
 }
 
-static void roundSliderMaterials(UIView *slider) {
+static void roundSliderMaterialsImpl(UIView *slider) {
     BOOL eligible = !ccHasSBElasticHierarchy(slider);
 
     CGFloat radius = ccPillRadius(slider);
@@ -715,6 +780,12 @@ static void roundSliderMaterials(UIView *slider) {
     }
 }
 
+static void roundSliderMaterials(UIView *slider) {
+    CFTimeInterval started = CACurrentMediaTime();
+    roundSliderMaterialsImpl(slider);
+    ccProfileRecord(CCProfileSliderRound, started);
+}
+
 static void roundToggleFills(UIView *buttonModule) {
     UIView *module = ccModuleAncestor(buttonModule);
     BOOL eligible = module && ccIsModuleCandidate(module) &&
@@ -725,7 +796,7 @@ static void roundToggleFills(UIView *buttonModule) {
         if (isExactClass(child, @"UIView")) ccApplyOrRestoreRound(child, r, eligible);
 }
 
-static void roundModuleContainer(UIView *module) {
+static void roundModuleContainerImpl(UIView *module) {
     if (!isExactClass(module, @"CCUIContentModuleContainerView")) return;
     BOOL eligible = ccIsModuleCandidate(module) && !ccHasSBElasticHierarchy(module);
     CGFloat r = eligible ? ccModuleCornerRadius(module) : 0.0;
@@ -736,15 +807,29 @@ static void roundModuleContainer(UIView *module) {
             ccApplyOrRestoreRound(sub, r, eligible);
 }
 
-static void ccRefreshContentContainerGlass(UIView *container) {
+static void roundModuleContainer(UIView *module) {
+    CFTimeInterval started = CACurrentMediaTime();
+    roundModuleContainerImpl(module);
+    ccProfileRecord(CCProfileModuleRound, started);
+}
+
+static void ccRefreshContentContainerGlassImpl(UIView *container) {
     for (UIView *material in container.subviews) {
         if (!isExactClass(material, @"MTMaterialView") ||
             !LGMaterialHasGlass(material, kGlassKey)) continue;
         CGFloat radius = ccGlassRadiusForMaterial(material);
-        if (radius >= 0.0)
+        if (radius >= 0.0) {
+            ccApplyOrRestoreRound(material, radius, YES);
             LGInstallRegisteredGlassInMaterial(material, kGlassKey, @"ControlCenter",
                                                UIEdgeInsetsZero, radius, nil);
+        }
     }
+}
+
+static void ccRefreshContentContainerGlass(UIView *container) {
+    CFTimeInterval started = CACurrentMediaTime();
+    ccRefreshContentContainerGlassImpl(container);
+    ccProfileRecord(CCProfileGlassRefresh, started);
 }
 
 #pragma mark - hooks
@@ -807,6 +892,7 @@ static void ccRefreshContentContainerGlass(UIView *container) {
     %orig;
     UIView *root = ((UIViewController *)self).view;
     ccApplyFullscreenBackdropStyle(root);
+    ccProfileReport(YES);
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
@@ -857,6 +943,11 @@ static void ccRefreshContentContainerGlass(UIView *container) {
 
 %hook CALayer
 
+- (void)setCornerRadius:(CGFloat)radius {
+    NSNumber *desired = objc_getAssociatedObject(self, kCCRoundDesiredRadiusKey);
+    %orig(desired ? desired.doubleValue : radius);
+}
+
 - (void)setFilters:(NSArray *)filters {
     UIView *overlayRoot = nil;
     CGFloat incomingBlurRadius = -1.0;
@@ -901,6 +992,22 @@ static void ccRefreshContentContainerGlass(UIView *container) {
 - (void)addAnimation:(CAAnimation *)animation forKey:(NSString *)key {
     if (ccObjectHasBlurCap(self) && lgHostEnabled(@"ControlCenter")) {
         ccClampBlurAnimation(animation, ccFullscreenBlurRadius());
+    }
+    NSNumber *desired = objc_getAssociatedObject(self, kCCRoundDesiredRadiusKey);
+    NSString *keyPath = [animation respondsToSelector:@selector(keyPath)]
+        ? [(id)animation keyPath] : nil;
+    if (desired && [keyPath isEqualToString:@"cornerRadius"]) {
+        if ([animation isKindOfClass:CABasicAnimation.class]) {
+            CABasicAnimation *basic = (CABasicAnimation *)animation;
+            basic.fromValue = desired;
+            basic.toValue = desired;
+            basic.byValue = nil;
+        } else if ([animation isKindOfClass:CAKeyframeAnimation.class]) {
+            CAKeyframeAnimation *keyframe = (CAKeyframeAnimation *)animation;
+            NSMutableArray *values = [NSMutableArray arrayWithCapacity:keyframe.values.count];
+            for (__unused id value in keyframe.values) [values addObject:desired];
+            keyframe.values = values;
+        }
     }
     %orig(animation, key);
 }

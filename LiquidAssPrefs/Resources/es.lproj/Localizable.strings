@@ -152,8 +152,8 @@
 "prefs.surface.tab_bar.title" = "Tab Bar";
 "prefs.surface.tab_bar_selection.title" = "Selection Lens";
 "prefs.surface.global_controls.title" = "Controls";
-"prefs.global_controls.exclusions.title" = "Exclusion List";
-"prefs.global_controls.exclusions.subtitle" = "Skip custom controls in matching bundle IDs or executable names.";
+"prefs.global_controls.exclusions.title" = "Excluded Apps";
+"prefs.global_controls.exclusions.subtitle" = "Choose apps that should keep their stock controls.";
 "prefs.global_controls.exclusions.body" = "Enter one bundle ID or executable name per line. Changes apply after reopening the affected app.";
 "prefs.global_controls.exclusions.placeholder" = "com.example.app\nExampleExecutable";
 "prefs.global_controls.section.title" = "Custom Controls";
@@ -219,8 +219,8 @@
 "prefs.misc.exit_safe_mode.subtitle" = "Exit Liquid (Gl)ass safe mode if active.";
 "prefs.rwb.restart_required.title" = "Restart Required";
 "prefs.rwb.restart_required.body" = "Return to the Liquid (Gl)ass settings home page and tap Restart System UI. This refreshes backboardd, SpringBoard, and the required widget rendering service.";
-"prefs.tab_bar.exclusions.title" = "Exclusion List";
-"prefs.tab_bar.exclusions.subtitle" = "Skip tab bars in matching bundle IDs or executable names.";
+"prefs.tab_bar.exclusions.title" = "Excluded Apps";
+"prefs.tab_bar.exclusions.subtitle" = "Choose apps that should keep their stock tab bar.";
 "prefs.tab_bar.exclusions.body" = "Enter one bundle ID or executable name per line. Changes apply after reopening the affected app.";
 "prefs.tab_bar.exclusions.placeholder" = "com.example.app\nExampleExecutable";
 "prefs.control.keyboard_key_radius" = "Key Corner Radius";
@@ -253,3 +253,18 @@
 "prefs.renderer.profile.classic" = "Classic / Compatible";
 "prefs.renderer.profile.enhanced" = "Enhanced / High Quality";
 "prefs.renderer.profile.restart_body" = "Changing the rendering mode requires restarting System UI. Only one renderer runs on each glass surface.";
+
+"prefs.button.more" = "More";
+"prefs.misc.rwb_third_party.subtitle" = "Enter widget bundle ids for the RWB allowlist.";
+"prefs.surface.assistive_touch.title" = "AssistiveTouch";
+"prefs.surface.assistive_touch.subtitle" = "Customize AssistiveTouch liquid glass button";
+"prefs.surface.volume_hud.title" = "Volume HUD";
+"prefs.surface.volume_hud.subtitle" = "Sidebar elastic volume slider";
+"prefs.surface.pill_hud.title" = "Pill HUDs";
+"prefs.surface.pill_hud.subtitle" = "Mute, ringer, and DND alert pills";
+"prefs.control.keyboard_custom_font" = "Custom Font";
+"prefs.subtitle.keyboard_custom_font" = "Use the bundled SF Compact font for keyboard keys.";
+"prefs.misc.support.title" = "Join our Support Server";
+"prefs.misc.support.subtitle" = "Get help and updates on Discord";
+"prefs.control.clock_fps_limit" = "FPS Limit";
+"prefs.subtitle.clock_fps_limit" = "Limits clock animation updates.";

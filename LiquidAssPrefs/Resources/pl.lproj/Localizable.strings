@@ -150,8 +150,8 @@
 "prefs.misc.settings_controls.title" = "Ustawienia iOS 26";
 "prefs.misc.settings_controls.subtitle" = "Próbuje odtworzyć doświadczenie aplikacji Ustawienia iOS 26.";
 "prefs.surface.global_controls.title" = "Sterowanie";
-"prefs.global_controls.exclusions.title" = "Lista wykluczeń";
-"prefs.global_controls.exclusions.subtitle" = "Pomiń niestandardowe sterowanie dla pasujących identyfikatorów bundle lub nazw plików wykonywalnych.";
+"prefs.global_controls.exclusions.title" = "Wykluczone aplikacje";
+"prefs.global_controls.exclusions.subtitle" = "Wybierz aplikacje, które mają zachować standardowe elementy sterujące.";
 "prefs.global_controls.exclusions.body" = "Wprowadź jeden identyfikator bundle lub nazwę pliku wykonywalnego w wierszu. Zmiany są stosowane po ponownym otwarciu dotkniętej aplikacji.";
 "prefs.global_controls.exclusions.placeholder" = "com.example.app\nExampleExecutable";
 "prefs.global_controls.section.title" = "Niestandardowe sterowanie";
@@ -213,8 +213,8 @@
 "prefs.misc.exit_safe_mode.subtitle" = "Exit Liquid (Gl)ass safe mode if active.";
 "prefs.rwb.restart_required.title" = "Restart Required";
 "prefs.rwb.restart_required.body" = "Return to the Liquid (Gl)ass settings home page and tap Restart System UI. This refreshes backboardd, SpringBoard, and the required widget rendering service.";
-"prefs.tab_bar.exclusions.title" = "Exclusion List";
-"prefs.tab_bar.exclusions.subtitle" = "Skip tab bars in matching bundle IDs or executable names.";
+"prefs.tab_bar.exclusions.title" = "Wykluczone aplikacje";
+"prefs.tab_bar.exclusions.subtitle" = "Wybierz aplikacje, które mają zachować standardowy pasek kart.";
 "prefs.tab_bar.exclusions.body" = "Enter one bundle ID or executable name per line. Changes apply after reopening the affected app.";
 "prefs.tab_bar.exclusions.placeholder" = "com.example.app\nExampleExecutable";
 "prefs.control.keyboard_key_radius" = "Key Corner Radius";
@@ -247,3 +247,18 @@
 "prefs.renderer.profile.classic" = "Classic / Compatible";
 "prefs.renderer.profile.enhanced" = "Enhanced / High Quality";
 "prefs.renderer.profile.restart_body" = "Changing the rendering mode requires restarting System UI. Only one renderer runs on each glass surface.";
+
+"prefs.button.more" = "Więcej";
+"prefs.misc.rwb_third_party.subtitle" = "Wprowadź identyfikatory bundle widgetów na listę dozwolonych RWB.";
+"prefs.surface.assistive_touch.title" = "AssistiveTouch";
+"prefs.surface.assistive_touch.subtitle" = "Customize AssistiveTouch liquid glass button";
+"prefs.surface.volume_hud.title" = "Volume HUD";
+"prefs.surface.volume_hud.subtitle" = "Sidebar elastic volume slider";
+"prefs.surface.pill_hud.title" = "Pill HUDs";
+"prefs.surface.pill_hud.subtitle" = "Mute, ringer, and DND alert pills";
+"prefs.control.keyboard_custom_font" = "Custom Font";
+"prefs.subtitle.keyboard_custom_font" = "Use the bundled SF Compact font for keyboard keys.";
+"prefs.misc.support.title" = "Join our Support Server";
+"prefs.misc.support.subtitle" = "Get help and updates on Discord";
+"prefs.control.clock_fps_limit" = "FPS Limit";
+"prefs.subtitle.clock_fps_limit" = "Limits clock animation updates.";

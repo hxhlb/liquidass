@@ -538,7 +538,7 @@ static void LGSettingsSwitchScheduleAutoContract(LGPrefsLiquidSwitch *self_) {
 
 - (void)handleDisplayLink:(CADisplayLink *)link {
     LGRecordSwitchLifecycle(@"tick", self);
-    // scrolling cancels physics so reused cells stay cheap
+
     if (LGSwitchAncestorIsScrolling(self)) {
         self.pressed = NO;
         self.dragMoved = NO;

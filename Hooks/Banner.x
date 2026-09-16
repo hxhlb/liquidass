@@ -1,7 +1,33 @@
 #import <UIKit/UIKit.h>
 #import "../Shared/LGLiveBackdropView.h"
 #import "../Shared/LGGlassKit.h"
+#import "../Shared/LGSharedSupport.h"
 #import <objc/runtime.h>
+
+typedef struct {
+    NSUInteger calls;
+    CFTimeInterval total;
+    CFTimeInterval peak;
+    CFTimeInterval started;
+} LGNotificationProfile;
+
+static LGNotificationProfile sLGNotificationProfile;
+
+static void LGNotificationProfileSample(CFTimeInterval elapsed) {
+    if (!LGDebugLoggingEnabled()) return;
+    CFTimeInterval now = CACurrentMediaTime();
+    if (sLGNotificationProfile.started == 0.0) sLGNotificationProfile.started = now;
+    sLGNotificationProfile.calls++;
+    sLGNotificationProfile.total += elapsed;
+    sLGNotificationProfile.peak = MAX(sLGNotificationProfile.peak, elapsed);
+    if (now - sLGNotificationProfile.started < 1.0) return;
+    LGLog(@"[NOTIFPROF] materialUpdates=%lu avg=%.3fms total=%.3fms peak=%.3fms",
+          (unsigned long)sLGNotificationProfile.calls,
+          sLGNotificationProfile.total * 1000.0 / MAX((NSUInteger)1, sLGNotificationProfile.calls),
+          sLGNotificationProfile.total * 1000.0,
+          sLGNotificationProfile.peak * 1000.0);
+    sLGNotificationProfile = (LGNotificationProfile){ .started = now };
+}
 
 static BOOL LGHasMaterialAncestorBefore(UIView *material, NSString *stopClassName) {
     Class stopCls = NSClassFromString(stopClassName);
@@ -181,6 +207,7 @@ static void LGUpdatePlatterGlass(UIView *material) {
     // one platter class serves banners notifications and action buttons
 
     if (!material.window) return;
+    CFTimeInterval start = CACurrentMediaTime();
 
     if (LGIsPlatterMaterial(material)) {
         BOOL topBanner = LGIsTopBannerPresentation(material);
@@ -201,6 +228,7 @@ static void LGUpdatePlatterGlass(UIView *material) {
                                            UIEdgeInsetsZero,
                                            LGActionButtonRadius(material), nil);
     }
+    LGNotificationProfileSample(CACurrentMediaTime() - start);
 }
 
 %hook MTMaterialView

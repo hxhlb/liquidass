@@ -47,7 +47,11 @@ typedef struct {
     X(TabBarSelection,"dylv.liquidglass.tabbarselect", "TabBarSelection",0.50f,         0.50f,                         18.0f, 2.2f, 1.75f, 0.0f, 1.0f,  0.0f, "#FFFFFF1A", "#FFFFFF14") \
     X(Keyboard,       "dylv.liquidglass.keyboard",     "Keyboard",      0.00f,          (28.0f / 220.0f) * 1.8f,       20.0f, 1.9f, 1.60f, 8.0f, 0.00f,  0.0f, "#FFFFFFCC", "#0000004d") \
     X(AppIcons,       "dylv.liquidglass.appicons",     "AppIcons",      28.0f / 220.0f, (28.0f / 220.0f) * 1.8f,       18.0f, 2.6f, 1.85f, 1.0f, 1.0f,  0.0f, "#FFFFFF1A", "#00000000") \
-    X(DynamicIsland,  "dylv.liquidglass.island",       "DynamicIsland", 28.0f / 220.0f, (28.0f / 220.0f) * 1.8f,       20.0f, 2.2f, 1.60f, 1.0f, 1.0f,  0.0f, "#FFFFFF00", "#00000000")
+    X(DynamicIsland,  "dylv.liquidglass.island",       "DynamicIsland", 28.0f / 220.0f, (28.0f / 220.0f) * 1.8f,       20.0f, 2.2f, 1.60f, 1.0f, 1.0f,  0.0f, "#FFFFFF00", "#00000000") \
+    /* New hosts use Banana ratio/thickness units until the renderer merge. */ \
+    X(AssistiveTouch, "dylv.liquidglass.assistivetouch", "AssistiveTouch",0.50f, 0.38f, 18.0f, 2.75f, 2.10f, 0.5f, 0.35f, 0.0f, "#00000000", "#00000000") \
+    X(VolumeHUD,      "dylv.liquidglass.volumehud",    "VolumeHUD",     0.50f, 0.50f, 46.67f, 3.0f, 3.20f, 5.0f, 0.35f, 1.2f, "#B8B8B8CC", "#666666CC") \
+    X(PillHUD,        "dylv.liquidglass.pillhud",      "PillHUD",       0.50f, 0.25f, 20.0f, 2.2f, 1.70f, 1.0f, 0.35f, 1.2f, "#FFFFFF1A", "#0000002E")
 
 enum LGHostIdentifier {
 #define LG_HOST_ENUM(identifier, ...) LGHostIdentifier##identifier,

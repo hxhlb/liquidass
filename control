@@ -6,7 +6,7 @@ Description: next level diarrhea
 Maintainer: dylv & banana
 Author: dylv & banana
 Section: Tweaks
-Depends: mobilesubstrate (>= 0.9.5000), firmware (>= 14.0), firmware (<< 26.0), preferenceloader
+Depends: mobilesubstrate (>= 0.9.5000), firmware (>= 14.0), firmware (<< 26.0), preferenceloader, com.opa334.altlist
 Conflicts: dylv.liquidass, dylv.liquidass.zh-hans
 Replaces: dylv.liquidass, dylv.liquidass.zh-hans
 Provides: dylv.liquidass

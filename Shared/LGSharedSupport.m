@@ -242,6 +242,33 @@ BOOL LGIsPreferencesProcess(void) {
     return [LGMainBundleIdentifier() isEqualToString:@"com.apple.Preferences"];
 }
 
+BOOL LGIsExcludedSystemProcess(void) {
+    static BOOL excluded;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSString *bundleID = (LGMainBundleIdentifier() ?: @"").lowercaseString;
+        NSString *executable = (NSBundle.mainBundle.executablePath ?: @"").lastPathComponent.lowercaseString;
+        NSString *process = (NSProcessInfo.processInfo.processName ?: @"").lowercaseString;
+        if ([bundleID isEqualToString:@"com.apple.springboard"] ||
+            [bundleID isEqualToString:@"com.apple.preferences"] ||
+            [bundleID isEqualToString:@"com.apple.mobilesafari"]) return;
+        if (!bundleID.length) {
+            excluded = YES;
+            return;
+        }
+        for (NSString *name in @[@"assistivetouchd", @"posterboard", @"posterextension",
+                                  @"wallpaper", @"widgetrenderer", @"chronod", @"backboardd",
+                                  @"sharingd", @"bluetoothd", @"wifid", @"powerlog", @"coreauthui"]) {
+            if ([bundleID containsString:name] || [executable containsString:name] ||
+                [process containsString:name]) {
+                excluded = YES;
+                return;
+            }
+        }
+    });
+    return excluded;
+}
+
 BOOL LGIsAtLeastiOS16(void) {
     static BOOL cached;
     static dispatch_once_t onceToken;

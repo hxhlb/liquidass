@@ -246,8 +246,8 @@
 "prefs.color.black" = "Black";
 "prefs.misc.exit_safe_mode.title" = "Exit Safe Mode";
 "prefs.misc.exit_safe_mode.subtitle" = "Exit Liquid (Gl)ass safe mode if active.";
-"prefs.tab_bar.exclusions.title" = "Exclusion List";
-"prefs.tab_bar.exclusions.subtitle" = "Skip tab bars in matching bundle IDs or executable names.";
+"prefs.tab_bar.exclusions.title" = "Excluded Apps";
+"prefs.tab_bar.exclusions.subtitle" = "Choose apps that should keep their stock tab bar.";
 "prefs.tab_bar.exclusions.body" = "Enter one bundle ID or executable name per line. Changes apply after reopening the affected app.";
 "prefs.tab_bar.exclusions.placeholder" = "com.example.app\nExampleExecutable";
 "prefs.control.keyboard_key_radius" = "Key Corner Radius";
@@ -266,3 +266,23 @@
 "prefs.renderer.profile.classic" = "經典 / 相容";
 "prefs.renderer.profile.enhanced" = "增強 / 高畫質";
 "prefs.renderer.profile.restart_body" = "切換渲染模式後需要重新啟動系統介面。每個玻璃表面只會執行一種渲染器。";
+
+"prefs.button.more" = "More";
+"prefs.misc.rwb_third_party.subtitle" = "Enter widget bundle ids for the RWB allowlist.";
+"prefs.surface.assistive_touch.title" = "AssistiveTouch";
+"prefs.surface.assistive_touch.subtitle" = "Customize AssistiveTouch liquid glass button";
+"prefs.surface.volume_hud.title" = "Volume HUD";
+"prefs.surface.volume_hud.subtitle" = "Sidebar elastic volume slider";
+"prefs.surface.pill_hud.title" = "Pill HUDs";
+"prefs.surface.pill_hud.subtitle" = "Mute, ringer, and DND alert pills";
+"prefs.control.keyboard_custom_font" = "Custom Font";
+"prefs.subtitle.keyboard_custom_font" = "Use the bundled SF Compact font for keyboard keys.";
+"prefs.misc.support.title" = "Join our Support Server";
+"prefs.misc.support.subtitle" = "Get help and updates on Discord";
+"prefs.control.clock_fps_limit" = "FPS Limit";
+"prefs.subtitle.clock_fps_limit" = "Limits clock animation updates.";
+"prefs.clock.mode.title" = "時鐘模式";
+"prefs.clock.mode.subtitle" = "選擇玻璃時鐘的呈現方式。";
+"prefs.clock.mode.native" = "原生修改";
+"prefs.clock.mode.custom" = "自訂圖層";
+"prefs.app_list.unavailable" = "無法載入 AltList。請重新安裝 AltList 相依套件並重新開啟設定。";

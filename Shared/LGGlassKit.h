@@ -14,7 +14,7 @@ BOOL isExactClass(UIView *v, NSString *name);
 
 BOOL lgHostEnabled(NSString *prefix);
 
-BOOL LGProcessMatchesExclusionList(NSString *list);
+BOOL LGProcessMatchesExclusionList(id list);
 
 void lgObservePreferenceReload(void (^handler)(void));
 

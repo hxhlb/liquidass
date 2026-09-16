@@ -47,7 +47,7 @@ void LGPresentSliderValuePrompt(UIViewController *controller,
 void LGAnimateSliderToDefault(UISlider *slider, CGFloat targetValue, UILabel *valueLabel, NSInteger decimals);
 UIBarButtonItem *LGMakeCircularBackItem(id target, SEL action);
 void LGRefreshCircularBackItem(UIBarButtonItem *item);
-UIBarButtonItem *LGMakeCircularMenuItem(id target, SEL resetAction, NSString *resetTitle);
+UIBarButtonItem *LGMakeCircularMenuItem(id target, SEL applyAction, SEL resetAction, NSString *resetTitle);
 void LGPresentResetConfirmation(UIViewController *controller);
 void LGPresentResetConfirmationWithBody(UIViewController *controller, NSString *body, SEL resetSelector);
 void LGPresentRespringConfirmation(UIViewController *controller);
@@ -78,5 +78,5 @@ void LGPresentPreferencesExport(UIViewController *controller);
 void LGPresentDiagnosticsExport(UIViewController *controller);
 BOOL LGImportPreferencesFromURL(UIViewController *controller, NSURL *url);
 void LGPresentThirdPartyRWBEditor(UIViewController *controller);
-void LGPresentGlobalControlsExclusionEditor(UIViewController *controller);
-void LGPresentTabBarExclusionEditor(UIViewController *controller);
+void LGPresentGlobalControlsAppList(UIViewController *controller);
+void LGPresentTabBarAppList(UIViewController *controller);

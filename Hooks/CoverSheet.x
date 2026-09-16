@@ -7,6 +7,8 @@
 #import "../Shared/LGSharedSupport.h"
 #import "../Shared/LGCoverSheetState.h"
 
+extern void LGScheduleClockRecoveryRefreshForPresentationChange(void);
+
 typedef NS_ENUM(NSInteger, LGCoverSheetMode) {
     LGCoverSheetModeIdle,
     LGCoverSheetModePresentingGlass,
@@ -55,6 +57,42 @@ static UIDeviceOrientation sLGCoverSheetLastLandscapeOrientation =
     UIDeviceOrientationLandscapeLeft;
 static UIDeviceOrientation sLGCoverSheetLastPortraitOrientation =
     UIDeviceOrientationPortrait;
+
+typedef struct {
+    NSUInteger ticks;
+    NSUInteger syncs;
+    CFTimeInterval geometry;
+    CFTimeInterval tick;
+    CFTimeInterval peak;
+    CFTimeInterval started;
+} LGCoverSheetProfile;
+
+static LGCoverSheetProfile sLGCoverSheetProfile;
+
+static void LGCoverSheetProfileSample(CFTimeInterval geometry,
+                                      CFTimeInterval tick, BOOL ticked) {
+    if (!LGDebugLoggingEnabled()) return;
+    CFTimeInterval now = CACurrentMediaTime();
+    if (sLGCoverSheetProfile.started == 0.0) sLGCoverSheetProfile.started = now;
+    if (geometry > 0.0) {
+        sLGCoverSheetProfile.syncs++;
+        sLGCoverSheetProfile.geometry += geometry;
+        sLGCoverSheetProfile.peak = MAX(sLGCoverSheetProfile.peak, geometry);
+    }
+    if (ticked) {
+        sLGCoverSheetProfile.ticks++;
+        sLGCoverSheetProfile.tick += tick;
+    }
+    if (now - sLGCoverSheetProfile.started < 1.0) return;
+    LGLog(@"[CSPROF] ticks=%lu syncs=%lu geometryAvg=%.3fms geometryTotal=%.3fms tickAvg=%.3fms peak=%.3fms",
+          (unsigned long)sLGCoverSheetProfile.ticks,
+          (unsigned long)sLGCoverSheetProfile.syncs,
+          sLGCoverSheetProfile.geometry * 1000.0 / MAX((NSUInteger)1, sLGCoverSheetProfile.syncs),
+          sLGCoverSheetProfile.geometry * 1000.0,
+          sLGCoverSheetProfile.tick * 1000.0 / MAX((NSUInteger)1, sLGCoverSheetProfile.ticks),
+          sLGCoverSheetProfile.peak * 1000.0);
+    sLGCoverSheetProfile = (LGCoverSheetProfile){ .started = now };
+}
 
 static void LGCoverSheetLogOrientation(UIView *view,
                                        UIDeviceOrientation resolved,
@@ -776,6 +814,7 @@ static LGLiveBackdropView *LGCoverSheetEnsureGlass(UIView *panel) {
 static void LGCoverSheetSyncGlassGeometry(UIView *panel,
                                           LGLiveBackdropView *glass) {
     if (!panel || !glass || glass.superview != panel.superview) return;
+    CFTimeInterval profileStart = CACurrentMediaTime();
 
     // presentation geometry keeps the glass attached during interactive pulls
     CALayer *modelLayer = panel.layer;
@@ -788,6 +827,10 @@ static void LGCoverSheetSyncGlassGeometry(UIView *panel,
 
         sourceLayer = modelLayer;
     }
+    BOOL moved = !CGRectEqualToRect(glass.layer.bounds, sourceLayer.bounds) ||
+                 !CGPointEqualToPoint(glass.layer.position, sourceLayer.position) ||
+                 !CATransform3DEqualToTransform(glass.layer.transform,
+                                                sourceLayer.transform);
 
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
@@ -796,6 +839,7 @@ static void LGCoverSheetSyncGlassGeometry(UIView *panel,
     glass.layer.position = sourceLayer.position;
     glass.layer.transform = sourceLayer.transform;
     [CATransaction commit];
+    if (moved) LGScheduleClockRecoveryRefreshForPresentationChange();
     if (LGCoverSheetModeUsesGlass(sLGCoverSheetMode) &&
         [NSThread isMainThread]) {
         [CATransaction flush];
@@ -831,6 +875,7 @@ static void LGCoverSheetSyncGlassGeometry(UIView *panel,
             height > 0.0 ? captureOrigin.y / height : 0.0,
             scale, (uint32_t)deviceOrientation);
     }
+    LGCoverSheetProfileSample(CACurrentMediaTime() - profileStart, 0.0, NO);
 }
 
 @interface LGCoverSheetDisplayLinkTarget : NSObject
@@ -841,6 +886,7 @@ static void LGCoverSheetSyncGlassGeometry(UIView *panel,
 - (void)lg_coverSheetDisplayLinkTick:(CADisplayLink *)displayLink {
     (void)displayLink;
     if (!LGCoverSheetModeUsesGlass(sLGCoverSheetMode)) return;
+    CFTimeInterval start = CACurrentMediaTime();
     for (UIView *panel in sLGCoverSheetPanels.allObjects) {
         LGLiveBackdropView *glass =
             objc_getAssociatedObject(panel, kLGCoverSheetGlassKey);
@@ -848,6 +894,7 @@ static void LGCoverSheetSyncGlassGeometry(UIView *panel,
             LGCoverSheetSyncGlassGeometry(panel, glass);
         }
     }
+    LGCoverSheetProfileSample(0.0, CACurrentMediaTime() - start, YES);
 }
 @end
 

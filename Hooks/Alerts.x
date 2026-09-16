@@ -23,6 +23,14 @@ static BOOL LGAlertsEnabled(void) {
     return lgHostEnabled(@"Alerts");
 }
 
+static BOOL LGAlertViewUsesAlertStyle(UIView *view) {
+    for (UIResponder *responder = view; responder; responder = responder.nextResponder) {
+        if ([responder isKindOfClass:UIAlertController.class])
+            return ((UIAlertController *)responder).preferredStyle == UIAlertControllerStyleAlert;
+    }
+    return NO;
+}
+
 static UIView *LGAlertFindViewWithClassPrefix(UIView *view, NSString *prefix) {
     if (!view) return nil;
     NSString *className = NSStringFromClass(view.class);
@@ -338,7 +346,7 @@ static void LGAlertScheduleHeaderStyle(UIView *headerScrollView) {
 }
 
 static void LGAlertStyleHeaderLabels(UIView *headerScrollView) {
-    if (!LGAlertsEnabled()) return;
+    if (!LGAlertsEnabled() || !LGAlertViewUsesAlertStyle(headerScrollView)) return;
     for (UIView *child in headerScrollView.subviews) {
         NSMutableArray<UILabel *> *labels = [NSMutableArray array];
         for (UIView *grandchild in child.subviews) {
@@ -463,7 +471,8 @@ static UIColor *LGAlertActionBackgroundColor(UIView *view, BOOL highlighted) {
 }
 
 static void LGAlertStyleActionRepresentation(UIView *representation) {
-    if (!LGAlertsEnabled() || !representation.window) return;
+    if (!LGAlertsEnabled() || !representation.window ||
+        !LGAlertViewUsesAlertStyle(representation)) return;
     UIView *background =
         objc_getAssociatedObject(representation, kLGAlertActionBackgroundKey);
     if (!background) {
@@ -698,19 +707,19 @@ static void LGAlertProbeHierarchy(UIAlertController *controller, NSString *reaso
 
 - (CGSize)intrinsicContentSize {
     CGSize size = %orig;
-    if (LGAlertsEnabled()) size.height = 48.0;
+    if (LGAlertsEnabled() && LGAlertViewUsesAlertStyle((UIView *)self)) size.height = 48.0;
     return size;
 }
 
 - (CGSize)sizeThatFits:(CGSize)size {
     CGSize fitted = %orig;
-    if (LGAlertsEnabled()) fitted.height = 48.0;
+    if (LGAlertsEnabled() && LGAlertViewUsesAlertStyle((UIView *)self)) fitted.height = 48.0;
     return fitted;
 }
 
 %new
 - (void)lg_alertActionPressChanged:(UILongPressGestureRecognizer *)gesture {
-    if (!LGAlertsEnabled()) return;
+    if (!LGAlertsEnabled() || !LGAlertViewUsesAlertStyle((UIView *)self)) return;
     UIView *view = (UIView *)self;
     CGPoint point = [gesture locationInView:view];
     BOOL active = (gesture.state == UIGestureRecognizerStateBegan ||
@@ -723,7 +732,7 @@ static void LGAlertProbeHierarchy(UIAlertController *controller, NSString *reaso
 
 %new
 - (void)lg_alertActionHoverChanged:(UIHoverGestureRecognizer *)gesture {
-    if (!LGAlertsEnabled()) return;
+    if (!LGAlertsEnabled() || !LGAlertViewUsesAlertStyle((UIView *)self)) return;
     CGFloat opacity = gesture.state == UIGestureRecognizerStateBegan ||
                       gesture.state == UIGestureRecognizerStateChanged
         ? 0.25 : 1.0;
@@ -740,7 +749,7 @@ static void LGAlertProbeHierarchy(UIAlertController *controller, NSString *reaso
 - (void)didMoveToWindow {
     %orig;
     UIView *view = (UIView *)self;
-    if (!LGAlertsEnabled()) return;
+    if (!LGAlertsEnabled() || !LGAlertViewUsesAlertStyle(view)) return;
     if (view.window) {
         LGAlertInvalidateActionHierarchy(view);
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -774,7 +783,7 @@ static void LGAlertProbeHierarchy(UIAlertController *controller, NSString *reaso
 
 - (void)layoutSubviews {
     %orig;
-    if (LGAlertsEnabled()) LGAlertStyleActionRepresentation((UIView *)self);
+    LGAlertStyleActionRepresentation((UIView *)self);
 }
 
 %end
@@ -783,7 +792,7 @@ static void LGAlertProbeHierarchy(UIAlertController *controller, NSString *reaso
 
 - (void)layoutSubviews {
     %orig;
-    if (LGAlertsEnabled())
+    if (LGAlertsEnabled() && LGAlertViewUsesAlertStyle((UIView *)self))
         LGAlertSuppressNativeActionHighlight((UIView *)self);
 }
 
@@ -793,7 +802,7 @@ static void LGAlertProbeHierarchy(UIAlertController *controller, NSString *reaso
 
 - (void)didMoveToWindow {
     %orig;
-    if (LGAlertsEnabled() &&
+    if (LGAlertsEnabled() && LGAlertViewUsesAlertStyle((UIView *)self) &&
         LGAlertViewIsInsideControllerChrome((UIView *)self)) {
         ((UIView *)self).hidden = YES;
         ((UIView *)self).alpha = 0.0;
@@ -802,7 +811,7 @@ static void LGAlertProbeHierarchy(UIAlertController *controller, NSString *reaso
 
 - (void)layoutSubviews {
     %orig;
-    if (LGAlertsEnabled() &&
+    if (LGAlertsEnabled() && LGAlertViewUsesAlertStyle((UIView *)self) &&
         LGAlertViewIsInsideControllerChrome((UIView *)self)) {
         ((UIView *)self).hidden = YES;
         ((UIView *)self).alpha = 0.0;
@@ -810,13 +819,13 @@ static void LGAlertProbeHierarchy(UIAlertController *controller, NSString *reaso
 }
 
 - (void)setHidden:(BOOL)hidden {
-    if (LGAlertsEnabled() &&
+    if (LGAlertsEnabled() && LGAlertViewUsesAlertStyle((UIView *)self) &&
         LGAlertViewIsInsideControllerChrome((UIView *)self)) hidden = YES;
     %orig(hidden);
 }
 
 - (void)setAlpha:(CGFloat)alpha {
-    if (LGAlertsEnabled() &&
+    if (LGAlertsEnabled() && LGAlertViewUsesAlertStyle((UIView *)self) &&
         LGAlertViewIsInsideControllerChrome((UIView *)self)) alpha = 0.0;
     %orig(alpha);
 }
@@ -827,14 +836,14 @@ static void LGAlertProbeHierarchy(UIAlertController *controller, NSString *reaso
 
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    if (LGAlertsEnabled())
+    if (LGAlertsEnabled() && self.preferredStyle == UIAlertControllerStyleAlert)
         LGAlertProbeHierarchy((UIAlertController *)self, @"appear");
     LGAlertInstallNativeGlass((UIAlertController *)self);
 }
 
 - (void)viewDidLayoutSubviews {
     %orig;
-    if (LGAlertsEnabled() &&
+    if (LGAlertsEnabled() && self.preferredStyle == UIAlertControllerStyleAlert &&
         !LGAlertStockChromeView(((UIAlertController *)self).view))
         LGAlertProbeHierarchy((UIAlertController *)self, @"missing-chrome");
     LGAlertInstallNativeGlass((UIAlertController *)self);

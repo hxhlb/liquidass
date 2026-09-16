@@ -25,15 +25,21 @@ BOOL isExactClass(UIView *v, NSString *name) {
 
 #pragma mark - per-host enable prefs
 
-BOOL LGProcessMatchesExclusionList(NSString *list) {
-    if (!list.length) return NO;
+BOOL LGProcessMatchesExclusionList(id list) {
     NSString *bundleID = NSBundle.mainBundle.bundleIdentifier.lowercaseString ?: @"";
+    if ([list isKindOfClass:NSArray.class]) {
+        for (id entry in (NSArray *)list)
+            if ([entry isKindOfClass:NSString.class] && LGProcessMatchesExclusionList(entry))
+                return YES;
+        return NO;
+    }
+    if (![list isKindOfClass:NSString.class] || ![list length]) return NO;
     NSString *executable =
         NSBundle.mainBundle.executablePath.lastPathComponent.lowercaseString ?: @"";
     NSString *processName = NSProcessInfo.processInfo.processName.lowercaseString ?: @"";
     NSCharacterSet *separators =
         [NSCharacterSet characterSetWithCharactersInString:@"\n,;"];
-    for (NSString *rawEntry in [list componentsSeparatedByCharactersInSet:separators]) {
+    for (NSString *rawEntry in [(NSString *)list componentsSeparatedByCharactersInSet:separators]) {
         NSString *entry = [rawEntry stringByTrimmingCharactersInSet:
             NSCharacterSet.whitespaceAndNewlineCharacterSet].lowercaseString;
         if (!entry.length || [entry hasPrefix:@"#"]) continue;

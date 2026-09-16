@@ -92,8 +92,16 @@ def main():
         source += function(widgets, signature)
     for path in ["LiquidAssRWB/Tweak.x", "Shared/LGSharedSupport.h", "Shared/LGSharedSupport.m"]:
         baseline = subprocess.check_output(["git", "show", "3d237d6:" + path], cwd=ROOT)
-        assert (ROOT / path).read_bytes() == baseline, f"rollback mismatch: {path}"
-    print("PASS renderer and shared support exactly match widgets1")
+        current = (ROOT / path).read_bytes()
+        # The upstream process exclusion helper is independent of widget removal.
+        # Strip only that addition; all pre-existing shared behavior stays locked.
+        if path.endswith("LGSharedSupport.h"):
+            current = current.replace(b"BOOL LGIsExcludedSystemProcess(void);\n", b"")
+        elif path.endswith("LGSharedSupport.m"):
+            added = function(current.decode(), "BOOL LGIsExcludedSystemProcess(void)")
+            current = current.replace((added + "\n\n").encode(), b"")
+        assert current == baseline, f"rollback mismatch: {path}"
+    print("PASS widget renderer and existing shared support match widgets1")
     with tempfile.TemporaryDirectory(prefix="liquidass-widget-background-") as tmp:
         test, binary = Path(tmp)/"test.m", Path(tmp)/"test"
         test.write_text(source + checks)

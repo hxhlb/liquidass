@@ -62,12 +62,32 @@ static NSArray<NSString *> *LGExportablePreferenceKeys(void) {
 
 static NSBundle *LGActiveLocalizationBundle(void) {
     NSString *languageCode = [LGPrefsUIStateDefaults() stringForKey:kLGPrefsLanguageKey];
+    if (!languageCode.length) {
+        for (NSString *pref in [NSLocale preferredLanguages]) {
+            NSString *canon = [NSLocale canonicalLanguageIdentifierFromString:pref] ?: pref;
+            if ([canon hasPrefix:@"he"] || [canon hasPrefix:@"iw"]) {
+                languageCode = @"he";
+                break;
+            }
+        }
+    }
     NSBundle *baseBundle = [NSBundle bundleForClass:[LGPRootListController class]];
     if (!languageCode.length || [languageCode isEqualToString:@"en"]) {
         return baseBundle;
     }
 
     NSString *bundlePath = [baseBundle pathForResource:languageCode ofType:@"lproj"];
+    if (!bundlePath.length && baseBundle.bundlePath.length) {
+        NSString *direct = [baseBundle.bundlePath stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.lproj", languageCode]];
+        if ([[NSFileManager defaultManager] fileExistsAtPath:direct]) {
+            bundlePath = direct;
+        } else if ([languageCode isEqualToString:@"he"]) {
+            NSString *iw = [baseBundle.bundlePath stringByAppendingPathComponent:@"iw.lproj"];
+            if ([[NSFileManager defaultManager] fileExistsAtPath:iw]) {
+                bundlePath = iw;
+            }
+        }
+    }
     if (!bundlePath.length) {
         return baseBundle;
     }
@@ -79,6 +99,9 @@ static NSBundle *LGActiveLocalizationBundle(void) {
 static NSString *LGDisplayNameForLanguageCode(NSString *languageCode) {
     if (!languageCode.length) return @"";
     if ([languageCode isEqualToString:@"en"]) return @"English";
+    if ([languageCode isEqualToString:@"he"] || [languageCode isEqualToString:@"iw"]) {
+        return @"עברית (Hebrew)";
+    }
 
     NSLocale *displayLocale = [NSLocale currentLocale];
     NSString *localeIdentifier = [NSLocale canonicalLocaleIdentifierFromString:languageCode];
@@ -99,11 +122,48 @@ static NSArray<NSDictionary *> *LGAvailableLanguageChoices(void) {
     dispatch_once(&onceToken, ^{
         NSBundle *baseBundle = [NSBundle bundleForClass:[LGPRootListController class]];
         NSMutableOrderedSet<NSString *> *codes = [NSMutableOrderedSet orderedSetWithObject:@"en"];
-        for (NSString *path in [baseBundle pathsForResourcesOfType:@"lproj" inDirectory:nil]) {
-            NSString *languageCode = [[path lastPathComponent] stringByDeletingPathExtension];
-            if (languageCode.length && ![languageCode isEqualToString:@"Base"]) {
-                [codes addObject:languageCode];
+
+        // 1. Direct filesystem scan of bundle directory
+        NSString *bundlePath = baseBundle.bundlePath;
+        if (bundlePath.length) {
+            NSArray<NSString *> *items = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:bundlePath error:nil];
+            for (NSString *item in items) {
+                if ([item.pathExtension isEqualToString:@"lproj"]) {
+                    NSString *code = [item stringByDeletingPathExtension];
+                    if (code.length && ![code isEqualToString:@"Base"]) {
+                        if ([code isEqualToString:@"iw"]) code = @"he";
+                        [codes addObject:code];
+                    }
+                }
             }
+        }
+
+        // 2. Official NSBundle localizations property
+        for (NSString *loc in [baseBundle localizations]) {
+            NSString *code = loc;
+            if ([code isEqualToString:@"iw"]) code = @"he";
+            if (code.length && ![code isEqualToString:@"Base"]) {
+                [codes addObject:code];
+            }
+        }
+
+        // 3. Fallback: pathsForResourcesOfType
+        for (NSString *path in [baseBundle pathsForResourcesOfType:@"lproj" inDirectory:nil]) {
+            NSString *code = [[path lastPathComponent] stringByDeletingPathExtension];
+            if ([code isEqualToString:@"iw"]) code = @"he";
+            if (code.length && ![code isEqualToString:@"Base"]) {
+                [codes addObject:code];
+            }
+        }
+
+        // 4. Guaranteed check for Hebrew
+        NSString *hePath = [bundlePath stringByAppendingPathComponent:@"he.lproj"];
+        NSString *iwPath = [bundlePath stringByAppendingPathComponent:@"iw.lproj"];
+        if ([[NSFileManager defaultManager] fileExistsAtPath:hePath] ||
+            [[NSFileManager defaultManager] fileExistsAtPath:iwPath] ||
+            [baseBundle pathForResource:@"Localizable" ofType:@"strings" inDirectory:@"he.lproj"] ||
+            [baseBundle pathForResource:@"Localizable" ofType:@"strings" inDirectory:@"iw.lproj"]) {
+            [codes addObject:@"he"];
         }
 
         NSMutableArray<NSDictionary *> *dynamicChoices = [NSMutableArray arrayWithCapacity:codes.count];
@@ -194,7 +254,14 @@ NSString *LGPrefsAppName(void) {
 
 NSString *LGCurrentPrefsLanguageCode(void) {
     NSString *languageCode = [LGPrefsUIStateDefaults() stringForKey:kLGPrefsLanguageKey];
-    return languageCode.length ? languageCode : @"en";
+    if (languageCode.length) return languageCode;
+    for (NSString *pref in [NSLocale preferredLanguages]) {
+        NSString *code = [NSLocale canonicalLanguageIdentifierFromString:pref] ?: pref;
+        if ([code hasPrefix:@"he"] || [code hasPrefix:@"iw"]) {
+            return @"he";
+        }
+    }
+    return @"en";
 }
 
 void LGSetCurrentPrefsLanguageCode(NSString *languageCode) {
@@ -489,16 +556,19 @@ NSArray<NSDictionary *> *LGRendererItemsForHostPrefix(NSString *prefix) {
                         host->dispersionStrength, 1.0, dispersionMax, 1),
         LGGlassSpecularSetting(key(@"SpecularOpacity"), host->specularOpacity, 0.0, 1.0, 2),
         LGGlassBlurSetting(key(@"Blur"), host->blur, 0.0, 50.0, 1),
-        @{
+    ]];
+    if (![prefix isEqualToString:@"AssistiveTouch"]) {
+        [items addObject:@{
             @"type": @"color", @"key": key(@"LightTintColor"),
             @"title": LGLocalized(@"prefs.control.light_tint_color"),
             @"subtitle": LGLocalized(@"prefs.subtitle.light_tint_color"), @"default": lightTint
-        }, @{
+        }];
+        [items addObject:@{
             @"type": @"color", @"key": key(@"DarkTintColor"),
             @"title": LGLocalized(@"prefs.control.dark_tint_color"),
             @"subtitle": LGLocalized(@"prefs.subtitle.dark_tint_color"), @"default": darkTint
-        },
-    ]];
+        }];
+    }
     if ([prefix isEqualToString:@"CoverSheet"]) {
         [items insertObject:LGSliderSetting(key(@"CornerRadius"),
                                             LGLocalized(@"prefs.control.corner_radius"),
@@ -658,6 +728,10 @@ NSArray<NSDictionary *> *LGKeyboardItems(void) {
     return LGJoinItemGroups(@[
         LGRendererItemsForHostPrefix(@"Keyboard"),
         LGSettingsControlledByKey(@[
+            LGSwitchSetting(@"Keyboard.CustomFont.Enabled",
+                            LGLocalized(@"prefs.control.keyboard_custom_font"),
+                            LGLocalized(@"prefs.subtitle.keyboard_custom_font"),
+                            YES),
             LGSectionSetting(LGLocalized(@"prefs.section.keyboard_geometry.title"),
                              LGLocalized(@"prefs.section.keyboard_geometry.subtitle")),
             LGSliderSetting(@"Keyboard.CornerRadius",
@@ -857,8 +931,21 @@ static NSArray<NSDictionary *> *LGClockDateFormatItems(void) {
 }
 
 NSArray<NSDictionary *> *LGClockItems(void) {
+    NSInteger maximumFPS = UIScreen.mainScreen.maximumFramesPerSecond;
+    NSMutableArray<NSDictionary *> *rendererItems =
+        [LGRendererItemsForHostPrefix(@"Clock") mutableCopy];
+    [rendererItems insertObject:LGMenuSetting(@"Clock.RenderingMode",
+        LGLocalized(@"prefs.clock.mode.title"), LGLocalized(@"prefs.clock.mode.subtitle"),
+        @"native", @[
+            @{ @"title": LGLocalized(@"prefs.clock.mode.native"), @"value": @"native" },
+            @{ @"title": LGLocalized(@"prefs.clock.mode.custom"), @"value": @"custom" },
+        ]) atIndex:1];
+    [rendererItems insertObject:LGSliderSetting(@"Clock.FPS",
+        LGLocalized(@"prefs.control.clock_fps_limit"),
+        LGLocalized(@"prefs.subtitle.clock_fps_limit"),
+        maximumFPS, 1.0, maximumFPS, 0) atIndex:2];
     return LGJoinItemGroups(@[
-        LGRendererItemsForHostPrefix(@"Clock"),
+        rendererItems,
         LGClockVariableFontItems(),
         LGClockDateFormatItems(),
     ]);

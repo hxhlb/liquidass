@@ -6,7 +6,7 @@ CCACHE := $(shell command -v ccache 2>/dev/null)
 export TARGET_CC 	:= $(CCACHE) $(shell xcrun -f clang)
 export TARGET_CXX 	:= $(CCACHE) $(shell xcrun -f clang++)
 
-INSTALL_TARGET_PROCESSES = backboardd SpringBoard chronod WidgetRenderer-Default WidgetRenderer-CarPlay
+INSTALL_TARGET_PROCESSES = backboardd SpringBoard chronod WidgetRenderer-Default WidgetRenderer-CarPlay assistivetouchd
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = liquidass

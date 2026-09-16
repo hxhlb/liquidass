@@ -20,6 +20,7 @@ FOUNDATION_EXPORT const char * const LGChronodRestartNotificationCString;
 NSString *LGMainBundleIdentifier(void);
 BOOL LGIsSpringBoardProcess(void);
 BOOL LGIsPreferencesProcess(void);
+BOOL LGIsExcludedSystemProcess(void);
 BOOL LGIsAtLeastiOS16(void);
 BOOL LGBackboardSafeModeActive(void);
 void LGClearBackboardSafeMode(void);

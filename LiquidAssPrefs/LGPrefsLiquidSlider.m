@@ -52,8 +52,19 @@ static NSArray<NSNumber *> *LGSliderEndpointCenters(UISlider *slider) {
     return [value isKindOfClass:[NSArray class]] ? value : nil;
 }
 
+static BOOL LGSliderIsRTL(UIView *view) {
+    if (@available(iOS 9.0, *)) {
+        if (view && view.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft)
+            return YES;
+        if ([UIView userInterfaceLayoutDirectionForSemanticContentAttribute:
+                view ? view.semanticContentAttribute : UISemanticContentAttributeUnspecified] == UIUserInterfaceLayoutDirectionRightToLeft)
+            return YES;
+    }
+    return [UIApplication sharedApplication].userInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+}
+
 static CGFloat LGSliderThumbCenterXForValue(UISlider *slider, float value) {
-    // segmented and continuous tracks share one visual motion path
+
     NSInteger snapPointCount = LGSliderSnapPointCount(slider);
     NSArray<NSNumber *> *segmentCenters = LGSliderSegmentCenters(slider);
     float range = slider.maximumValue - slider.minimumValue;
@@ -77,6 +88,11 @@ static CGFloat LGSliderThumbCenterXForValue(UISlider *slider, float value) {
         CGFloat thumbWidth = kLGPrefsSliderContractedThumbWidth;
         CGFloat minCenterX = CGRectGetMinX(trackRect) + thumbWidth * 0.5;
         CGFloat maxCenterX = CGRectGetMaxX(trackRect) - thumbWidth * 0.5;
+        if (LGSliderIsRTL(slider)) {
+            CGFloat temp = minCenterX;
+            minCenterX = maxCenterX;
+            maxCenterX = temp;
+        }
         if (fabsf(range) <= FLT_EPSILON) return minCenterX;
         CGFloat normalized = (value - slider.minimumValue) / range;
         normalized = fmax(0.0, fmin(1.0, normalized));
@@ -417,22 +433,22 @@ static UIColor *LGSliderInactiveTrackColor(UITraitCollection *traitCollection) {
 }
 
 - (CGFloat)rubberBandedCenterXForTouchX:(CGFloat)touchX {
-    CGFloat minX = [self minimumThumbCenterX];
-    CGFloat maxX = [self maximumThumbCenterX];
+    CGFloat minX = fmin([self minimumThumbCenterX], [self maximumThumbCenterX]);
+    CGFloat maxX = fmax([self minimumThumbCenterX], [self maximumThumbCenterX]);
     return LGLiquidRubberBandedCenterX(touchX, minX, maxX, 1.24);
 }
 
 - (CGFloat)overshootDistanceForTouchX:(CGFloat)touchX {
-    CGFloat minX = [self minimumThumbCenterX];
-    CGFloat maxX = [self maximumThumbCenterX];
+    CGFloat minX = fmin([self minimumThumbCenterX], [self maximumThumbCenterX]);
+    CGFloat maxX = fmax([self minimumThumbCenterX], [self maximumThumbCenterX]);
     return LGLiquidOvershootDistance(touchX, minX, maxX);
 }
 
 - (void)updatePresentedThumbForTouchX:(CGFloat)touchX
                            updateValue:(BOOL)updateValue {
     // logical value stays clamped while the visible thumb can overhang
-    CGFloat minX = [self minimumThumbCenterX];
-    CGFloat maxX = [self maximumThumbCenterX];
+    CGFloat minX = fmin([self minimumThumbCenterX], [self maximumThumbCenterX]);
+    CGFloat maxX = fmax([self minimumThumbCenterX], [self maximumThumbCenterX]);
     CGFloat clampedX = fmax(minX, fmin(touchX, maxX));
     self.hasPresentedThumbCenter = YES;
     self.logicalThumbCenterX = clampedX;
@@ -445,9 +461,12 @@ static UIColor *LGSliderInactiveTrackColor(UITraitCollection *traitCollection) {
         self.rubberBandOffset = 0.0;
     }
 
-    CGFloat range = maxX - minX;
-    if (updateValue && range > 0.0) {
-        CGFloat normalized = (clampedX - minX) / range;
+    CGFloat minValX = [self minimumThumbCenterX];
+    CGFloat maxValX = [self maximumThumbCenterX];
+    CGFloat travel = maxValX - minValX;
+    if (updateValue && fabs(travel) > FLT_EPSILON) {
+        CGFloat normalized = (clampedX - minValX) / travel;
+        normalized = fmax(0.0, fmin(1.0, normalized));
         float newValue = self.minimumValue + (float)normalized * (self.maximumValue - self.minimumValue);
         if (fabs(self.value - newValue) > 0.0001f) {
             [super setValue:newValue animated:NO];
@@ -467,17 +486,35 @@ static UIColor *LGSliderInactiveTrackColor(UITraitCollection *traitCollection) {
 }
 
 - (void)updateEdgeHapticsForTouchX:(CGFloat)touchX {
-    CGFloat minX = [self minimumThumbCenterX];
-    CGFloat maxX = [self maximumThumbCenterX];
+    CGFloat minX = fmin([self minimumThumbCenterX], [self maximumThumbCenterX]);
+    CGFloat maxX = fmax([self minimumThumbCenterX], [self maximumThumbCenterX]);
+    CGFloat minValX = [self minimumThumbCenterX];
+    BOOL minIsLeft = (minValX <= minX + 0.1);
     CGFloat threshold = 2.0;
-    if (touchX <= minX + threshold && !self.didTriggerMinHaptic) {
-        self.didTriggerMinHaptic = YES;
-        self.didTriggerMaxHaptic = NO;
-        [self.lightFeedbackGenerator impactOccurred];
-    } else if (touchX >= maxX - threshold && !self.didTriggerMaxHaptic) {
-        self.didTriggerMaxHaptic = YES;
-        self.didTriggerMinHaptic = NO;
-        [self.mediumFeedbackGenerator impactOccurred];
+    if (touchX <= minX + threshold) {
+        if (minIsLeft ? !self.didTriggerMinHaptic : !self.didTriggerMaxHaptic) {
+            if (minIsLeft) {
+                self.didTriggerMinHaptic = YES;
+                self.didTriggerMaxHaptic = NO;
+                [self.lightFeedbackGenerator impactOccurred];
+            } else {
+                self.didTriggerMaxHaptic = YES;
+                self.didTriggerMinHaptic = NO;
+                [self.mediumFeedbackGenerator impactOccurred];
+            }
+        }
+    } else if (touchX >= maxX - threshold) {
+        if (minIsLeft ? !self.didTriggerMaxHaptic : !self.didTriggerMinHaptic) {
+            if (minIsLeft) {
+                self.didTriggerMaxHaptic = YES;
+                self.didTriggerMinHaptic = NO;
+                [self.mediumFeedbackGenerator impactOccurred];
+            } else {
+                self.didTriggerMinHaptic = YES;
+                self.didTriggerMaxHaptic = NO;
+                [self.lightFeedbackGenerator impactOccurred];
+            }
+        }
     } else if (touchX > minX + threshold * 2.0 && touchX < maxX - threshold * 2.0) {
         self.didTriggerMinHaptic = NO;
         self.didTriggerMaxHaptic = NO;
@@ -679,27 +716,49 @@ static UIColor *LGSliderInactiveTrackColor(UITraitCollection *traitCollection) {
     CGFloat minimumThumbX = [self minimumThumbCenterX];
     CGFloat maximumThumbX = [self maximumThumbCenterX];
 
+    BOOL isRTL = LGSliderIsRTL(self);
+
     CGFloat startSnapZone = fmin(8.0, CGRectGetWidth(track) * 0.05);
     CGFloat endSnapZone = fmin(8.0, CGRectGetWidth(track) * 0.05);
-    if (normalized <= 0.0001 || presentedX <= minimumThumbX + 0.5) {
-        fillEnd = minX;
-    } else if (normalized >= 0.9999 || presentedX >= maximumThumbX - 0.5) {
-        fillEnd = maxX;
-    } else if (presentedX < minimumThumbX + startSnapZone) {
-        CGFloat t = fmax(0.0, fmin((presentedX - minimumThumbX) / startSnapZone, 1.0));
-        fillEnd = minX + (presentedX - minX) * t * t;
-    } else if (presentedX > maximumThumbX - endSnapZone) {
-        CGFloat t = fmax(0.0, fmin((maximumThumbX - presentedX) / endSnapZone, 1.0));
-        fillEnd = maxX - (maxX - presentedX) * t * t;
-    }
 
-    CGFloat seamOverlap = fillEnd > minX + 0.01 ? 1.25 : 0.0;
-    CGFloat width = fmax(0.0, fmin(fillEnd + seamOverlap, maxX) - minX);
-    self.magneticFillView.hidden = width < 0.5;
-    self.magneticFillView.frame = CGRectMake(minX, CGRectGetMinY(track), width, CGRectGetHeight(track));
+    if (!isRTL) {
+        if (normalized <= 0.0001 || presentedX <= minimumThumbX + 0.5) {
+            fillEnd = minX;
+        } else if (normalized >= 0.9999 || presentedX >= maximumThumbX - 0.5) {
+            fillEnd = maxX;
+        } else if (presentedX < minimumThumbX + startSnapZone) {
+            CGFloat t = fmax(0.0, fmin((presentedX - minimumThumbX) / startSnapZone, 1.0));
+            fillEnd = minX + (presentedX - minX) * t * t;
+        } else if (presentedX > maximumThumbX - endSnapZone) {
+            CGFloat t = fmax(0.0, fmin((maximumThumbX - presentedX) / endSnapZone, 1.0));
+            fillEnd = maxX - (maxX - presentedX) * t * t;
+        }
+
+        CGFloat seamOverlap = fillEnd > minX + 0.01 ? 1.25 : 0.0;
+        CGFloat width = fmax(0.0, fmin(fillEnd + seamOverlap, maxX) - minX);
+        self.magneticFillView.hidden = width < 0.5;
+        self.magneticFillView.frame = CGRectMake(minX, CGRectGetMinY(track), width, CGRectGetHeight(track));
+    } else {
+        if (normalized <= 0.0001 || presentedX >= minimumThumbX - 0.5) {
+            fillEnd = maxX;
+        } else if (normalized >= 0.9999 || presentedX <= maximumThumbX + 0.5) {
+            fillEnd = minX;
+        } else if (presentedX > minimumThumbX - startSnapZone) {
+            CGFloat t = fmax(0.0, fmin((minimumThumbX - presentedX) / startSnapZone, 1.0));
+            fillEnd = maxX - (maxX - presentedX) * t * t;
+        } else if (presentedX < maximumThumbX + endSnapZone) {
+            CGFloat t = fmax(0.0, fmin((presentedX - maximumThumbX) / endSnapZone, 1.0));
+            fillEnd = minX + (presentedX - minX) * t * t;
+        }
+
+        CGFloat seamOverlap = fillEnd < maxX - 0.01 ? 1.25 : 0.0;
+        CGFloat startX = fmax(minX, fillEnd - seamOverlap);
+        CGFloat width = fmax(0.0, maxX - startX);
+        self.magneticFillView.hidden = width < 0.5;
+        self.magneticFillView.frame = CGRectMake(startX, CGRectGetMinY(track), width, CGRectGetHeight(track));
+    }
     self.magneticFillView.layer.cornerRadius = CGRectGetHeight(track) * 0.5;
     self.magneticFillView.layer.cornerCurve = kCACornerCurveContinuous;
-
 }
 
 @end
