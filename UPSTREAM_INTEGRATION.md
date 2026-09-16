@@ -61,7 +61,7 @@ a later ordinary merge will not replay those intentionally retained hunks.
 - Existing widget/icon/RWB implementations, including the Maps rollback.
 - Existing defaults, cover-sheet bezel-ratio controls, batched preference writes,
   motion warning, Dynamic Island and iOS 26 icon settings.
-- Package identity/version and release/maintainer scripts.
+- Package identity and release scripts; the installer change is recorded below.
 
 AssistiveTouch hooks are initialized only under both master and surface enable
 flags. A flag change relaunches assistivetouchd so native layers are reconstructed;
@@ -124,7 +124,8 @@ Version: `0.1.1b+banana34`. Both schemes built with `release.sh` and the matchin
 Theos checkout, including arm64 and arm64e slices in all four Mach-O binaries.
 Package checks passed for identity/version, architecture, Rootless/RootHide
 layout and linkage, font resource, new localized selectors, changelog and POSIX
-postinst syntax. The installer still resolves commands through PATH for apt/dpkg.
+postinst syntax. The installer resolves commands through PATH for apt/dpkg and no longer terminates
+backboardd. Restart userspace manually after installation.
 
 Artifacts: `packages/iya.iapple.liquidass_0.1.1b+banana34_iphoneos-arm64.deb`
 and `packages/iya.iapple.liquidass_0.1.1b+banana34_iphoneos-arm64e.deb`.
