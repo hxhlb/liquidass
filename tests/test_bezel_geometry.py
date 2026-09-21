@@ -8,6 +8,7 @@ PRELUDE=r'''
 #import <Foundation/Foundation.h>
 #import "LGHostRegistry.h"
 #import "LGBezelGeometry.h"
+#import "LGRendererPreferences.h"
 #include <assert.h>
 #include <stdio.h>
 static NSDictionary *prefs;
@@ -15,15 +16,6 @@ static id LGReadPreferenceObject(NSString *key,id fallback){return prefs[key] ?:
 '''
 MAIN=r'''
 int main(void){@autoreleasepool {
-    assert(!LGBezelUsesPointWidth(NO,@"points",@.2,@30,20));
-    assert(LGBezelUsesPointWidth(YES,nil,nil,nil,20));
-    assert(!LGBezelUsesPointWidth(YES,nil,@.2,nil,20));
-    assert(LGBezelUsesPointWidth(YES,nil,@.2,@15,20));
-    assert(!LGBezelUsesPointWidth(YES,@"ratio",@.2,@15,20));
-    assert(LGBezelUsesPointWidth(YES,@"points",@.2,nil,20));
-    assert(!LGBezelUsesPointWidth(YES,@"invalid",nil,nil,20));
-    assert(!LGBezelUsesPointWidth(YES,nil,nil,nil,-1));
-    assert(LGBezelUsesPointWidth(YES,@"points",nil,nil,-1));
     assert(LGBezelPointWidth(nil,-1)==20);
     assert(LGBezelPointWidth(@(-2),20)==0);
     assert(LGBezelPointWidth(@99,20)==80);
@@ -36,30 +28,18 @@ int main(void){@autoreleasepool {
     assert(fabs(LGBezelWidthPixels(YES,15,.2,300,2,34)-30)<1e-5);
     assert(fabs(LGBezelWidthPixels(YES,15,.2,300,3,34)-45)<1e-5);
     assert(fabs(LGBezelWidthPixels(YES,80,.2,20,3,34)-10)<1e-5);
-    NSDictionary *width=@{@"enhanced_only":@YES,@"bezel_host":@"Dock",@"bezel_units":@"points"};
-    NSDictionary *ratio=@{@"bezel_host":@"Dock",@"bezel_units":@"ratio"};
-    prefs=@{@"Renderer.Profile":@"classic",@"Dock.BezelMode":@"points"};
-    assert(!LGPrefsItemIsVisible(width)&&!LGPrefsItemIsEnabled(width)&&LGPrefsItemIsEnabled(ratio));
-    prefs=@{@"Renderer.Profile":@"enhanced",@"Dock.BezelRatio":@.25};
-    assert(LGPrefsItemIsVisible(width)&&!LGPrefsItemIsEnabled(width)&&LGPrefsItemIsEnabled(ratio));
-    prefs=@{@"Renderer.Profile":@"enhanced",@"Dock.BezelRatio":@.25,@"Dock.BezelMode":@"points"};
-    assert(LGPrefsItemIsEnabled(width)&&!LGPrefsItemIsEnabled(ratio));
-    assert([prefs[@"Dock.BezelRatio"] isEqual:@.25]);
-    prefs=@{@"Renderer.Profile":@"enhanced"};
-    assert(LGPrefsItemIsEnabled(width)&&!LGPrefsItemIsEnabled(ratio));
-    assert(!LGBezelUsesPointsForPrefix(@"DynamicIsland",YES));
-    ResetHarness *h=[ResetHarness new];h.items=@[@{@"key":@"Dock.BezelMode"}];
+    ResetHarness *h=[ResetHarness new];h.items=@[@{@"key":@"Enhanced.Dock.GlassThickness"}];
     [h handlePrefsUIRefresh:nil];assert(h.rebuilt==2 && h.animated==0);
     h=[ResetHarness new];h.items=@[@{@"key":@"Renderer.Profile"}];
     [h handlePrefsUIRefresh:nil];assert(h.rebuilt==2 && h.animated==0);
     h=[ResetHarness new];h.items=@[@{@"key":@"Clock.Enabled"}];
     [h handlePrefsUIRefresh:nil];assert(h.rebuilt==0 && h.animated==1);
-    puts("PASS legacy/explicit/default precedence, Classic isolation, point scaling/caps and settings visibility/enablement");
+    puts("PASS native point scaling/caps and selected-engine reset UI refresh");
 }return 0;}
 '''
 def main():
  data=(ROOT/'LiquidAssPrefs/LGPrefsDataSupport.m').read_text();code=PRELUDE
- for sig in ['static BOOL LGBezelUsesPointsForPrefix(', 'BOOL LGPrefsItemIsEnabled(', 'BOOL LGPrefsItemIsVisible(']:code+=function(data,sig)+'\n'
+ for sig in ['static BOOL LGSelectedRendererEnhanced(', 'BOOL LGPrefsItemIsEnabled(', 'BOOL LGPrefsItemIsVisible(']:code+=function(data,sig)+'\n'
  code+='''
 @interface ResetHarness : NSObject
 @property(copy) NSArray *items;

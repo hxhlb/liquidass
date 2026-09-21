@@ -8,6 +8,7 @@ from test_clock_icon_ownership import function
 ROOT = Path(__file__).resolve().parents[1]
 SUPPORT = r'''
 #import <Foundation/Foundation.h>
+#import "LGRendererPreferences.h"
 #include <assert.h>
 #include <stdio.h>
 @interface PSSpecifier : NSObject
@@ -36,6 +37,7 @@ UI_SUPPORT = r'''
 + (instancetype)mainScreen { UIScreen *s=[UIScreen new]; s.maximumFramesPerSecond=120; return s; }
 @end
 static NSString *LGLocalized(NSString *key) { return key; }
+static BOOL LGSelectedRendererEnhanced(void) { return NO; }
 static NSArray *LGRendererItemsForHostPrefix(NSString *prefix) { return @[@{@"key":@"Clock.Enabled"}]; }
 static NSDictionary *LGSliderSetting(NSString *key, NSString *title, NSString *subtitle, CGFloat value, CGFloat min, CGFloat max, NSInteger decimals) {
  return @{@"key":key,@"default":@(value),@"max":@(max)};
@@ -104,7 +106,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='liquidass-settings-') as tmp:
         src, exe=Path(tmp)/'settings.m', Path(tmp)/'settings'
         src.write_text(source)
-        subprocess.run(['xcrun','clang','-fobjc-arc','-framework','Foundation',str(src),'-o',str(exe)],check=True)
+        subprocess.run(['xcrun','clang','-fobjc-arc','-I'+str(ROOT/'Shared'),'-framework','Foundation',str(src),'-o',str(exe)],check=True)
         subprocess.run([str(exe)],check=True)
 
 

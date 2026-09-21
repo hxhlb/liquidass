@@ -15,6 +15,7 @@
 #include <stdio.h>
 #import "../Shared/LGGlassKit.h"
 #import "../Shared/LGHostRegistry.h"
+#import "../Shared/LGSharedSupport.h"
 #import "../Shared/LGLensRectState.h"
 #import "../Shared/LGLiveBackdropView.h"
 
@@ -1178,7 +1179,7 @@ static void LGClockRestoreDirectFontState(LGClockState *state) {
 }
 
 static UIColor *LGClockPullTint(UITraitCollection *traits) {
-    const LGHostDefinition *host = &kLGHostRegistry[LGHostIdentifierClock];
+    const LGHostDefinition *host = LGActiveHostDefinitionForPrefix(@"Clock");
     BOOL dark = traits.userInterfaceStyle == UIUserInterfaceStyleDark;
     NSString *fallback = [NSString stringWithUTF8String:dark ? host->darkTintHex : host->lightTintHex];
     const char *hex = LG_prefString(dark ? @"Clock.DarkTintColor" : @"Clock.LightTintColor",
@@ -1351,7 +1352,7 @@ static UIColor *LGClockPullTint(UITraitCollection *traits) {
     if (active) {
         @try {
             [self.pullBlurView setValue:@(MAX(0.0, LG_prefFloat(@"Clock.Blur",
-                kLGHostRegistry[LGHostIdentifierClock].blur))) forKey:@"lgBlurRadius"];
+                LGActiveHostDefinitionForPrefix(@"Clock")->blur))) forKey:@"lgBlurRadius"];
         } @catch (__unused NSException *exception) {}
     }
     self.glassView.maskView = nil;

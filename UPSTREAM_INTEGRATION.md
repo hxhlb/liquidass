@@ -41,9 +41,9 @@ an offscreen cover sheet retains a translated frame and window.
 ## Explicitly deferred renderer work
 
 The current blur path remains the default. Optional system blur and the Enhanced
-bezel/geometry follow-up are described below. Existing material tuning and Classic
-shader calculations remain intact. Upstream material retuning, specular motion
-rewrite and filter-registration ordering are still deferred. Classic/Enhanced
+bezel/geometry follow-up are described below. Classic shader calculations and tuning remain intact. Enhanced now uses the raw
+upstream default table (see banana37). The upstream specular motion rewrite is still deferred. Filter-registration
+ordering is included in the banana37 test described below. Classic/Enhanced
 modes and current motion frame/visibility limits stay.
 
 Do not import upstream `lgClearAccessibilityFiles` unchanged: it removes the
@@ -213,3 +213,73 @@ Symbols: `packages/symbols/banana36/{rootless,roothide}/`.
 Install manually and restart userspace. Select Enhanced and complete its profile
 restart before evaluating the new geometry. Device appearance remains unverified.
 No push, tag, GitHub release or automatic installation was performed.
+
+## banana37 independent engine parameters
+
+The main acceptance criterion is independent tuning: editing or resetting one
+engine must not overwrite the other engine's material values.
+
+- Classic keeps existing unprefixed keys and Classic defaults. Existing large
+  legacy thickness values retain their previous interpretation at preference
+  reload only; there is no thickness conversion in the rendering loop.
+- Enhanced uses `Enhanced.<key>` and the literal upstream material table in
+  `Shared/LGUpstreamHostDefaults.h` (9b7c5eb). No old-key fallback and no cross-engine
+  multiplication/division. AssistiveTouch thickness is 18, Volume HUD is 280.
+  Dynamic Island has separate Enhanced defaults because upstream has no such host.
+- The intermediate banana36 mixed-unit selector is retired. Classic uses its
+  ratio units; Enhanced uses upstream point widths. Enhanced defaults to system
+  blur, with the optional renderer-blur choice retained in its own group.
+- Thickness, refraction, index, tints, blur, dispersion, specular parameters,
+  geometry, quality, motion settings and clock FPS are independent. Master and
+  surface enable flags, font/date controls, clock implementation and icon modes
+  remain shared.
+- Settings controls write physical keys for the selected group. Switching the
+  engine rebuilds those controls after the queued preference commit completes.
+  Runtime selection stays latched until restart, matching the backend profile.
+- Presets always export both physical groups. Old unprefixed presets update only
+  Classic material settings, even while Enhanced is selected. Surface reset uses
+  that page's current physical keys; the explicit global Reset All still clears
+  both groups and shared controls.
+- Classic clock material inheritance/adaptive tint remains Classic-only; Enhanced
+  uses its own clock material/tints. Enhanced also uses upstream Fresnel strength
+  and tab-selection zoom rather than Classic overrides.
+
+Validation: production-code tests cover every scoped key, runtime profile latch,
+Classic/Enhanced independent edits, upstream default equality, actual backend
+reload values, both-group preset round trips and isolated surface reset. Existing
+widget, icon, clock, switch, motion, Metal geometry, AssistiveTouch and HUD tests
+pass. Device visual and thermal validation is still pending; no heat reduction
+is claimed from removing a few arithmetic operations.
+
+### banana37 filter registration ordering
+
+Gaussian hooks are prepared once after their context/slots are valid, before
+waiting for QuartzCore's filter table. Custom atoms are still registered only
+after that table is ready. If the Gaussian context itself is pending, registration
+retries after 250 ms. Resolved edge/render slots are retained after hooking: a
+retry must not scan the now-patched function bodies or install duplicate hooks.
+The clone path still waits for the table before allocating its descriptor.
+
+`test_filter_registration.py` executes the production registration body with
+controlled delayed context/table readiness, scanners that reject already-hooked
+code, invalid slots/symbols, hook failures and the iOS 14 fallback. It verifies
+single installation/registration and preserved ordering. `test_render_compat.py`
+still passes the iOS 14/15–17/18 forwarding checks. The upstream broad accessibility
+file cleanup is not imported; crash/probe protection remains intact.
+
+Material defaults are implemented in the independent Enhanced table, but final
+acceptance remains pending the user's device test. Dynamic highlights retain the
+existing Banana optimization (30 FPS active / 5 FPS idle, unchanged-angle and
+visibility suppression); the upstream single-gradient/idle-pause rewrite is not
+part of this build.
+
+### banana37 combined local artifacts
+
+Both Rootless and RootHide were rebuilt after the registration-order change.
+The delivered banana37 artifacts include parameter isolation and registration
+ordering together. All four binaries contain arm64 and arm64e; symbol UUIDs,
+loader paths, version, localization/resources, font and postinst checks passed.
+The installer still does not terminate backboardd. Checksums/validation records
+are in `packages/release/v0.1.1b-banana37/`, and matching symbols are under
+`packages/symbols/banana37/{rootless,roothide}/`. No GitHub push/tag/release or
+remote device changes were performed.

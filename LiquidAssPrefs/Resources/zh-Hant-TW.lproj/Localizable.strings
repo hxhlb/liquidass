@@ -262,10 +262,10 @@
 "prefs.subtitle.bezel_width" = "Width of the refracting edge around the clock glyphs, in points.";
 
 "prefs.renderer.profile.title" = "渲染模式";
-"prefs.renderer.profile.subtitle" = "經典模式使用 banana29 渲染器，負載較低；增強模式使用上游多重採樣渲染器，可能增加發熱、耗電和 backboardd 佔用。";
+"prefs.renderer.profile.subtitle" = "Classic 與 Enhanced 的渲染參數分別儲存。Enhanced 從上游預設參數開始，可能增加耗電與發熱。";
 "prefs.renderer.profile.classic" = "經典 / 相容";
 "prefs.renderer.profile.enhanced" = "增強 / 高畫質";
-"prefs.renderer.profile.restart_body" = "切換渲染模式後需要重新啟動系統介面。每個玻璃表面只會執行一種渲染器。";
+"prefs.renderer.profile.restart_body" = "切換引擎後需要重新啟動系統介面。材質參數分別儲存；表面啟用開關、字體和圖示模式繼續共用。";
 
 "prefs.button.more" = "More";
 "prefs.misc.rwb_third_party.subtitle" = "Enter widget bundle ids for the RWB allowlist.";
@@ -287,8 +287,8 @@
 "prefs.clock.mode.custom" = "自訂圖層";
 "prefs.app_list.unavailable" = "無法載入 AltList。請重新安裝 AltList 相依套件並重新開啟設定。";
 "prefs.renderer.blur_mode.title" = "模糊實作";
-"prefs.renderer.blur_mode.subtitle" = "僅限 Enhanced。作用於獨立玻璃表面（含時鐘自訂圖層）；時鐘原生修改維持原有方式。可搭配各表面的「模糊」強度比較。";
-"prefs.renderer.blur_mode.current" = "目前方式";
+"prefs.renderer.blur_mode.subtitle" = "僅限 Enhanced，預設使用系統模糊圖層。作用於獨立玻璃表面（含時鐘自訂圖層）；時鐘原生修改維持自己的模糊路徑。";
+"prefs.renderer.blur_mode.current" = "渲染器模糊";
 "prefs.renderer.blur_mode.system" = "系統模糊圖層";
 "prefs.bezel.mode.title" = "邊緣寬度模式";
 "prefs.bezel.mode.subtitle" = "Enhanced 可保留原比例或使用固定寬度；Classic 繼續使用比例。";

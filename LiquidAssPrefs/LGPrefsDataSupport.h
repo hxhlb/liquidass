@@ -31,6 +31,7 @@ BOOL LGRespringBarDismissed(void);
 void LGSetRespringBarDismissed(BOOL dismissed);
 void LGSetNeedsRespring(BOOL needsRespring);
 void LGForceSynchronizePreferences(void);
+void LGAfterPendingPreferencesCommit(dispatch_block_t completion);
 
 NSNumber *LGReadPreference(NSString *key, NSNumber *fallback);
 void LGWritePreference(NSString *key, NSNumber *value);

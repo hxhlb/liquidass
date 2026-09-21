@@ -3,18 +3,7 @@
 #import <Foundation/Foundation.h>
 #include <math.h>
 
-// Old ratios depend on runtime surface geometry; never destructively convert
-// them into a guessed fixed width. Explicit mode selections take precedence.
-static inline BOOL LGBezelUsesPointWidth(BOOL enhanced, id mode, id ratio,
-                                          id width, float defaultWidth) {
-    if (!enhanced) return NO;
-    if ([mode isKindOfClass:NSString.class] && [mode length])
-        return [mode isEqualToString:@"points"];
-    if ([width isKindOfClass:NSNumber.class] && isfinite([width doubleValue])) return YES;
-    if ([ratio isKindOfClass:NSNumber.class]) return NO;
-    return defaultWidth >= 0.0f;
-}
-
+// Classic uses ratios; Enhanced uses upstream point widths.
 static inline float LGBezelPointWidth(id value, float fallback) {
     if (fallback < 0.0f) fallback = 20.0f;
     double width = [value isKindOfClass:NSNumber.class] ? [value doubleValue] : fallback;

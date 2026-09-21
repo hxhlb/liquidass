@@ -1,4 +1,5 @@
 #import "LGSharedSupport.h"
+#import "LGRendererPreferences.h"
 #import <objc/runtime.h>
 #import <os/lock.h>
 #import <stdlib.h>
@@ -324,7 +325,7 @@ void LGObservePreferenceChanges(dispatch_block_t block) {
     }];
 }
 
-id LGPreferenceValue(NSString *key) {
+static id LGUnscopedPreferenceValue(NSString *key) {
     if (!key.length) return nil;
     LGEnsurePreferenceCacheInitialized();
     NSDictionary<NSString *, id> *preferences = nil;
@@ -334,14 +335,26 @@ id LGPreferenceValue(NSString *key) {
     return preferences[key];
 }
 
+BOOL LGRendererUsesEnhancedAtLaunch(void) {
+    static BOOL enhanced;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        enhanced = [LGUnscopedPreferenceValue(@"Renderer.Profile") isEqual:@"enhanced"];
+    });
+    return enhanced;
+}
+
+const LGHostDefinition *LGActiveHostDefinitionForPrefix(NSString *prefix) {
+    return LGHostDefinitionForProfile(prefix.UTF8String, LGRendererUsesEnhancedAtLaunch());
+}
+
+id LGPreferenceValue(NSString *key) {
+    if (!key.length) return nil;
+    return LGUnscopedPreferenceValue(LGRendererPreferenceKey(key, LGRendererUsesEnhancedAtLaunch()));
+}
+
 BOOL LGHasExplicitPreferenceValue(NSString *key) {
-    if (!key.length) return NO;
-    LGEnsurePreferenceCacheInitialized();
-    NSDictionary<NSString *, id> *preferences = nil;
-    os_unfair_lock_lock(&sLGPrefsLock);
-    preferences = sLGCachedPreferences;
-    os_unfair_lock_unlock(&sLGPrefsLock);
-    return preferences[key] != nil;
+    return LGPreferenceValue(key) != nil;
 }
 
 BOOL LG_prefBool(NSString *key, BOOL fallback) {

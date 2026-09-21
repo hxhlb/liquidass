@@ -6,6 +6,7 @@
 #import "LGPrefsLiquidSwitch.h"
 #import "../Shared/LGLiveBackdropView.h"
 #import "../Shared/LGSharedSupport.h"
+#import "../Shared/LGRendererPreferences.h"
 #import <Preferences/PSSpecifier.h>
 #import <QuartzCore/QuartzCore.h>
 #import <math.h>
@@ -115,7 +116,7 @@ static void LGRefreshCoverSheetBezelRatioControl(UIView *root, CGFloat cornerRad
             if (!item) continue;
             BOOL visible = LGPrefsItemIsVisible(item);
             BOOL enabled = LGPrefsItemIsEnabled(item);
-            if ([item[@"requires_enhanced_renderer"] boolValue] || item[@"bezel_host"])
+            if ([item[@"requires_enhanced_renderer"] boolValue])
                 subview.userInteractionEnabled = enabled;
             void (^changes)(void) = ^{
                 subview.hidden = !visible;
@@ -317,8 +318,9 @@ static void LGRestartAssistiveTouchDaemon(void) {
 - (void)handleApplyPressed {
     LGForceSynchronizePreferences();
     if ([_screenIdentifier isEqualToString:LGPrefsSurfaceAssistiveTouch]) {
-        CFPreferencesSetAppValue(CFSTR("AssistiveTouch.LightTintColor"), NULL, (__bridge CFStringRef)LGPrefsDomain);
-        CFPreferencesSetAppValue(CFSTR("AssistiveTouch.DarkTintColor"), NULL, (__bridge CFStringRef)LGPrefsDomain);
+        BOOL enhanced = [LGReadPreferenceObject(@"Renderer.Profile", @"classic") isEqual:@"enhanced"];
+        CFPreferencesSetAppValue((__bridge CFStringRef)LGRendererPreferenceKey(@"AssistiveTouch.LightTintColor", enhanced), NULL, (__bridge CFStringRef)LGPrefsDomain);
+        CFPreferencesSetAppValue((__bridge CFStringRef)LGRendererPreferenceKey(@"AssistiveTouch.DarkTintColor", enhanced), NULL, (__bridge CFStringRef)LGPrefsDomain);
         CFPreferencesAppSynchronize((__bridge CFStringRef)LGPrefsDomain);
         LGRestartAssistiveTouchDaemon();
         UIImpactFeedbackGenerator *generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
@@ -473,9 +475,9 @@ static void LGRestartAssistiveTouchDaemon(void) {
     if (!self.isViewLoaded) return;
     for (NSDictionary *item in _items) {
         NSString *key = item[@"key"];
-        if ([key hasSuffix:@".BezelMode"] || [key isEqualToString:@"Renderer.Profile"]) {
-            // Resetting removes the legacy key as well, which can change the
-            // inferred unit. Rebuild the menu default and control eligibility.
+        if (LGRendererPreferenceKeyMap()[LGRendererBasePreferenceKey(key)] ||
+            [key isEqualToString:@"Renderer.Profile"]) {
+            // Rebuild defaults from the selected engine after reset/import.
             [self reloadLocalizedContent];
             [self reloadVisibleSettings];
             return;
@@ -1240,7 +1242,7 @@ static void LGRestartAssistiveTouchDaemon(void) {
                     self,
                     LGLocalized(@"prefs.icon_provider.restart_required.title"),
                     LGLocalized(@"prefs.icon_provider.restart_required.body"));
-            } else if (sender.isOn && [item[@"key"] isEqualToString:@"Specular.Motion.Enabled"]) {
+            } else if (sender.isOn && [LGRendererBasePreferenceKey(item[@"key"]) isEqualToString:@"Specular.Motion.Enabled"]) {
                 LGPresentInfoSheet(self,
                     LGLocalized(@"prefs.motion_highlights_warning.title"),
                     LGLocalized(@"prefs.motion_highlights_warning.body"));
@@ -1364,6 +1366,14 @@ static void LGRestartAssistiveTouchDaemon(void) {
                                    LGLocalized(@"prefs.renderer.profile.restart_body"));
             }
             applyMenuSelectionTitle(title);
+            if (strongSelf && [item[@"key"] isEqualToString:@"Renderer.Profile"]) {
+                LGAfterPendingPreferencesCommit(^{
+                    [strongSelf reloadLocalizedContent];
+                    [strongSelf reloadVisibleSettings];
+                    [strongSelf updateRespringBarAnimated:YES];
+                });
+                return;
+            }
             UIButton *strongMenuButton = weakMenuButton;
             if (strongSelf && strongMenuButton) {
                 strongMenuButton.menu = [strongSelf menuForItem:item

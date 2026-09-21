@@ -71,7 +71,11 @@ static const LGHostDefinition kLGHostRegistry[LGHostIdentifierCount] = {
 };
 
 static inline enum LGHostIdentifier LGHostIdentifierForDefinition(const LGHostDefinition *host) {
-    return host ? (enum LGHostIdentifier)(host - kLGHostRegistry) : LGHostIdentifierCount;
+    if (!host) return LGHostIdentifierCount;
+    for (size_t i = 0; i < LGHostIdentifierCount; ++i)
+        if (strcmp(host->preferencePrefix, kLGHostRegistry[i].preferencePrefix) == 0)
+            return (enum LGHostIdentifier)i;
+    return LGHostIdentifierCount;
 }
 
 static inline const LGHostDefinition *LGHostDefinitionForPreferencePrefix(const char *prefix) {
@@ -95,4 +99,26 @@ static inline const LGHostDefinition *LGHostDefinitionForFilterType(const char *
 
 static inline enum LGHostIdentifier LGHostIdentifierForFilterType(const char *filterType) {
     return LGHostIdentifierForDefinition(LGHostDefinitionForFilterType(filterType));
+}
+
+#include "LGUpstreamHostDefaults.h"
+
+static const LGHostDefinition kLGEnhancedHostDefaults[] = {
+#define LG_ENHANCED_ENTRY(identifier, filter, prefix, radius, width, thickness, refraction, index, blurValue, specular, dispersion, lightTint, darkTint) \
+    { #identifier, filter, prefix, radius, 0.0f, width, thickness, refraction, index, blurValue, specular, dispersion, lightTint, darkTint },
+    LG_UPSTREAM_HOST_REGISTRY(LG_ENHANCED_ENTRY)
+#undef LG_ENHANCED_ENTRY
+    // Banana-only surface: independent Enhanced defaults in Enhanced units.
+    { "DynamicIsland", "dylv.liquidglass.island", "DynamicIsland", 28.0f / 220.0f,
+      0.0f, 30.0f, 120.0f, 2.2f, 1.60f, 1.0f, 1.0f, 0.0f, "#FFFFFF00", "#00000000" },
+};
+
+static inline const LGHostDefinition *LGHostDefinitionForProfile(const char *prefix,
+                                                                 int enhanced) {
+    if (!enhanced) return LGHostDefinitionForPreferencePrefix(prefix);
+    if (!prefix) return NULL;
+    for (size_t i = 0; i < sizeof(kLGEnhancedHostDefaults) / sizeof(kLGEnhancedHostDefaults[0]); ++i)
+        if (strcmp(kLGEnhancedHostDefaults[i].preferencePrefix, prefix) == 0)
+            return &kLGEnhancedHostDefaults[i];
+    return NULL;
 }

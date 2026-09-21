@@ -20,6 +20,9 @@ static BOOL enhancedAtLaunch;
 static id LGGlassPreferenceValue(NSString *key) { return prefs[key]; }
 static id LGReadPreferenceObject(NSString *key, id fallback) { return prefs[key] ?: fallback; }
 static BOOL LGEnhancedRendererProfileAtLaunch(void) { return enhancedAtLaunch; }
+static const LGHostDefinition *LGActiveHostDefinitionForPrefix(NSString *prefix) {
+ return LGHostDefinitionForProfile(prefix.UTF8String, enhancedAtLaunch);
+}
 #define CALayer TestLayer
 #define CATransaction TestTransaction
 @interface CALayer : NSObject
@@ -91,7 +94,7 @@ int main(void) { @autoreleasepool {
     assert(LGNativeBlurRadiusForFilterType(@"dylv.liquidglass.dock")==0);
     assert([prefs[@"Renderer.BlurMode"] isEqual:@"system"]); // disabling doesn't erase choice
     prefs=@{@"Renderer.Profile":@"enhanced",@"Renderer.BlurMode":@"unknown"};
-    assert(!LGUsesSystemBlurOverlay());
+    assert(LGUsesSystemBlurOverlay()); // Unknown values use the upstream default.
     assert(LGPrefsItemIsEnabled(@{}));
     for(NSNumber *value in @[@0,@(-1),@999,@(NAN)]) {
         prefs=@{@"Renderer.Profile":@"enhanced",@"Renderer.BlurMode":@"system",@"Dock.Blur":value};
@@ -156,7 +159,7 @@ def main():
     source=PRELUDE+function(live,'- (void)updateNativeBlurOverlayWithRadius:(CGFloat)radius {')+'\n@end\n'
     for sig in ('static BOOL LGUsesSystemBlurOverlay(', 'static CGFloat LGNativeBlurRadiusForFilterType('):
         source+=function(live,sig)+'\n'
-    source+=function(prefs,'static BOOL LGBezelUsesPointsForPrefix(')+'\n'
+    source+=function(prefs,'static BOOL LGSelectedRendererEnhanced(')+'\n'
     source+=function(prefs,'BOOL LGPrefsItemIsEnabled(')+MAIN
     routes='''#import <Foundation/Foundation.h>\n#import <os/lock.h>\n#include <unordered_map>\n#include <unordered_set>\n#include <string>\n#include <assert.h>\n#include <math.h>\n#import "LGHostRegistry.h"\n'''
     # Copy the production host table and routing implementation unchanged.

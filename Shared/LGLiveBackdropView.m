@@ -53,8 +53,10 @@ static CFStringRef const kLGParametersReloadedNotification =
 static NSHashTable<LGLiveBackdropView *> *sLGAllGlasses;
 static BOOL sLGFilterRefreshSetup;
 static BOOL LGSpecularEnabledForFilterType(NSString *type) {
-    const LGHostDefinition *host = LGHostDefinitionForFilterType(type.UTF8String);
-    if (host == &kLGHostRegistry[LGHostIdentifierCoverSheet]) return NO;
+    const LGHostDefinition *identity = LGHostDefinitionForFilterType(type.UTF8String);
+    const LGHostDefinition *host = identity
+        ? LGActiveHostDefinitionForPrefix([NSString stringWithUTF8String:identity->preferencePrefix]) : NULL;
+    if (LGHostIdentifierForDefinition(host) == LGHostIdentifierCoverSheet) return NO;
     if (host && host->specularOpacity <= 0.001f) return NO;
     NSString *prefix = host ? [NSString stringWithUTF8String:host->preferencePrefix] : nil;
     if (!prefix.length) return YES;
@@ -152,14 +154,7 @@ static const CGFloat kLGPrefsControlScale = 1.50;
 static const CGFloat kLGDefaultScaleBudget = 8000.0;
 
 static BOOL LGEnhancedRendererProfileAtLaunch(void) {
-    static BOOL enhanced;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        id value = LGGlassPreferenceValue(@"Renderer.Profile");
-        enhanced = [value isKindOfClass:NSString.class] &&
-                   [value isEqualToString:@"enhanced"];
-    });
-    return enhanced;
+    return LGRendererUsesEnhancedAtLaunch();
 }
 
 // The filter variant tells backboardd which view owns blur. This avoids a
@@ -168,12 +163,14 @@ static BOOL LGUsesSystemBlurOverlay(void) {
     if (!LGEnhancedRendererProfileAtLaunch() ||
         ![LGGlassPreferenceValue(@"Renderer.Profile") isEqual:@"enhanced"]) return NO;
     id mode = LGGlassPreferenceValue(@"Renderer.BlurMode");
-    return [mode isKindOfClass:NSString.class] && [mode isEqualToString:@"system"];
+    return ![mode isEqual:@"current"];
 }
 
 static CGFloat LGNativeBlurRadiusForFilterType(NSString *filterType) {
     if (!LGUsesSystemBlurOverlay()) return 0.0;
-    const LGHostDefinition *host = LGHostDefinitionForFilterType(filterType.UTF8String);
+    const LGHostDefinition *identity = LGHostDefinitionForFilterType(filterType.UTF8String);
+    const LGHostDefinition *host = identity
+        ? LGActiveHostDefinitionForPrefix([NSString stringWithUTF8String:identity->preferencePrefix]) : NULL;
     if (!host) return 0.0;
     NSString *prefix = [NSString stringWithUTF8String:host->preferencePrefix];
     id value = LGGlassPreferenceValue([prefix stringByAppendingString:@".Blur"]);

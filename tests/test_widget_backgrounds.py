@@ -96,8 +96,20 @@ def main():
         # The upstream process exclusion helper is independent of widget removal.
         # Strip only that addition; all pre-existing shared behavior stays locked.
         if path.endswith("LGSharedSupport.h"):
+            current = current.replace(b'#import "LGHostRegistry.h"\n', b'')
+            current = current.replace(b'BOOL LGRendererUsesEnhancedAtLaunch(void);\n', b'')
+            current = current.replace(b'const LGHostDefinition *LGActiveHostDefinitionForPrefix(NSString *prefix);\n', b'')
             current = current.replace(b"BOOL LGIsExcludedSystemProcess(void);\n", b"")
         elif path.endswith("LGSharedSupport.m"):
+            text = current.decode().replace('#import "LGRendererPreferences.h"\n', '')
+            original = baseline.decode()
+            start = text.index('BOOL LGRendererUsesEnhancedAtLaunch(void)')
+            end = text.index('BOOL LG_prefBool(', start)
+            old_start = original.index('BOOL LGHasExplicitPreferenceValue(')
+            old_end = original.index('BOOL LG_prefBool(', old_start)
+            text = text[:start] + original[old_start:old_end] + text[end:]
+            text = text.replace('static id LGUnscopedPreferenceValue(', 'id LGPreferenceValue(', 1)
+            current = text.encode()
             added = function(current.decode(), "BOOL LGIsExcludedSystemProcess(void)")
             current = current.replace((added + "\n\n").encode(), b"")
         assert current == baseline, f"rollback mismatch: {path}"

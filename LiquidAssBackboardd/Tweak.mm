@@ -3,6 +3,7 @@
 #import <Metal/Metal.h>
 #import "../Shared/LGHostRegistry.h"
 #import "../Shared/LGBezelGeometry.h"
+#import "../Shared/LGRendererPreferences.h"
 #import "../Shared/LGLensRectState.h"
 #import "LGSymbolResolver.h"
 #import "../Shared/LGCoverSheetState.h"
@@ -347,6 +348,9 @@ static void   *g_customCtx    = nullptr; // mmapped filtersubclass-shaped block
 typedef void (*MSHookFunctionFn)(void *, void *, void **);
 static MSHookFunctionFn g_hookFunction = nullptr;
 static bool             g_useHookPath = false;
+static bool             g_gaussianHooksInstalled = false;
+static int              g_gaussianEdgeInfoSlot = -1;
+static int              g_gaussianRenderSlot = -1;
 static bool             g_legacyRenderABI = false;
 static bool             g_extendedRenderABI = false;
 static bool             g_skipGaussianIdentityHook = false;
@@ -1594,7 +1598,8 @@ static bool lgDecodeTintColor(NSString *hex, simd_float4 *out);
 
 static void lgApplyHistoricalTintDefault(int host, LGHostParams *p, bool dark) {
     if (host < 0 || host >= LGHostIdentifierCount || !p) return;
-    const LGHostDefinition *definition = &kLGHostRegistry[host];
+    const LGHostDefinition *definition = LGHostDefinitionForProfile(
+        kLGHostRegistry[host].preferencePrefix, g_enhancedRenderer);
     NSString *hex = [NSString stringWithUTF8String:dark
         ? definition->darkTintHex : definition->lightTintHex];
     simd_float4 tint;
@@ -1618,7 +1623,7 @@ static bool lgDecodeTintColor(NSString *hex, simd_float4 *out) {
 }
 
 static void lgReloadHostPrefs(void) {
-    NSDictionary *prefs = lgReadHostPreferences();
+    NSDictionary *prefs = LGRendererPreferenceValues(lgReadHostPreferences(), g_enhancedRenderer);
     NSNumber *debugLogging = prefs[@"Debug.Logging.Enabled"];
     gLGBackboardDebugLogging = [debugLogging isKindOfClass:NSNumber.class]
         ? debugLogging.boolValue : false;
@@ -1636,16 +1641,26 @@ static void lgReloadHostPrefs(void) {
         uint32_t keepAtom = g_hostParamsInit ? g_hostParams[i].atom : 0;
         uint32_t keepDarkAtom = g_hostParamsInit ? g_darkAtoms[i] : 0;
         g_hostParams[i] = kHostDefaults[i];
+        const LGHostDefinition *definition = LGHostDefinitionForProfile(
+            kHostDefaults[i].prefPrefix, g_enhancedRenderer);
+        if (definition) {
+            g_hostParams[i].radiusRatio = definition->cornerRadiusRatio;
+            g_hostParams[i].bezelRatio = definition->bezelRatio;
+            g_hostParams[i].bezelWidthPoints = definition->bezelWidthPoints;
+            g_hostParams[i].glassThickness = definition->glassThickness;
+            g_hostParams[i].refractionScale = definition->refractionScale;
+            g_hostParams[i].refractiveIndex = definition->refractiveIndex;
+            g_hostParams[i].blur = definition->blur;
+            g_hostParams[i].specularOpacity = definition->specularOpacity;
+            g_hostParams[i].dispersionStrength = definition->dispersionStrength;
+        }
         g_hostParams[i].atom = keepAtom;
         g_darkAtoms[i] = keepDarkAtom;
-        if (i > 0) { lgApplyHistoricalTintDefault(i, &g_hostParams[i], false); lgApplyHistoricalTintDefault(i, &g_hostParams[i], true); }
+        if (i > 0 || g_enhancedRenderer) { lgApplyHistoricalTintDefault(i, &g_hostParams[i], false); lgApplyHistoricalTintDefault(i, &g_hostParams[i], true); }
         NSString *p = [NSString stringWithUTF8String:kHostDefaults[i].prefPrefix];
-        g_hostParams[i].pointBezel = i != LGHostIdentifierClock && LGBezelUsesPointWidth(
-            g_enhancedRenderer, prefs[[p stringByAppendingString:@".BezelMode"]],
-            prefs[[p stringByAppendingString:@".BezelRatio"]],
-            prefs[[p stringByAppendingString:@".BezelWidth"]], kHostDefaults[i].bezelWidthPoints);
+        g_hostParams[i].pointBezel = g_enhancedRenderer;
         g_hostParams[i].bezelWidthPoints = LGBezelPointWidth(
-            prefs[[p stringByAppendingString:@".BezelWidth"]], kHostDefaults[i].bezelWidthPoints);
+            prefs[[p stringByAppendingString:@".BezelWidth"]], g_hostParams[i].bezelWidthPoints);
         if (!prefs) continue;
         NSNumber *v;
         if (i == LGHostIdentifierCoverSheet) {
@@ -1658,6 +1673,10 @@ static void lgReloadHostPrefs(void) {
 
         LG_OVR(bezelRatio,      @"BezelRatio");
         LG_OVR(glassThickness,     @"GlassThickness");
+        // Keep Classic's existing legacy-preset interpretation, once per reload.
+        // Enhanced has its own raw upstream values and never enters this path.
+        if (!g_enhancedRenderer && g_hostParams[i].glassThickness > 60.0f)
+            g_hostParams[i].glassThickness /= 6.0f;
         LG_OVR(refractionScale,    @"RefractionScale");
         LG_OVR(refractiveIndex,    @"RefractiveIndex");
         LG_OVR(dispersionStrength, @"DispersionStrength");
@@ -1686,23 +1705,25 @@ static void lgReloadHostPrefs(void) {
             overrides++;
         }
     }
-    LGHostParams *clock = &g_hostParams[LGHostIdentifierClock];
-    const LGHostParams *notification = &g_hostParams[LGHostIdentifierNotification];
-    clock->bezelRatio = notification->bezelRatio;
-    clock->glassThickness = notification->glassThickness;
-    clock->refractionScale = notification->refractionScale;
-    clock->refractiveIndex = notification->refractiveIndex;
-    clock->blur = notification->blur;
-    clock->specularOpacity = notification->specularOpacity;
-    clock->dispersionStrength = notification->dispersionStrength;
-    clock->tintR = notification->tintR;
-    clock->tintG = notification->tintG;
-    clock->tintB = notification->tintB;
-    clock->tintStrength = notification->tintStrength;
-    clock->darkTintR = notification->darkTintR;
-    clock->darkTintG = notification->darkTintG;
-    clock->darkTintB = notification->darkTintB;
-    clock->darkTintStrength = notification->darkTintStrength;
+    if (!g_enhancedRenderer) {
+        LGHostParams *clock = &g_hostParams[LGHostIdentifierClock];
+        const LGHostParams *notification = &g_hostParams[LGHostIdentifierNotification];
+        clock->bezelRatio = notification->bezelRatio;
+        clock->glassThickness = notification->glassThickness;
+        clock->refractionScale = notification->refractionScale;
+        clock->refractiveIndex = notification->refractiveIndex;
+        clock->blur = notification->blur;
+        clock->specularOpacity = notification->specularOpacity;
+        clock->dispersionStrength = notification->dispersionStrength;
+        clock->tintR = notification->tintR;
+        clock->tintG = notification->tintG;
+        clock->tintB = notification->tintB;
+        clock->tintStrength = notification->tintStrength;
+        clock->darkTintR = notification->darkTintR;
+        clock->darkTintG = notification->darkTintG;
+        clock->darkTintB = notification->darkTintB;
+        clock->darkTintStrength = notification->darkTintStrength;
+    }
     g_hostParamsInit = true;
 
     lglog("lgReloadHostPrefs: %s (%d hosts, %d overrides) banner.bezel=%.3f refr=%.2f",
@@ -1818,20 +1839,19 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
     lu.borderWidthPixels = enhancedPipeline ? pixelsPerPoint : 0.0f;
     lu.bezelWidth = LGBezelWidthPixels(hp->pointBezel, hp->bezelWidthPoints,
                                       hp->bezelRatio, shortestF, pixelsPerPoint, maxBezel);
-    float canonicalThickness = hp->glassThickness > 60.0f
-        ? hp->glassThickness / 6.0f : hp->glassThickness;
-    lu.glassThickness     = enhancedPipeline
-        ? canonicalThickness * 6.0f : canonicalThickness;
+    // Each engine's settings and defaults are already in its own units.
+    lu.glassThickness = hp->glassThickness;
     lu.refractionScale    = hp->refractionScale;
     lu.refractiveIndex    = hp->refractiveIndex;
     lu.dispersionStrength = hp->dispersionStrength;
-    lu.fresnelGlareStrength = !strcmp(hp->prefPrefix, "Clock")
+    lu.fresnelGlareStrength = enhancedPipeline ? g_fresnelGlareStrength
+        : !strcmp(hp->prefPrefix, "Clock")
         ? g_fresnelGlareStrength *
               g_hostParams[LGHostIdentifierNotification].specularOpacity
         : 0.0f;
     lu.tintColor          = darkTint ? simd_make_float4(hp->darkTintR, hp->darkTintG, hp->darkTintB, hp->darkTintStrength)
                                   : simd_make_float4(hp->tintR, hp->tintG, hp->tintB, hp->tintStrength);
-    if (!strcmp(hp->prefPrefix, "Clock")) {
+    if (!enhancedPipeline && !strcmp(hp->prefPrefix, "Clock")) {
         LGSpatialClockColorState spatialColor = {};
         bool matchingSpatialColor = lgReadSpatialClockColor(&spatialColor) &&
             spatialColor.appearance == (darkTint ? 2u : 1u);
@@ -1864,7 +1884,7 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
     if (!strcmp(hp->prefPrefix, "TabBarSelection")) {
         LGLensRectSlot lens = {};
         if (LGLensRectRead(LGLensRectSlotTabBarSelection, &lens)) {
-            lu.backdropZoom = 0.85f;
+            lu.backdropZoom = enhancedPipeline ? 0.80f : 0.85f;
             lu.shapeScale   = 1.0f;
             lu.shapeOrigin  = simd_make_float2(lens.originXRatio * (float)w,
                                                lens.originYRatio * (float)h);
@@ -2433,21 +2453,12 @@ static void lgRegisterSystemBlurVariants(void *descriptor) {
 
 // registering before filter table exists breaks system blur, this became a tweak btw check out https://github.com/winaviation-tweaks/Blurless
 static bool registerCustomFilter(void) {
+    if (g_filterRegistered) return true;
     void **filterTableSlot = (void **)LGResolve_FilterTableSlot();
     if (!filterTableSlot) {
         lglog("registerCustomFilter: could not resolve filter_table, aborting (no fallback)");
         return false;
     }
-    if (!*filterTableSlot) {
-        lglog("registerCustomFilter: filter_table null, retrying in 250ms");
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 250 * NSEC_PER_MSEC),
-                       dispatch_get_global_queue(QOS_CLASS_UTILITY, 0),
-                       ^{ registerCustomFilter(); });
-        return false;
-    }
-
-    if (g_filterRegistered) return true; // idempotent
-
     void **gaussCtxSlot = (void **)LGResolve_GaussianCtxSlot();
     if (!gaussCtxSlot) {
         lglog("registerCustomFilter: could not resolve gaussian context, aborting (no fallback)");
@@ -2458,12 +2469,15 @@ static bool registerCustomFilter(void) {
     lglog("registerCustomFilter: g_gaussCtxValue = %p (raw from %p)", g_gaussCtxValue, *gaussCtxSlot);
     void **gaussVtable = (void **)g_gaussCtxValue;
     if (!gaussVtable) {
-        lglog("registerCustomFilter: gaussian vtable not found");
+        lglog("registerCustomFilter: gaussian context pending, retrying in 250ms");
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 250 * NSEC_PER_MSEC),
+                       dispatch_get_global_queue(QOS_CLASS_UTILITY, 0),
+                       ^{ registerCustomFilter(); });
         return false;
     }
     lglog("registerCustomFilter: gaussian vtable @ %p", gaussVtable);
 
-    int edgeInfoSlot =
+    int edgeInfoSlot = g_gaussianHooksInstalled ? g_gaussianEdgeInfoSlot :
         LGResolve_EdgeInfoVtableSlot((void * const *)gaussVtable,
                                      (int)kVtableSlots);
     if (edgeInfoSlot < 0 || edgeInfoSlot >= (int)kVtableSlots) {
@@ -2473,7 +2487,7 @@ static bool registerCustomFilter(void) {
     }
     lglog("registerCustomFilter: edge-info vtable slot = %d", edgeInfoSlot);
 
-    int renderSlot = LGResolve_RenderVtableSlot((void * const *)gaussVtable,
+    int renderSlot = g_gaussianHooksInstalled ? g_gaussianRenderSlot : LGResolve_RenderVtableSlot((void * const *)gaussVtable,
                                                 (int)kVtableSlots);
     if (renderSlot < 0 && g_legacyRenderABI && edgeInfoSlot >= 3) {
         int candidate = edgeInfoSlot - 3;
@@ -2499,6 +2513,28 @@ static bool registerCustomFilter(void) {
               (void *)g_internAtom, (void *)g_addFilter);
         return false;
     }
+    // Prepare passthrough hooks as soon as Gaussian exists, but publish no
+    // custom atoms until QuartzCore has created the filter table.
+    if (g_useHookPath && !g_gaussianHooksInstalled) {
+        if (!lgInstallGaussianHooks(gaussVtable[0], gaussVtable[edgeInfoSlot],
+                                   gaussVtable[renderSlot])) {
+            lglog("registerCustomFilter: Gaussian hooks install failed");
+            return false;
+        }
+        // Subsequent retries must not scan function bodies already patched by
+        // the hook backend, or install another hook on the same entry points.
+        g_gaussianEdgeInfoSlot = edgeInfoSlot;
+        g_gaussianRenderSlot = renderSlot;
+        g_gaussianHooksInstalled = true;
+    }
+    if (!*filterTableSlot) {
+        lglog("registerCustomFilter: filter_table null, retrying in 250ms");
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 250 * NSEC_PER_MSEC),
+                       dispatch_get_global_queue(QOS_CLASS_UTILITY, 0),
+                       ^{ registerCustomFilter(); });
+        return false;
+    }
+
     uint32_t atomId    = g_internAtom(kCustomFilterTypeName);
     uint32_t gaussAtom = g_internAtom("gaussianBlur");
     lglog("registerCustomFilter: atom('%s')=0x%x  gaussian=0x%x  collision=%s",
@@ -2507,13 +2543,7 @@ static bool registerCustomFilter(void) {
 
     void *registrationDescriptor = nullptr;
     if (g_useHookPath) {
-
-        if (!lgInstallGaussianHooks(gaussVtable[0],
-                                    gaussVtable[edgeInfoSlot],
-                                    gaussVtable[renderSlot])) {
-            lglog("registerCustomFilter: Gaussian hooks install failed");
-            return false;
-        }
+        if (!g_gaussianHooksInstalled) return false;
         registrationDescriptor = gaussCtxSlot;
     } else {
         g_origGaussR13 = (Render13Fn)LGSymMakeCallable(gaussVtable[renderSlot]);
