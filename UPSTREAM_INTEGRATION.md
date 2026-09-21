@@ -172,7 +172,7 @@ this press/drag effect. Constant idle glass was offered but has not been request
 Diagnostics so far are read-only; no device preferences or view properties were
 changed and no processes were restarted by the diagnostic tools.
 
-## Enhanced bezel width and geometry (source integration, not packaged yet)
+## Enhanced bezel width and geometry (banana36 test build)
 
 - Classic retains its previous ratio calculations and shader behavior. The shared
   CPU/Classic/Enhanced uniform declaration gains the same border-width field.
@@ -195,5 +195,21 @@ changed and no processes were restarted by the diagnostic tools.
 Validation: legacy/point precedence, pixel scaling/caps and settings gate tests;
 unchanged Classic shader body and pre-existing host defaults; matching uniform
 fields/offsets; both real Metal shader compilations and GPU edge/alpha/border tests.
-No full package build, installation, publication, or device settings change is
-part of this source integration.
+The source integration passed these checks before packaging. The subsequent
+banana36 local test build is recorded below; no device settings were changed.
+
+## banana36 local test packages
+
+Version `0.1.1b+banana36`, containing the Enhanced bezel/geometry work from
+`ae1905e`. RootHide and Rootless were built sequentially with their respective
+Theos installations. Both packages passed metadata, four universal-binary slices,
+symbol UUID, loader path, font, localized clock/blur/bezel control, version,
+changelog and postinst checks. The installer does not terminate backboardd.
+
+Artifacts: `packages/iya.iapple.liquidass_0.1.1b+banana36_iphoneos-arm64.deb`
+and `packages/iya.iapple.liquidass_0.1.1b+banana36_iphoneos-arm64e.deb`.
+Checksums/validation: `packages/release/v0.1.1b-banana36/`.
+Symbols: `packages/symbols/banana36/{rootless,roothide}/`.
+Install manually and restart userspace. Select Enhanced and complete its profile
+restart before evaluating the new geometry. Device appearance remains unverified.
+No push, tag, GitHub release or automatic installation was performed.
