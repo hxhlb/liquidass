@@ -377,7 +377,10 @@ static const CGFloat kLGGlassEdgeWidth = 1.0;
 
     if (LGUsesDynamicRadiusType(base) && !CGRectIsEmpty(self.bounds)) {
         CGFloat shortest = MIN(CGRectGetWidth(self.bounds), CGRectGetHeight(self.bounds));
-        CGFloat ratio = shortest > 0.0 ? self.layer.cornerRadius / shortest : 0.0;
+        BOOL keyboard = LGEnhancedRendererProfileAtLaunch() &&
+            LGHostIdentifierForFilterType(base.UTF8String) == LGHostIdentifierKeyboard;
+        CGFloat radius = keyboard ? _lgShapeCornerRadius : self.layer.cornerRadius;
+        CGFloat ratio = shortest > 0.0 ? radius / shortest : 0.0;
         CGFloat exact = MAX(0.0, MIN(0.5, ratio)) * kLGDynamicRadiusSteps;
         NSInteger step = (NSInteger)llround(exact);
         if (_lastRadiusStep >= 0 && fabs(exact - (CGFloat)_lastRadiusStep) < 0.75)
@@ -469,6 +472,11 @@ static const CGFloat kLGGlassEdgeWidth = 1.0;
 - (void)setLgShapeRect:(CGRect)rect {
     if (CGRectEqualToRect(_lgShapeRect, rect)) return;
     _lgShapeRect = rect;
+    if (LGEnhancedRendererProfileAtLaunch() &&
+        LGHostIdentifierForFilterType(_lgFilterType.UTF8String) == LGHostIdentifierKeyboard) {
+        _filterAttached = NO;
+        [self applyFilters];
+    }
     if (_nativeBlurView) [self updateNativeBlurOverlayWithRadius:_nativeBlurView.blurRadius];
     [self updateSpecular];
 }
@@ -476,6 +484,11 @@ static const CGFloat kLGGlassEdgeWidth = 1.0;
 - (void)setLgShapeCornerRadius:(CGFloat)radius {
     if (fabs(_lgShapeCornerRadius - radius) < 0.01) return;
     _lgShapeCornerRadius = radius;
+    if (LGEnhancedRendererProfileAtLaunch() &&
+        LGHostIdentifierForFilterType(_lgFilterType.UTF8String) == LGHostIdentifierKeyboard) {
+        _filterAttached = NO;
+        [self applyFilters];
+    }
     if (_nativeBlurView) [self updateNativeBlurOverlayWithRadius:_nativeBlurView.blurRadius];
     [self updateSpecular];
 }
@@ -655,7 +668,8 @@ static const CGFloat kLGGlassEdgeWidth = 1.0;
             wantScale = kLGClockCaptureScale;
         } else if (hostIdentifier == LGHostIdentifierCoverSheet ||
                    (LGEnhancedRendererProfileAtLaunch() &&
-                    hostIdentifier == LGHostIdentifierTabBar)) {
+                    (hostIdentifier == LGHostIdentifierTabBar ||
+                     hostIdentifier == LGHostIdentifierTabBarSelection))) {
             wantScale = 1.0;
         } else {
             wantScale = LGUsesPrefsControlCaptureScale(_lgFilterType)

@@ -40,12 +40,11 @@ an offscreen cover sheet retains a translated frame and window.
 
 ## Explicitly deferred renderer work
 
-The current blur path remains the default. The follow-up below adds an optional
-system blur overlay; it does not replace the shader, change the material parameter
-units, retune existing host defaults or import the upstream specular motion rewrite.
-Classic/Enhanced modes and current motion frame/visibility limits stay.
-The new host registry entries use Banana ratio/thickness units provisionally;
-their visual tuning belongs to the renderer follow-up.
+The current blur path remains the default. Optional system blur and the Enhanced
+bezel/geometry follow-up are described below. Existing material tuning and Classic
+shader calculations remain intact. Upstream material retuning, specular motion
+rewrite and filter-registration ordering are still deferred. Classic/Enhanced
+modes and current motion frame/visibility limits stay.
 
 Do not import upstream `lgClearAccessibilityFiles` unchanged: it removes the
 persisted backboardd crash guard and hook-probe files before the guard is checked.
@@ -155,3 +154,46 @@ fixture fails on banana34 and passes on this fix.
 
 `test_assistive_glow.py` and `test_volume_hud.py` pass. Actual fixed-package
 visibility, touch behavior and glass appearance remain pending device validation.
+
+### banana35 device follow-up
+
+The user confirmed the volume HUD now works on iOS 17.3.1 RootHide. AssistiveTouch
+subsequently returned. The user initially reported no glass effect while idle,
+but later confirmed that pressing/dragging shows it, matching upstream behavior. Both system AssistiveTouch and the
+LiquidAss surface preference read enabled. The live rocker has 60x60 bounds and
+a valid generated glow image; no newer AssistiveTouch crash report was observed.
+The launch service retains prior crash/backoff records, so the exact delayed
+visibility recovery trigger has not been proved.
+
+Idle inspection shows the custom glass filter attached, but its parent
+`ASSHeldGlassView` is hidden with alpha 0. Upstream explicitly shows that container
+only during press/drag and hides it on release. The user subsequently confirmed
+this press/drag effect. Constant idle glass was offered but has not been requested.
+Diagnostics so far are read-only; no device preferences or view properties were
+changed and no processes were restarted by the diagnostic tools.
+
+## Enhanced bezel width and geometry (source integration, not packaged yet)
+
+- Classic retains its previous ratio calculations and shader behavior. The shared
+  CPU/Classic/Enhanced uniform declaration gains the same border-width field.
+- Enhanced gains per-surface `BezelMode`: compatible ratio or fixed width in pt.
+  An explicit mode wins; otherwise a saved width selects points, a saved ratio
+  keeps compatibility, and fresh surfaces use upstream point defaults. Dynamic
+  Island keeps its legacy default because upstream supplies no corresponding host.
+  No preferences are destructively rewritten. Both keys remain exportable.
+- The mode/point slider is visible only under Enhanced; the inactive unit's slider
+  is disabled. Returning to Classic always uses the original ratio, retaining the
+  Enhanced choice. The clock keeps its existing dedicated mask-width path.
+- Fixed widths use upstream's `scale * 2` render conversion, capped at half the
+  surface's shortest side. CoverSheet uses its shared pixels-per-point value when
+  available. Actual cross-device visual scaling still needs device validation.
+- Enhanced shader ports upstream keyboard bottom extension/refraction suppression,
+  cover-sheet top refraction suppression, hard subshape clipping and border lift.
+  The keyboard filter uses its shape radius; TabBarSelection receives full capture
+  scale under Enhanced. Existing tint, thickness, zoom and highlighter tuning stay.
+
+Validation: legacy/point precedence, pixel scaling/caps and settings gate tests;
+unchanged Classic shader body and pre-existing host defaults; matching uniform
+fields/offsets; both real Metal shader compilations and GPU edge/alpha/border tests.
+No full package build, installation, publication, or device settings change is
+part of this source integration.

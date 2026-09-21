@@ -290,3 +290,8 @@
 "prefs.renderer.blur_mode.subtitle" = "僅限 Enhanced。作用於獨立玻璃表面（含時鐘自訂圖層）；時鐘原生修改維持原有方式。可搭配各表面的「模糊」強度比較。";
 "prefs.renderer.blur_mode.current" = "目前方式";
 "prefs.renderer.blur_mode.system" = "系統模糊圖層";
+"prefs.bezel.mode.title" = "邊緣寬度模式";
+"prefs.bezel.mode.subtitle" = "Enhanced 可保留原比例或使用固定寬度；Classic 繼續使用比例。";
+"prefs.bezel.mode.ratio" = "相容比例";
+"prefs.bezel.mode.points" = "固定寬度";
+"prefs.bezel.width.subtitle" = "以 pt 為單位，實際寬度不超過表面短邊的一半。";

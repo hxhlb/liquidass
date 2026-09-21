@@ -4,6 +4,7 @@
 #import "LGPrefsLiquidSwitch.h"
 #import "../Shared/LGSharedSupport.h"
 #import "../Shared/LGHostRegistry.h"
+#import "../Shared/LGBezelGeometry.h"
 #import <notify.h>
 
 NSString * const kLGPrefsUIRefreshNotification = @"LGPrefsUIRefreshNotification";
@@ -519,6 +520,15 @@ static CGFloat LGDefaultBezelRatioForHost(NSString *prefix, const LGHostDefiniti
     return screenWidth > 0.0 ? cornerRadius / screenWidth : host->bezelRatio;
 }
 
+static BOOL LGBezelUsesPointsForPrefix(NSString *prefix, BOOL enhanced) {
+    const LGHostDefinition *host = LGHostDefinitionForPreferencePrefix(prefix.UTF8String);
+    if (!host) return NO;
+    return LGBezelUsesPointWidth(enhanced,
+        LGReadPreferenceObject([prefix stringByAppendingString:@".BezelMode"], nil),
+        LGReadPreferenceObject([prefix stringByAppendingString:@".BezelRatio"], nil),
+        LGReadPreferenceObject([prefix stringByAppendingString:@".BezelWidth"], nil), host->bezelWidthPoints);
+}
+
 NSArray<NSDictionary *> *LGRendererItemsForHostPrefix(NSString *prefix) {
     const LGHostDefinition *host = LGHostDefinitionForPreferencePrefix(prefix.UTF8String);
     if (!host) return @[];
@@ -557,6 +567,28 @@ NSArray<NSDictionary *> *LGRendererItemsForHostPrefix(NSString *prefix) {
         LGGlassSpecularSetting(key(@"SpecularOpacity"), host->specularOpacity, 0.0, 1.0, 2),
         LGGlassBlurSetting(key(@"Blur"), host->blur, 0.0, 50.0, 1),
     ]];
+    if (![prefix isEqualToString:@"Clock"]) {
+        NSMutableDictionary *ratio = [items[1] mutableCopy];
+        ratio[@"bezel_host"] = prefix;
+        ratio[@"bezel_units"] = @"ratio";
+        items[1] = ratio.copy;
+        NSMutableDictionary *mode = [LGMenuSetting(key(@"BezelMode"),
+            LGLocalized(@"prefs.bezel.mode.title"), LGLocalized(@"prefs.bezel.mode.subtitle"),
+            LGBezelUsesPointsForPrefix(prefix, YES) ? @"points" : @"ratio", @[
+                @{ @"value": @"ratio", @"title": LGLocalized(@"prefs.bezel.mode.ratio") },
+                @{ @"value": @"points", @"title": LGLocalized(@"prefs.bezel.mode.points") },
+            ]) mutableCopy];
+        mode[@"enhanced_only"] = @YES;
+        mode[@"reload_on_change"] = @YES;
+        NSMutableDictionary *width = [LGSliderSetting(key(@"BezelWidth"),
+            LGLocalized(@"prefs.control.bezel_width"), LGLocalized(@"prefs.bezel.width.subtitle"),
+            LGBezelPointWidth(nil, host->bezelWidthPoints), 0.0, 80.0, 1) mutableCopy];
+        width[@"enhanced_only"] = @YES;
+        width[@"bezel_host"] = prefix;
+        width[@"bezel_units"] = @"points";
+        [items insertObject:width.copy atIndex:1];
+        [items insertObject:mode.copy atIndex:1];
+    }
     if (![prefix isEqualToString:@"AssistiveTouch"]) {
         [items addObject:@{
             @"type": @"color", @"key": key(@"LightTintColor"),
@@ -594,11 +626,19 @@ NSArray<NSDictionary *> *LGRendererItemsForHostPrefix(NSString *prefix) {
 }
 
 BOOL LGPrefsItemIsEnabled(NSDictionary *item) {
-    return ![item[@"requires_enhanced_renderer"] boolValue] ||
-        [LGReadPreferenceObject(@"Renderer.Profile", @"classic") isEqual:@"enhanced"];
+    BOOL enhanced = [LGReadPreferenceObject(@"Renderer.Profile", @"classic") isEqual:@"enhanced"];
+    if ([item[@"requires_enhanced_renderer"] boolValue] && !enhanced) return NO;
+    NSString *prefix = item[@"bezel_host"];
+    if (prefix.length) {
+        BOOL points = LGBezelUsesPointsForPrefix(prefix, enhanced);
+        return points == [item[@"bezel_units"] isEqualToString:@"points"];
+    }
+    return YES;
 }
 
 BOOL LGPrefsItemIsVisible(NSDictionary *item) {
+    if ([item[@"enhanced_only"] boolValue] &&
+        ![LGReadPreferenceObject(@"Renderer.Profile", @"classic") isEqual:@"enhanced"]) return NO;
     NSString *visibleKey = item[@"visible_key"];
     NSArray *visibleValues = item[@"visible_values"];
     if (!visibleKey.length || visibleValues.count == 0) return YES;

@@ -14,6 +14,7 @@ PRELUDE = r'''
 #include <math.h>
 #include <stdio.h>
 #import "LGHostRegistry.h"
+#import "LGBezelGeometry.h"
 static NSDictionary *prefs;
 static BOOL enhancedAtLaunch;
 static id LGGlassPreferenceValue(NSString *key) { return prefs[key]; }
@@ -155,6 +156,7 @@ def main():
     source=PRELUDE+function(live,'- (void)updateNativeBlurOverlayWithRadius:(CGFloat)radius {')+'\n@end\n'
     for sig in ('static BOOL LGUsesSystemBlurOverlay(', 'static CGFloat LGNativeBlurRadiusForFilterType('):
         source+=function(live,sig)+'\n'
+    source+=function(prefs,'static BOOL LGBezelUsesPointsForPrefix(')+'\n'
     source+=function(prefs,'BOOL LGPrefsItemIsEnabled(')+MAIN
     routes='''#import <Foundation/Foundation.h>\n#import <os/lock.h>\n#include <unordered_map>\n#include <unordered_set>\n#include <string>\n#include <assert.h>\n#include <math.h>\n#import "LGHostRegistry.h"\n'''
     # Copy the production host table and routing implementation unchanged.

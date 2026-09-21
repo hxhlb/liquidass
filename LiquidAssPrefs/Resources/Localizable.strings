@@ -265,3 +265,8 @@
 "prefs.renderer.blur_mode.subtitle" = "Enhanced only. Applies to standalone glass surfaces, including the custom clock layer. Native clock modification keeps its current behavior. Use each surface’s Blur control to compare.";
 "prefs.renderer.blur_mode.current" = "Current method";
 "prefs.renderer.blur_mode.system" = "System blur layer";
+"prefs.bezel.mode.title" = "Edge width mode";
+"prefs.bezel.mode.subtitle" = "Enhanced: keep the saved proportional edge, or use a fixed width in points. Classic retains proportional edges.";
+"prefs.bezel.mode.ratio" = "Compatible ratio";
+"prefs.bezel.mode.points" = "Fixed width";
+"prefs.bezel.width.subtitle" = "Width in points, capped at half the surface’s shortest side.";

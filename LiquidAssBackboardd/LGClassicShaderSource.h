@@ -26,6 +26,7 @@ struct Uniforms {
     float  useGlyphMask;
     float  dispersionStrength;
     float  fresnelGlareStrength;
+    float  borderWidthPixels;
     float4 tintColor;
 };
 

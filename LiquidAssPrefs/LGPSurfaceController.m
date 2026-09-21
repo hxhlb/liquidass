@@ -115,7 +115,7 @@ static void LGRefreshCoverSheetBezelRatioControl(UIView *root, CGFloat cornerRad
             if (!item) continue;
             BOOL visible = LGPrefsItemIsVisible(item);
             BOOL enabled = LGPrefsItemIsEnabled(item);
-            if ([item[@"requires_enhanced_renderer"] boolValue])
+            if ([item[@"requires_enhanced_renderer"] boolValue] || item[@"bezel_host"])
                 subview.userInteractionEnabled = enabled;
             void (^changes)(void) = ^{
                 subview.hidden = !visible;
@@ -471,6 +471,16 @@ static void LGRestartAssistiveTouchDaemon(void) {
 - (void)handlePrefsUIRefresh:(NSNotification *)notification {
     (void)notification;
     if (!self.isViewLoaded) return;
+    for (NSDictionary *item in _items) {
+        NSString *key = item[@"key"];
+        if ([key hasSuffix:@".BezelMode"] || [key isEqualToString:@"Renderer.Profile"]) {
+            // Resetting removes the legacy key as well, which can change the
+            // inferred unit. Rebuild the menu default and control eligibility.
+            [self reloadLocalizedContent];
+            [self reloadVisibleSettings];
+            return;
+        }
+    }
     [self animateVisibleControlsToDefaults];
 }
 

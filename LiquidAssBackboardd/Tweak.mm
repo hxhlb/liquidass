@@ -2,6 +2,7 @@
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 #import "../Shared/LGHostRegistry.h"
+#import "../Shared/LGBezelGeometry.h"
 #import "../Shared/LGLensRectState.h"
 #import "LGSymbolResolver.h"
 #import "../Shared/LGCoverSheetState.h"
@@ -293,6 +294,7 @@ typedef struct {
     float       useGlyphMask;
     float       dispersionStrength;
     float       fresnelGlareStrength;
+    float       borderWidthPixels;
     simd_float4 tintColor;
 } LGUniforms;
 
@@ -498,6 +500,7 @@ struct Uniforms {
     float  useGlyphMask;
     float  dispersionStrength;
     float  fresnelGlareStrength;
+    float  borderWidthPixels;
     float4 tintColor;
 };
 
@@ -658,6 +661,7 @@ float4 liquidGlassPixel(texture2d<float, access::sample> src,
 
     float2 localUV = (float2(gid) + 0.5) / float2(W, H);
     bool isCoverSheet = u.useGlyphMask < -0.5;
+    bool isKeyboard = u.useGlyphMask > 0.0 && u.useGlyphMask < 0.5;
     float2 captureUV = localUV;
     float2 capturePx = localUV * u.resolution;
     float2 px = capturePx;
@@ -750,6 +754,10 @@ float4 liquidGlassPixel(texture2d<float, access::sample> src,
         }
 
         float2 lensPx = px - (isCoverSheet ? u.lensOrigin : shapeInset);
+        if (isKeyboard) {
+            fh += max(R, bezel);
+            shortest = min(fw, fh);
+        }
         float2 halfSize = float2(fw, fh) * 0.5;
         float2 p = lensPx - halfSize;
         float2 core;
@@ -785,7 +793,7 @@ float4 liquidGlassPixel(texture2d<float, access::sample> src,
             cornerBlend = saturate(min(q.x, q.y) /
                                    max(min(extent.x, extent.y), 0.001));
         }
-        if (signedDistance > 1.0) {
+        if (signedDistance > (subShape ? 0.0 : 1.0)) {
             return subShape ? float4(0.0) : src.sample(s, captureUV);
         }
 
@@ -821,10 +829,10 @@ float4 liquidGlassPixel(texture2d<float, access::sample> src,
             dir = float2((dL < dR && dL == dm) ? -1.0 : (dR <= dL && dR == dm) ?  1.0 : 0.0,
                          (dT < dB && dT == dm) ? -1.0 : (dB <= dT && dB == dm) ?  1.0 : 0.0);
         }
-        edgeOpacity = clamp(1.0 - max(0.0, signedDistance), 0.0, 1.0);
+        edgeOpacity = subShape ? 1.0 : clamp(1.0 - max(0.0, signedDistance), 0.0, 1.0);
     }
 
-    if (u.useGlyphMask < 0.5 && !isCoverSheet && R >= 0.5 && bezel > R) {
+    if (u.useGlyphMask < 0.5 && !isCoverSheet && !isKeyboard && R >= 0.5 && bezel > R) {
         float cornerScale = R >= shortest * 0.49 ? R
                                                  : min(R * 1.528, shortest * 0.5);
         float taper = cornerBlend * cornerBlend * (3.0 - 2.0 * cornerBlend);
@@ -840,6 +848,9 @@ float4 liquidGlassPixel(texture2d<float, access::sample> src,
     float normDisp = (distFromSide < bezel) ?
         quartzGlassEdgeProfile(distFromSide,
                                min(max(u.glassThickness, 1.0), bezel)) : 0.0;
+
+    if ((isCoverSheet && dir.y <= -abs(dir.x)) ||
+        (isKeyboard && dir.y >= abs(dir.x))) normDisp = 0.0;
 
     float2 textureDir = dir;
     if (isCoverSheet && coverOrientation == 2.0) {
@@ -928,6 +939,8 @@ float4 liquidGlassPixel(texture2d<float, access::sample> src,
     highlight *= mix(0.32, 1.0, luminance);
     highlight = min(highlight, 0.22);
     outRGB = 1.0 - (1.0 - outRGB) * (1.0 - highlight);
+    if (subShape && distFromSide <= u.borderWidthPixels)
+        outRGB = 1.0 - (1.0 - outRGB) * 0.82;
     return float4(outRGB, edgeOpacity);
 }
 
@@ -1468,6 +1481,7 @@ static void ensureUniforms(__unsafe_unretained id<MTLDevice> device, uint64_t w,
     u->useGlyphMask            = 0.f;
     u->dispersionStrength      = 5.0f;
     u->fresnelGlareStrength    = 0.5f;
+    u->borderWidthPixels       = 0.0f;
     lglog("uniforms buffer allocated (geometry refreshed per-frame)");
 }
 
@@ -1492,6 +1506,7 @@ typedef struct {
     uint32_t    atom;
     float       radiusRatio;
     float       bezelRatio;
+    float       bezelWidthPoints;
     float       glassThickness;
     float       refractionScale;
     float       refractiveIndex;
@@ -1500,11 +1515,12 @@ typedef struct {
     float       dispersionStrength;
     float       tintR, tintG, tintB, tintStrength;
     float       darkTintR, darkTintG, darkTintB, darkTintStrength;
+    bool        pointBezel;
 } LGHostParams;
 
 static const LGHostParams kHostDefaults[] = {
-#define LG_BACKBOARDD_HOST(identifier, type, prefix, radius, bezel, thickness, refraction, index, blurValue, specular, dispersion, lightTint, darkTint) \
-    { type, prefix, 0, radius, bezel, thickness, refraction, index, blurValue, specular, dispersion },
+#define LG_BACKBOARDD_HOST(identifier, type, prefix, radius, bezel, widthPoints, thickness, refraction, index, blurValue, specular, dispersion, lightTint, darkTint) \
+    { type, prefix, 0, radius, bezel, widthPoints, thickness, refraction, index, blurValue, specular, dispersion },
     LG_HOST_REGISTRY(LG_BACKBOARDD_HOST)
 #undef LG_BACKBOARDD_HOST
 };
@@ -1623,8 +1639,14 @@ static void lgReloadHostPrefs(void) {
         g_hostParams[i].atom = keepAtom;
         g_darkAtoms[i] = keepDarkAtom;
         if (i > 0) { lgApplyHistoricalTintDefault(i, &g_hostParams[i], false); lgApplyHistoricalTintDefault(i, &g_hostParams[i], true); }
-        if (!prefs) continue;
         NSString *p = [NSString stringWithUTF8String:kHostDefaults[i].prefPrefix];
+        g_hostParams[i].pointBezel = i != LGHostIdentifierClock && LGBezelUsesPointWidth(
+            g_enhancedRenderer, prefs[[p stringByAppendingString:@".BezelMode"]],
+            prefs[[p stringByAppendingString:@".BezelRatio"]],
+            prefs[[p stringByAppendingString:@".BezelWidth"]], kHostDefaults[i].bezelWidthPoints);
+        g_hostParams[i].bezelWidthPoints = LGBezelPointWidth(
+            prefs[[p stringByAppendingString:@".BezelWidth"]], kHostDefaults[i].bezelWidthPoints);
+        if (!prefs) continue;
         NSNumber *v;
         if (i == LGHostIdentifierCoverSheet) {
             id storedBezelRatio = prefs[[p stringByAppendingString:@".BezelRatio"]];
@@ -1791,8 +1813,11 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
     lu.radius          = radiusRatio * shortestF;
     float maxBezel = !strcmp(hp->prefPrefix, "CoverSheet")
         ? shortestF * 0.5f : kMaxBezelPx;
-    lu.bezelWidth      = fminf(hp->bezelRatio * shortestF, maxBezel);
     bool enhancedPipeline = g_enhancedRenderer;
+    float pixelsPerPoint = fmaxf(0.1f, scale * 2.0f);
+    lu.borderWidthPixels = enhancedPipeline ? pixelsPerPoint : 0.0f;
+    lu.bezelWidth = LGBezelWidthPixels(hp->pointBezel, hp->bezelWidthPoints,
+                                      hp->bezelRatio, shortestF, pixelsPerPoint, maxBezel);
     float canonicalThickness = hp->glassThickness > 60.0f
         ? hp->glassThickness / 6.0f : hp->glassThickness;
     lu.glassThickness     = enhancedPipeline
@@ -1847,7 +1872,8 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
                                                lens.heightRatio * (float)h);
             float shapeShortest = fminf(lu.shapeSize.x, lu.shapeSize.y);
             lu.radius = radiusRatio * shapeShortest;
-            lu.bezelWidth = fminf(hp->bezelRatio * shapeShortest, kMaxBezelPx);
+            lu.bezelWidth = LGBezelWidthPixels(hp->pointBezel, hp->bezelWidthPoints,
+                                              hp->bezelRatio, shapeShortest, pixelsPerPoint, kMaxBezelPx);
         }
     }
 
@@ -1862,12 +1888,14 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
                                               lens.heightRatio * (float)h);
             float shapeShortest = fminf(lu.shapeSize.x, lu.shapeSize.y);
             lu.radius = radiusRatio * shapeShortest;
-            lu.bezelWidth = fminf(hp->bezelRatio * shapeShortest, kMaxBezelPx);
+            lu.bezelWidth = LGBezelWidthPixels(hp->pointBezel, hp->bezelWidthPoints,
+                                              hp->bezelRatio, shapeShortest, pixelsPerPoint, kMaxBezelPx);
         } else {
             lu.shapeScale = 0.75f;
             float shapeShortest = shortestF * lu.shapeScale;
             lu.radius = radiusRatio * shapeShortest;
-            lu.bezelWidth = fminf(hp->bezelRatio * shapeShortest, kMaxBezelPx);
+            lu.bezelWidth = LGBezelWidthPixels(hp->pointBezel, hp->bezelWidthPoints,
+                                              hp->bezelRatio, shapeShortest, pixelsPerPoint, kMaxBezelPx);
         }
 
     }
@@ -1886,6 +1914,8 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
             float pixelsPerPoint = fminf(pixelsPerPointX, pixelsPerPointY);
             lu.bezelWidth = fmaxf(1.0f, g_clockMaskBezelWidthPoints * pixelsPerPoint);
         }
+    } else if (enhancedPipeline && !strcmp(hp->prefPrefix, "Keyboard")) {
+        lu.useGlyphMask = 0.25f;
     } else if (!strcmp(hp->prefPrefix, "CoverSheet")) {
 
         lu.useGlyphMask = -1.f;
@@ -1918,7 +1948,12 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
                 lu.radius = coverSheetCornerRadiusPoints * pixelsPerPoint;
             }
         }
-        if (!g_coverSheetBezelRatioOverride && coverStateValid &&
+        if (hp->pointBezel && coverStateValid &&
+            state.pixelsPerPoint >= 1.0f && state.pixelsPerPoint <= 4.0f) {
+            lu.bezelWidth = LGBezelWidthPixels(YES, hp->bezelWidthPoints,
+                hp->bezelRatio, shortestF, state.pixelsPerPoint, maxBezel);
+        }
+        if (!hp->pointBezel && !g_coverSheetBezelRatioOverride && coverStateValid &&
             state.pixelsPerPoint >= 1.0f && state.pixelsPerPoint <= 4.0f && w > 0) {
             float screenWidthPoints = (float)w / state.pixelsPerPoint;
             float cornerRadiusPoints = lu.radius / state.pixelsPerPoint;
