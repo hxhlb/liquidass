@@ -1,0 +1,29 @@
+Vertical floating Dock rim fix — private test build
+
+Branch: fix/vertical-dock-rim-upstream
+Base: iya/upstream-0.1.1-2b-dual-clock / 71d0eb0 (banana37)
+Upstream/main was already merged by 73e7aa2 and is included in banana37.
+Test package: 0.1.1b+banana37.verticaldock1, RootHide.
+
+Scope:
+- Only the native MTMaterialView returned by SBFloatingDockPlatterView.backgroundView while it is vertical.
+- Include narrow vertical material in the Dock matcher.
+- After native platter layout, synchronize its final corner radius and corner curve into the existing glass and rim.
+- Correct sub-0.5pt changes only for this vertical adapter; generic horizontal tolerances are unchanged.
+- A previously-owned vertical Dock restores native horizontal radius tracking on exit, and removes stale overlays when its background is replaced, invalid or detached.
+- Shared renderer/router, host defaults, ordinary horizontal and iOS15 direct Dock functions, icons and other surfaces are unchanged.
+
+Host checks:
+python3.11 tests/test_vertical_dock_geometry.py
+Covers final radius/rim, small radius and curve changes, 1000 stable callbacks without geometry/filter/rim rewrites, horizontal restoration, background replacement, disable/detach cleanup, and Library/non-background exclusion.
+The test compiles actual matcher, adapter, routing and sync methods with a Foundation/QuartzCore lifecycle model; it is not phone rendering proof.
+
+Phone acceptance:
+1. Keep the accepted DuoFlow version and its margin value unchanged.
+2. Enable ASS Dock glass and DuoFlow vertical Dock; compare outer rim on Home and inside a landscape app.
+3. Rotate back and forth and switch Home/App; the rim should follow native corners without a large capsule or a stale second outline.
+4. Change DuoFlow right margin; the rim should stay aligned with the same Dock.
+5. Disable vertical Dock; ordinary horizontal Dock should retain its former appearance.
+6. Disable ASS Dock glass; the native background should return without a retained rim.
+
+No phone installation/restart or APT publication was performed by the agent.

@@ -3,6 +3,7 @@
 #import "../Shared/LGGlassKit.h"
 #import "../Shared/LGSharedSupport.h"
 #import <objc/runtime.h>
+#import <objc/message.h>
 
 typedef NS_ENUM(NSInteger, LGDockMode) {
     LGDockModeNone = 0,
@@ -13,6 +14,11 @@ typedef NS_ENUM(NSInteger, LGDockMode) {
 static const void *kDockHomeButtonBorderKey = &kDockHomeButtonBorderKey;
 static const void *kIOS15DockGlassKey = &kIOS15DockGlassKey;
 static const void *kIOS15DockBackgroundKey = &kIOS15DockBackgroundKey;
+static const void *kVerticalDockMaterialKey = &kVerticalDockMaterialKey;
+
+@interface LGLiveBackdropView (LGVerticalDockShapeSync)
+- (void)updateSpecular;
+@end
 
 @interface SBDockView : UIView
 @property (nonatomic, readonly) UIView *backgroundView;
@@ -30,6 +36,36 @@ static BOOL dockInsideCategoryStackBackground(UIView *view) {
     return NO;
 }
 
+static UIView *dockBackgroundForPlatter(UIView *platter) {
+    SEL selector = @selector(backgroundView);
+    Method method = class_getInstanceMethod(object_getClass(platter), selector);
+    char type[32] = {0};
+    if (!method || method_getNumberOfArguments(method) != 2) return nil;
+    method_getReturnType(method, type, sizeof(type));
+    if (type[0] != '@') return nil;
+    id background = ((id (*)(id, SEL))objc_msgSend)(platter, selector);
+    return [background isKindOfClass:UIView.class] ? background : nil;
+}
+
+static BOOL dockIsVerticalFloatingMaterial(UIView *material) {
+    if (!isExactClass(material, @"MTMaterialView")) return NO;
+    CGSize size = material.bounds.size;
+    if (size.width < 24.0 || size.height <= size.width) return NO;
+    Class platterClass = NSClassFromString(@"SBFloatingDockPlatterView");
+    if (!platterClass) return NO;
+    for (UIView *parent = material.superview; parent; parent = parent.superview) {
+        if ([parent isKindOfClass:platterClass]) {
+            // Only the native platter background, never Library cards/icons.
+            return dockBackgroundForPlatter(parent) == material;
+        }
+    }
+    return NO;
+}
+
+static CGFloat dockCornerRadiusForMaterial(UIView *material) {
+    return dockIsVerticalFloatingMaterial(material) ? material.layer.cornerRadius : -1.0;
+}
+
 static LGDockMode dockModeForMaterial(UIView *material) {
     // each dock family exposes different host geometry
     BOOL regular = hasAncestorOfClassName(material, @"SBDockView");
@@ -42,6 +78,7 @@ static LGDockMode dockModeForMaterial(UIView *material) {
               NSStringFromCGRect(material.bounds), material.window.screen.scale,
               regular, floating, exact, stacked);
     if (!exact || stacked) return LGDockModeNone;
+    if (dockIsVerticalFloatingMaterial(material)) return LGDockModeFloating;
 
     CGSize size = material.bounds.size;
     if (size.width < 160.0 || size.height < 40.0) {
@@ -109,6 +146,68 @@ static void configureDockGlass(UIView *material, LGLiveBackdropView *glass) {
           (long)mode, homeButtonDock, NSStringFromCGRect(material.bounds),
           NSStringFromCGRect(glass.frame));
 }
+
+static void dockSyncVerticalGlassAfterLayout(UIView *platter) {
+    UIView *material = dockBackgroundForPlatter(platter);
+    UIView *previous = objc_getAssociatedObject(platter, kVerticalDockMaterialKey);
+    BOOL vertical = dockIsVerticalFloatingMaterial(material);
+    if (previous && (previous != material || !platter.window || !vertical)) {
+        objc_setAssociatedObject(platter, kVerticalDockMaterialKey, nil,
+                                 OBJC_ASSOCIATION_ASSIGN);
+        if (previous != material || !platter.window ||
+            dockModeForMaterial(previous) == LGDockModeNone) {
+            LGRemoveGlassFromMaterial(previous, kGlassKey);
+        } else {
+            // Leaving a previously-owned vertical Dock: restore the existing
+            // horizontal route and its native-radius tracking after layout.
+            LGLiveBackdropView *glass = LGInstallRegisteredGlassInMaterial(
+                previous, kGlassKey, @"Dock", UIEdgeInsetsZero, -1.0, nil);
+            if (glass) configureDockGlass(previous, glass);
+        }
+    }
+    if (!vertical || !platter.window) return;
+
+    // Native layout sets the background frame before its continuous radius.
+    // Synchronize only after %orig completed, using that final radius for both
+    // the glass and its specular masks. No fixed corner value or global hook.
+    CGFloat radius = material.layer.cornerRadius;
+    LGLiveBackdropView *glass = LGInstallRegisteredGlassInMaterial(
+        material, kGlassKey, @"Dock", UIEdgeInsetsZero, radius, nil);
+    if (glass) {
+        NSString *curve = material.layer.cornerCurve;
+        BOOL curveChanged = glass.layer.cornerCurve != curve &&
+                            ![glass.layer.cornerCurve isEqualToString:curve];
+        // The generic injector tolerates 0.5pt; the vertical rim must track
+        // even smaller native radius changes, without changing horizontal rules.
+        if (fabs(glass.layer.cornerRadius - radius) > 0.001 || curveChanged) {
+            glass.layer.cornerRadius = radius;
+            glass.layer.cornerCurve = curve;
+            [glass updateSpecular];
+            [glass applyFilters];
+        }
+        objc_setAssociatedObject(platter, kVerticalDockMaterialKey, material,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        configureDockGlass(material, glass);
+    }
+}
+
+%group LGVerticalFloatingDockLifecycle
+
+%hook SBFloatingDockPlatterView
+
+- (void)layoutSubviews {
+    %orig;
+    dockSyncVerticalGlassAfterLayout((UIView *)self);
+}
+
+- (void)didMoveToWindow {
+    %orig;
+    dockSyncVerticalGlassAfterLayout((UIView *)self);
+}
+
+%end
+
+%end
 
 static void removeIOS15DockGlass(UIView *dockView) {
     LGLiveBackdropView *glass = objc_getAssociatedObject(dockView,
@@ -191,12 +290,14 @@ static void installIOS15DockGlass(UIView *dockView) {
 %ctor {
     LGRegisterMaterialHost(@"Dock", 80, ^BOOL(UIView *material) {
         return dockModeForMaterial(material) != LGDockModeNone;
-    }, UIEdgeInsetsZero, ^CGFloat(__unused UIView *material) {
-
-        return -1.0;
+    }, UIEdgeInsetsZero, ^CGFloat(UIView *material) {
+        return dockCornerRadiusForMaterial(material);
     }, nil, ^(UIView *material, LGLiveBackdropView *glass) {
         configureDockGlass(material, glass);
     });
+    if (NSClassFromString(@"SBFloatingDockPlatterView")) {
+        %init(LGVerticalFloatingDockLifecycle);
+    }
     if (dockUsesIOS15DirectGlass() && NSClassFromString(@"SBDockView")) {
         %init(LGIOS15DirectDockLifecycle);
     }
