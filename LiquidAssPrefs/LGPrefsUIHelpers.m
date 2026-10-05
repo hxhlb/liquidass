@@ -1569,6 +1569,18 @@ static void LGPresentAppList(UIViewController *controller, NSString *key,
     [specifier setProperty:@YES forKey:@"showIdentifiersAsSubtitle"];
 
     Class altClass = NSClassFromString(@"ATLApplicationListMultiSelectionController");
+    if (!altClass) {
+        [[NSBundle bundleWithPath:@"/Library/PreferenceBundles/AltList.bundle"] load];
+        altClass = NSClassFromString(@"ATLApplicationListMultiSelectionController");
+    }
+    if (!altClass) {
+        [[NSBundle bundleWithPath:jbroot(@"/Library/PreferenceBundles/AltList.bundle")] load];
+        altClass = NSClassFromString(@"ATLApplicationListMultiSelectionController");
+    }
+    if (!altClass) {
+        [[NSBundle bundleWithPath:jbroot(@"/Library/Frameworks/AltList.framework")] load];
+        altClass = NSClassFromString(@"ATLApplicationListMultiSelectionController");
+    }
     UIViewController *list = altClass ? [altClass new] : nil;
     if (list) {
         if ([list respondsToSelector:@selector(setSpecifier:)]) {

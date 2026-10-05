@@ -908,7 +908,6 @@ static void ccRefreshContentContainerGlass(UIView *container) {
 
 - (void)viewDidDisappear:(BOOL)animated {
     %orig;
-
 }
 
 - (void)viewDidLayoutSubviews {

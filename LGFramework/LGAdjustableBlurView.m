@@ -35,7 +35,9 @@
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    [self applyFilters];
+    if (self.layer.filters.count == 0) {
+        [self applyFilters];
+    }
 }
 
 - (void)setBlurRadius:(CGFloat)blurRadius {
@@ -59,7 +61,7 @@
         [layer setValue:@(self.qualityScale) forKey:@"scale"];
 
         NSArray *existing = layer.filters;
-        if (existing.count == 1) {
+        if (existing.count >= 1) {
             NSString *type = nil;
             @try { type = [existing[0] valueForKey:@"type"]; } @catch (...) {}
             if ([type isEqualToString:@"gaussianBlur"]) {

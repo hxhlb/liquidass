@@ -1173,7 +1173,7 @@ static NSArray<NSString *> *LGCustomViewRuleKeys(NSString *ruleID) {
         @"SiblingClass", @"ClearBackground", @"BezelWidth",
         @"GlassThickness", @"RefractionScale", @"RefractiveIndex",
         @"DispersionEnabled", @"DispersionStrength", @"SpecularEnabled", @"SpecularMode",
-        @"SpecularOpacity", @"Blur", @"Quality", @"CustomScaleEnabled", @"CustomScale",
+        @"SpecularOpacity", @"Blur", @"CustomScaleEnabled", @"CustomScale",
         @"LightTintColor", @"DarkTintColor", @"APIManaged", @"APINonRemovable",
         @"APIHiddenFromPrefs", @"APIDefaults", @"APIUserOverrides"
     ];

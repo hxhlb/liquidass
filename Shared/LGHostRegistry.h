@@ -24,12 +24,12 @@ typedef struct {
 //    host            filter                            pref             corner          bezel      thick   refr  index  blur  spec   disp   light        dark
 #define LG_HOST_REGISTRY(X) \
     X(Default,        "dylv.liquidglass.refraction",   "Default",         28.0f / 220.0f, 20.00f,    108.0f, 2.6f, 1.80f, 1.0f, 0.85f, 2.00f, "#FFFFFF1A", "#00000000") \
-    X(FolderIcon,     "dylv.liquidglass.folder",       "FolderIcon",      28.0f / 220.0f, 13.75f,    108.0f, 2.6f, 1.80f, 1.0f, 0.85f, 1.00f, "#FFFFFF1A", "#00000000") \
+    X(FolderIcon,     "dylv.liquidglass.folder",       "FolderIcon",      28.0f / 220.0f, 13.75f,    108.0f, 2.6f, 1.80f, 1.0f, 0.85f, 0.00f, "#FFFFFF1A", "#00000000") \
     X(OpenFolder,     "dylv.liquidglass.openfolder",   "OpenFolder",      28.0f / 220.0f, 36.00f,    108.0f, 2.6f, 1.80f, 1.0f, 0.85f, 0.00f, "#FFFFFF1A", "#00000000") \
     X(Dock,           "dylv.liquidglass.dock",         "Dock",            0.35f,          17.50f,    120.0f, 2.6f, 1.60f, 1.0f, 0.85f, 0.00f, "#FFFFFF1A", "#00000000") \
     X(Banner,         "dylv.liquidglass.banner",       "Banner",          28.0f / 220.0f, 20.75f,    132.0f, 1.6f, 1.60f, 1.0f, 0.85f, 0.00f, "#FFFFFFCC", "#00000080") \
     X(Notification,   "dylv.liquidglass.notification", "Notification",    28.0f / 220.0f, 20.75f,    132.0f, 1.6f, 1.60f, 1.0f, 0.85f, 0.00f, "#FFFFFF00", "#00000000") \
-    X(ControlCenter,  "dylv.liquidglass.cc",           "ControlCenter",   28.0f / 220.0f, 15.50f,    120.0f, 1.8f, 1.60f, 0.0f, 0.85f, 2.00f, "#FFFFFF1A", "#00000000") \
+    X(ControlCenter,  "dylv.liquidglass.cc",           "ControlCenter",   28.0f / 220.0f, 15.50f,    120.0f, 1.8f, 1.60f, 1.0f, 0.85f, 2.00f, "#FFFFFF1A", "#00000000") \
     X(AppLibrary,     "dylv.liquidglass.applibpod",    "AppLibrary",      28.0f / 220.0f, 25.00f,    120.0f, 2.2f, 1.60f, 1.0f, 0.85f, 2.00f, "#FFFFFF1A", "#00000000") \
     X(AppLibSearch,   "dylv.liquidglass.applibsearch", "AppLibSearch",    0.50f,          25.00f,    108.0f, 1.8f, 1.60f, 1.0f, 0.85f, 2.00f, "#FFFFFF1A", "#00000000") \
     X(Spotlight,      "dylv.liquidglass.spotlight",    "Spotlight",       0.50f,          25.00f,    108.0f, 1.8f, 1.60f, 1.0f, 0.85f, 2.00f, "#FFFFFFCC", "#0000004d") \
@@ -52,7 +52,7 @@ typedef struct {
     X(AssistiveTouch, "dylv.liquidglass.assistivetouch","AssistiveTouch", 0.50f,          22.80f,    18.00f, 2.75f, 2.10f, 0.5f, 0.85f, 0.00f, "#00000000", "#00000000") \
     X(VolumeHUD,      "dylv.liquidglass.volumehud",    "VolumeHUD",       0.50f,          28.00f,    280.0f, 3.00f, 3.20f, 1.0f, 0.85f, 1.20f, "#B8B8B8CC", "#666666CC") \
     X(PillHUD,        "dylv.liquidglass.pillhud",      "PillHUD",         0.50f,          17.50f,    120.0f, 2.2f, 1.70f, 1.0f, 0.85f, 1.20f, "#FFFFFF1A", "#0000002E") \
-    X(CustomViews,    "dylv.liquidglass.custom",       "CustomViews",     0.15f,          16.00f,    100.0f, 1.5f, 1.50f, 1.0f, 0.85f, 2.00f, "#00000000", "#00000000")
+    X(CustomViews,    "dylv.liquidglass.custom",       "CustomViews",     0.15f,          16.00f,    100.0f, 1.5f, 1.50f, 1.0f, 0.85f, 0.00f, "#00000000", "#00000000")
 
 enum LGHostIdentifier {
 #define LG_HOST_ENUM(identifier, ...) LGHostIdentifier##identifier,

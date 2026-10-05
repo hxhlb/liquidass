@@ -138,10 +138,12 @@
             return;
         }
         [layer setValue:@NO forKey:@"layerUsesCoreImageFilters"];
-        [layer setValue:@YES forKey:@"windowServerAware"];
+        [layer setValue:@NO forKey:@"windowServerAware"];
+        [layer setValue:@(0.35) forKey:@"scale"];
         if (![layer valueForKey:@"groupName"]) {
             [layer setValue:[NSString stringWithFormat:@"dylv.liquidglass.satblur.%p", self] forKey:@"groupName"];
         }
+        [layer setValue:@"dylv.liquidglass" forKey:@"groupNamespace"];
         Class filterClass = NSClassFromString(@"CAFilter");
         if (!filterClass) return;
         SEL selector = NSSelectorFromString(@"filterWithType:");
@@ -154,7 +156,7 @@
             [filters addObject:blurFilter];
         }
         if (satFilter) {
-            [satFilter setValue:@1.80 forKey:@"inputAmount"];
+            [satFilter setValue:@1.50 forKey:@"inputAmount"];
             [filters addObject:satFilter];
         }
         layer.filters = filters;

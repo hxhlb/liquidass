@@ -72,11 +72,19 @@ static CFStringRef const kLGParametersReloadedNotification =
 static NSHashTable<LGLiveBackdropView *> *sLGAllGlasses;
 static BOOL sLGFilterRefreshSetup;
 
+static NSString *LGPreferencePrefixForFilterType(NSString *filterType, const LGHostDefinition *host) {
+    if ([filterType hasPrefix:@"dylv.liquidglass.custom."]) {
+        NSString *ruleID = [filterType substringFromIndex:@"dylv.liquidglass.custom.".length];
+        return [NSString stringWithFormat:@"CustomViews.Rule.%@", ruleID];
+    }
+    return host ? [NSString stringWithUTF8String:host->preferencePrefix] : nil;
+}
+
 LGGlassRimMode LGGlassRimModeForFilterType(NSString *filterType) {
     if (!filterType.length) return LGGlassRimModeGlass;
     const LGHostDefinition *host = LGHostDefinitionForFilterType(filterType.UTF8String);
     if (!host) return LGGlassRimModeGlass;
-    NSString *prefix = [NSString stringWithUTF8String:host->preferencePrefix];
+    NSString *prefix = LGPreferencePrefixForFilterType(filterType, host);
     if (!prefix.length) return LGGlassRimModeGlass;
     id mode = LGGlassPreferenceValue([prefix stringByAppendingString:@".SpecularMode"]);
     if ([mode isKindOfClass:NSString.class]) {
@@ -175,13 +183,15 @@ static BOOL LGUsesDynamicRadiusType(NSString *filterType) {
 static CGFloat LGNativeBlurRadiusForFilterType(NSString *filterType) {
     const LGHostDefinition *host = LGHostDefinitionForFilterType(filterType.UTF8String);
     if (!host) return 0.0;
-    if (LGHostIdentifierForDefinition(host) == LGHostIdentifierControlCenter) {
-        return 0.0;
+    NSString *prefix = LGPreferencePrefixForFilterType(filterType, host);
+    id value = prefix.length ? LGGlassPreferenceValue([prefix stringByAppendingString:@".Blur"]) : nil;
+    if ([value respondsToSelector:@selector(doubleValue)]) {
+        return MAX(0.0, [value doubleValue]);
     }
-    NSString *prefix = [NSString stringWithUTF8String:host->preferencePrefix];
-    id value = LGGlassPreferenceValue([prefix stringByAppendingString:@".Blur"]);
-    return [value respondsToSelector:@selector(doubleValue)]
-        ? MAX(0.0, [value doubleValue]) : host->blur;
+    if (LGHostIdentifierForDefinition(host) == LGHostIdentifierControlCenter) {
+        return 1.0;
+    }
+    return host->blur;
 }
 
 static const CGFloat kLGScaleMax    = 0.75;
@@ -201,7 +211,7 @@ static CGFloat LGScaleBudget(void) {
 static NSNumber *LGCustomScaleForFilterType(NSString *filterType) {
     const LGHostDefinition *host = LGHostDefinitionForFilterType(filterType.UTF8String);
     if (!host) return nil;
-    NSString *prefix = [NSString stringWithUTF8String:host->preferencePrefix];
+    NSString *prefix = LGPreferencePrefixForFilterType(filterType, host);
     id enabled = LGGlassPreferenceValue([prefix stringByAppendingString:@".CustomScaleEnabled"]);
     enum LGHostIdentifier identifier = LGHostIdentifierForDefinition(host);
     BOOL enabledByDefault = identifier == LGHostIdentifierClock ||
@@ -239,22 +249,34 @@ static CGFloat LGScaleForSize(CGSize s) {
 - (void)reapplyFilterForParameterReload;
 @end
 
+static dispatch_block_t sLGParametersReloadWorkItem;
+
 static void LGParametersReloaded(CFNotificationCenterRef center, void *observer,
                                  CFStringRef name, const void *object,
                                  CFDictionaryRef userInfo) {
     (void)center; (void)observer; (void)name; (void)object; (void)userInfo;
     dispatch_async(dispatch_get_main_queue(), ^{
-
-        LGInvalidateGlassPreferenceCache();
-        NSArray<LGLiveBackdropView *> *glasses = sLGAllGlasses.allObjects;
-        LGLog(@"render parameters ready; refreshing %lu live filters",
-              (unsigned long)glasses.count);
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        for (LGLiveBackdropView *glass in glasses) {
-            [glass reapplyFilterForParameterReload];
+        if (sLGParametersReloadWorkItem) {
+            dispatch_block_cancel(sLGParametersReloadWorkItem);
+            sLGParametersReloadWorkItem = nil;
         }
-        [CATransaction commit];
+        sLGParametersReloadWorkItem = dispatch_block_create(DISPATCH_BLOCK_INHERIT_QOS_CLASS, ^{
+            LGInvalidateGlassPreferenceCache();
+            NSArray<LGLiveBackdropView *> *glasses = sLGAllGlasses.allObjects;
+            LGLog(@"render parameters ready; refreshing %lu live filters",
+                  (unsigned long)glasses.count);
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES];
+            for (LGLiveBackdropView *glass in glasses) {
+                if (glass.window && !glass.window.hidden && glass.alpha > 0.01) {
+                    [glass reapplyFilterForParameterReload];
+                }
+            }
+            [CATransaction commit];
+            sLGParametersReloadWorkItem = nil;
+        });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), sLGParametersReloadWorkItem);
     });
 }
 
@@ -561,6 +583,10 @@ static NSString *LGCurrentBackdropBlurMethod(void) {
 
 - (void)updateNativeBlurOverlayWithRadius:(CGFloat)radius {
     NSString *method = LGCurrentBackdropBlurMethod();
+    BOOL isCC = (LGHostIdentifierForFilterType(_lgFilterType.UTF8String) == LGHostIdentifierControlCenter);
+    if (isCC) {
+        method = @"material";
+    }
     if ([method isEqualToString:@"none"] || radius <= 0.01) {
         if (_nativeBlurView) {
             [_nativeBlurView removeFromSuperview];
@@ -700,7 +726,7 @@ static NSString *LGCurrentBackdropBlurMethod(void) {
     CGFloat maxAlpha = self.lgSpecularOpacityOverride
         ? self.lgSpecularOpacityOverride.doubleValue : 0.85;
     if (!self.lgSpecularOpacityOverride && host) {
-        NSString *prefix = [NSString stringWithUTF8String:host->preferencePrefix];
+        NSString *prefix = LGPreferencePrefixForFilterType(_lgFilterType, host);
         id value = prefix.length
             ? LGGlassPreferenceValue([prefix stringByAppendingString:@".SpecularOpacity"])
             : nil;
@@ -896,6 +922,11 @@ static NSString *LGCurrentBackdropBlurMethod(void) {
             ? self.lgNativeBlurRadiusOverride.doubleValue
             : LGNativeBlurRadiusForFilterType(_lgFilterType ?: wantType);
 
+        if (_filterAttached && layer.filters.count > 0 && _nativeBlurView &&
+            fabs(blurRadius - _nativeBlurRadius) <= 0.01) {
+            return;
+        }
+
         if (!filterCls) { sblog("CAFilter class not found"); return; }
 
         id glassFilter = ((id (*)(Class, SEL, NSString *))objc_msgSend)(
@@ -1020,7 +1051,8 @@ static void LGSyncGlassGeometry(UIView *mat, const void *assocKey,
     CGRect gf = LGOutsetFrame(mat.frame, outset);
     CGFloat radius = (cornerRadius >= 0.0) ? cornerRadius : mat.layer.cornerRadius;
 
-    if (!CGRectEqualToRect(glass.frame, gf)) {
+    BOOL frameChanged = !CGRectEqualToRect(glass.frame, gf);
+    if (frameChanged) {
         glass.frame = gf;
     }
     CGFloat shortest = fmin(CGRectGetWidth(gf), CGRectGetHeight(gf));
@@ -1029,13 +1061,15 @@ static void LGSyncGlassGeometry(UIView *mat, const void *assocKey,
     } else {
         glass.layer.cornerCurve = kCACornerCurveContinuous;
     }
-    if (fabs(glass.layer.cornerRadius - radius) > 0.5) {
+    BOOL radiusChanged = fabs(glass.layer.cornerRadius - radius) > 0.5;
+    if (radiusChanged) {
         glass.layer.cornerRadius = radius;
+    }
+    if (frameChanged || radiusChanged) {
         [glass updateSpecular];
         [glass applyFilters];
-    } else {
-        [glass updateSpecular];
     }
+
     if (!mat.hidden) mat.hidden = YES;
 }
 

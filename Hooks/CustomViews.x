@@ -172,35 +172,43 @@ static void LGCustomApply(UIView *view) {
                                  OBJC_ASSOCIATION_COPY_NONATOMIC);
         LGLog(@"custom view attached rule=%@ class=%@", ruleID,
               NSStringFromClass(view.class));
+        glass.lgSpecularEnabledOverride = nil;
+        glass.lgSpecularOpacityOverride = @(LG_prefFloat(LGCustomRuleKey(rule, @"SpecularOpacity"),
+                                                         kLGHostRegistry[LGHostIdentifierCustomViews].specularOpacity));
+        glass.lgNativeBlurRadiusOverride = @(LG_prefFloat(LGCustomRuleKey(rule, @"Blur"),
+                                                          kLGHostRegistry[LGHostIdentifierCustomViews].blur));
+        [glass applyFilters];
     }
     if (glass.superview != view.superview)
         [view.superview insertSubview:glass belowSubview:view];
-    glass.bounds = view.bounds;
-    glass.center = view.center;
+    if (!CGRectEqualToRect(glass.bounds, view.bounds)) glass.bounds = view.bounds;
+    if (!CGPointEqualToPoint(glass.center, view.center)) glass.center = view.center;
     glass.transform = view.transform;
-    glass.layer.cornerRadius = view.layer.cornerRadius;
+    if (glass.layer.cornerRadius != view.layer.cornerRadius) glass.layer.cornerRadius = view.layer.cornerRadius;
     glass.layer.cornerCurve = view.layer.cornerCurve;
     glass.layer.maskedCorners = view.layer.maskedCorners;
     glass.layer.masksToBounds = YES;
-    glass.lgSpecularEnabledOverride = nil;
-    glass.lgSpecularOpacityOverride = @(LG_prefFloat(LGCustomRuleKey(rule, @"SpecularOpacity"),
-                                                     kLGHostRegistry[LGHostIdentifierCustomViews].specularOpacity));
-    glass.lgNativeBlurRadiusOverride = @(LG_prefFloat(LGCustomRuleKey(rule, @"Blur"),
-                                                      kLGHostRegistry[LGHostIdentifierCustomViews].blur));
-    [glass applyFilters];
 }
 
 static NSArray<NSString *> *LGCustomRuleIDs(void) {
     CFPropertyListRef value = CFPreferencesCopyAppValue(CFSTR("CustomViews.RuleIDs"),
                                                         (__bridge CFStringRef)LGPrefsDomain);
     id stored = CFBridgingRelease(value);
-    return [stored isKindOfClass:NSArray.class] ? stored : @[];
+    if ([stored isKindOfClass:NSArray.class]) return stored;
+    if ([stored isKindOfClass:NSString.class]) {
+        NSData *data = [(NSString *)stored dataUsingEncoding:NSUTF8StringEncoding];
+        if (data) {
+            id parsed = [NSPropertyListSerialization propertyListWithData:data options:0 format:NULL error:NULL];
+            if ([parsed isKindOfClass:NSArray.class]) return (NSArray<NSString *> *)parsed;
+        }
+    }
+    return @[];
 }
 
 static void LGCustomScanView(UIView *view) {
     if ([sLGCustomTargetClasses containsObject:NSStringFromClass(view.class)] ||
         objc_getAssociatedObject(view, kLGCustomGlassKey)) LGCustomApply(view);
-    for (UIView *child in view.subviews) LGCustomScanView(child);
+    for (UIView *child in [view.subviews copy]) LGCustomScanView(child);
 }
 
 static void LGCustomReload(void) {
@@ -337,6 +345,7 @@ BOOL LGCVRegister(NSString *identifier, NSDictionary *configuration,
     NSString *base = [@"CustomViews.Rule." stringByAppendingString:identifier];
     NSString *managedKey = [base stringByAppendingString:@".APIManaged"];
     NSString *existingKey = [base stringByAppendingString:@".TargetClass"];
+    BOOL anyPreferenceChanged = NO;
     @synchronized (LGCustomAPILock()) {
         id managed = CFBridgingRelease(CFPreferencesCopyAppValue(
             (__bridge CFStringRef)managedKey, (__bridge CFStringRef)LGPrefsDomain));
@@ -353,7 +362,7 @@ BOOL LGCVRegister(NSString *identifier, NSDictionary *configuration,
             @"ChildClass": @"", @"GrandchildClass": @"", @"DescendantClass": @"",
             @"SiblingClass": @"", @"ClearBackground": @YES,
             @"BezelWidth": @16.0, @"GlassThickness": @100.0, @"RefractionScale": @1.5,
-            @"RefractiveIndex": @1.5, @"DispersionEnabled": @YES, @"DispersionStrength": @2.0,
+            @"RefractiveIndex": @1.5, @"DispersionEnabled": @NO, @"DispersionStrength": @0.0,
             @"SpecularMode": @"glass", @"SpecularOpacity": @0.5, @"Blur": @8.0,
             @"CustomScaleEnabled": @NO, @"CustomScale": @1.0,
             @"LightTintColor": @"#00000000", @"DarkTintColor": @"#00000000"
@@ -385,16 +394,34 @@ BOOL LGCVRegister(NSString *identifier, NSDictionary *configuration,
         NSMutableArray<NSString *> *ruleIDs = [LGCustomRuleIDs() mutableCopy];
         if (![ruleIDs containsObject:identifier]) [ruleIDs addObject:identifier];
         updates[@"CustomViews.RuleIDs"] = ruleIDs;
-        CFPreferencesSetMultiple((__bridge CFDictionaryRef)updates, NULL,
-                                 (__bridge CFStringRef)LGPrefsDomain,
-                                 kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
-        CFPreferencesAppSynchronize((__bridge CFStringRef)LGPrefsDomain);
+        if (!LG_prefBool(@"CustomViews.Enabled", NO)) {
+            updates[@"CustomViews.Enabled"] = @YES;
+        }
+
+        anyPreferenceChanged = NO;
+        for (NSString *prefKey in updates) {
+            id oldVal = CFBridgingRelease(CFPreferencesCopyAppValue(
+                (__bridge CFStringRef)prefKey, (__bridge CFStringRef)LGPrefsDomain));
+            if (![oldVal isEqual:updates[prefKey]]) {
+                anyPreferenceChanged = YES;
+                break;
+            }
+        }
+
+        if (anyPreferenceChanged) {
+            CFPreferencesSetMultiple((__bridge CFDictionaryRef)updates, NULL,
+                                     (__bridge CFStringRef)LGPrefsDomain,
+                                     kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+            CFPreferencesAppSynchronize((__bridge CFStringRef)LGPrefsDomain);
+        }
     }
 
-    LGReloadPreferences();
-    LGInvalidateGlassPreferenceCache();
-    LGCustomReload();
-    notify_post(LGPrefsChangedNotificationCString);
+    if (anyPreferenceChanged) {
+        LGReloadPreferences();
+        LGInvalidateGlassPreferenceCache();
+        LGCustomReload();
+        notify_post(LGPrefsChangedNotificationCString);
+    }
     return YES;
 }
 
@@ -423,6 +450,9 @@ BOOL LGCVRemove(NSString *identifier, NSError **error) {
         }
 
         NSMutableArray<NSString *> *ruleIDs = [LGCustomRuleIDs() mutableCopy];
+        if (![ruleIDs containsObject:identifier]) {
+            return YES;
+        }
         [ruleIDs removeObject:identifier];
         NSArray *suffixes = @[
             @"Name", @"Enabled", @"TargetClass", @"ParentClass", @"GrandparentClass",
