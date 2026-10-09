@@ -1,5 +1,9 @@
 iOS 16 Dynamic Island glass — banana38 private test build
 
+2026-10-09 UPDATE: an iOS 16 userspace-restart spinner hang has been reported.
+Pause the restart acceptance steps below pending version/log identification.
+See DYNAMIC_ISLAND_STARTUP_INVESTIGATION.txt; host checks are not startup proof.
+
 Branch: iya/ios16-dynamic-island-glass
 Base: 4d1953f (vertical Dock fix merged and pushed to banana)
 Reported target: iOS 16.3; black background both collapsed and expanded.

@@ -1,0 +1,58 @@
+Open investigation — iOS 16 userspace restart hang (2026-10-09)
+
+User report: with only Dynamic Island enabled, banana38 on iOS 16.5 Rootless
+gets stuck at the spinner after a userspace restart. Rolling back to banana33
+restores successful startup. Exact device/build and matching logs are pending.
+banana39/40 appearance and music code is therefore excluded from this failure.
+Do not recommend another userspace-restart acceptance run until this is triaged.
+Host regression/build success does not validate cold userspace startup.
+
+Known version boundaries:
+- banana38 / 09890ca: enables the existing Dynamic Island lifecycle, native
+  gain-map keepalive and proxy layer class on iOS 16; adjusts shadow callbacks.
+- banana39 / 359f0e0: adds appearance hooks in content-producing UIKit processes,
+  a scoped child-trait setter, window theme observer and late framework loader.
+- banana40 / f743889: adds a private Light palette for the music island view.
+
+Candidates to distinguish, not established causes:
+1. SpringBoard/gain-map initialization with a freshly restarted render server.
+   Proxy +layerClass is active from constructor time; native keepalive creation
+   depends on an available SBRootSceneWindow or applicationDidFinishLaunching.
+2. Repeated process crashes versus watchdog/launch timeout during startup.
+3. Content-framework/trait lifecycle introduced in 39, if the affected package
+   actually includes it. Music palette cannot explain a failure on 38 or 39.
+4. Renderer/backboardd initialization or another installed tweak interaction;
+   enabling only one setting is not proof that only one constructor/hook runs.
+
+Needed evidence:
+- Exact installed package version and Rootless/RootHide architecture.
+- Device model, iOS version/build, jailbreak and current recovery status.
+- Failure time and corresponding SpringBoard/backboardd .ips files; if no crash
+  exists, any watchdog/Jetsam or launch failure report from the same time.
+- Whether the report concerns the first full userspace restart since enabling
+  the feature, versus an already-running session after a SpringBoard restart.
+
+For symbolication, match reported binary UUIDs against the retained
+packages/symbols-banana38, symbols-banana39 or symbols-banana40 archive first.
+Do not diagnose from a different build's addresses.
+
+No restart, instrumentation or recovery action was performed on the affected
+iOS 16 device. No startup-hang fix has been established or published.
+
+Received backboardd-2026-10-09-173721.ips:
+- Actual metadata: iPhone15,2, iOS 16.3 / 20D47, SIGABRT, main-thread exception
+  through +[UIScreen mainScreen]. This differs from the reported iOS 16.5.
+- liquidass.dylib arm64e UUID 27DEE519-9CE9-37C4-B9BD-497163E30574 matches
+  packages/symbols/banana33/rootless/liquidass-arm64e.uuid.txt exactly.
+  It does not match the retained banana38 Rootless artifact.
+- Offset 0x474ac = ____logosLocalCtor_76d9a6c6_block_invoke + 0x38.
+  Reprocessing banana33 Hooks/Keyboard.x with Logos reproduces that ctor ID.
+  Its preference-reload block calls LGKeyboardRefreshReportedGeometry(UIScreen.mainScreen).
+- Offset 0x601c4 = ___lgEnablePrefsReloadCallback_block_invoke + 0x328,
+  the shared dispatcher executing registered preference callbacks.
+- banana38 already guards the Keyboard ctor with LGIsExcludedSystemProcess(),
+  and that helper explicitly excludes backboardd.
+- This establishes an old keyboard-callback crash, not the reported banana38
+  cold-start failure. An old mapped process or post-rollback report is possible;
+  do not infer either explanation without matched timing/version evidence.
+- Keep the iOS 16 startup investigation open until the matching report arrives.

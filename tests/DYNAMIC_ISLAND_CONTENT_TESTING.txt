@@ -1,5 +1,9 @@
 Dynamic Island content appearance — banana39 private test build
 
+2026-10-09 UPDATE: an iOS 16 userspace-restart spinner hang has been reported.
+Pause the restart acceptance steps below pending version/log identification.
+See DYNAMIC_ISLAND_STARTUP_INVESTIGATION.txt; host checks are not startup proof.
+
 User confirmed banana38 glass works. New issue affects both system content and
 third-party Live Activities: white text loses contrast on glass in Light mode.
 This is a general island appearance problem, not an iOS 16-only compatibility fix.
@@ -80,3 +84,38 @@ cover is unchanged; then Dark -> Light, track change and collapsed -> expanded.
 Control Center and Lock Screen music should retain their native palettes.
 This fixes the confirmed music path; it does not prove all other activity types
 or app-defined fixed colors are covered. No additional user setting is required.
+
+banana41 investigation and candidate (iPhone 13 Pro Max, iOS 17.3.1 RootHide):
+- Installed package was verified as banana40. The user reports music and recording
+  content still white. Do not count banana39/40 host tests as device success.
+- Read-only SpringBoard snapshots show UIScreen style 1 and island window style 1.
+  The active com.apple.MediaRemoteUI SBSystemApertureSceneElement exposes
+  ActivityUIServices.ActivitySceneSettings with userInterfaceStyle 2.
+- SpringBoard method IMPs for both source and music hooks resolve to liquidass.dylib.
+  OS file-mapping inspection confirms liquidass.dylib also loads in MediaRemoteUI
+  and ReplayKitAngel. The generic injection filter was therefore not the problem.
+- Frida attachment to MediaRemoteUI failed and its PID changed; no repeat attach,
+  process kill or automatic relaunch was performed. Remaining content-process
+  state was not read. Do not claim exact remote per-view colors were observed.
+- A real UIKit iOS 18.6 probe independently shows an App forced Dark can report
+  UIScreen style 2 while the simulator remains globally Light. UIScreen inside
+  a content service is not an authoritative SpringBoard-theme source.
+- Candidate hooks the existing SBSystemApertureSceneElement mutable-settings
+  update, after the original, to apply the host's style to that dedicated scene.
+  Preserves the native value for disable/restoration and updates tracked scenes
+  on host theme changes. No ordinary app scenes are registered by this adapter.
+- Gate the new host adapter to iOS 17+ and SpringBoard; do not access UIScreen
+  from non-host refresh callbacks or initialize island content in backboardd.
+- Additional host regression: python3.11 tests/test_dynamic_island_host_appearance.py
+
+Acceptance for the prepared RootHide candidate:
+1. Installation/restart on the iPhone requires separate authorization; the user
+   has authorized only read-only diagnostics so far.
+2. After installation, re-read the host scene settings: SpringBoard Light must
+   propagate style 1 to the active music scene, and Dark must propagate style 2.
+3. Confirm title, time and playback controls in actual expanded/collapsed UI,
+   with artwork preserved; repeat the user's recording case.
+4. If scene style is fixed but text remains white, inspect that actual content
+   path before adding another palette adapter. No success claim before this.
+5. Keep the iOS 16.5/banana38 startup report separate; the supplied .ips matches
+   iOS 16.3/banana33 and does not close that investigation.

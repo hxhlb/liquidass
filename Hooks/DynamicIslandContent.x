@@ -128,6 +128,7 @@ static void LGRefreshIslandContent(UIWindow *window) {
 }
 
 static void LGRefreshIslandMedia(UIWindow *window);
+static void LGRefreshIslandHostedScenes(void);
 
 %group LGIslandContentLifecycle
 %hook SBUISystemApertureElementSource
@@ -155,6 +156,7 @@ static void LGRefreshIslandMedia(UIWindow *window);
     if (previous.userInterfaceStyle != self.traitCollection.userInterfaceStyle) {
         LGRefreshIslandContent(self);
         LGRefreshIslandMedia(self);
+        LGRefreshIslandHostedScenes();
     }
 }
 %end
@@ -265,6 +267,101 @@ static void LGRefreshIslandMedia(UIWindow *window) {
 %end
 %end
 
+#pragma mark - Authoritative appearance for remote island scenes
+
+@interface NSObject (LGIslandHostedScene)
+- (id)scene;
+- (id)settings;
+- (NSInteger)userInterfaceStyle;
+- (void)setUserInterfaceStyle:(NSInteger)style;
+- (void)updateSettingsWithBlock:(void (^)(id settings))block;
+@end
+
+@interface LGIslandSceneAppearance : NSObject
+@property (nonatomic) NSInteger nativeStyle;
+@property (nonatomic) NSInteger appliedStyle;
+@end
+@implementation LGIslandSceneAppearance @end
+
+static NSMapTable<id, LGIslandSceneAppearance *> *sLGIslandHostedScenes;
+
+static NSInteger LGIslandHostAppearance(void) {
+    // Called only in SpringBoard. The remote service's UIScreen may itself be
+    // forced Dark by its ActivitySceneSettings, even when SpringBoard is Light.
+    return UIScreen.mainScreen.traitCollection.userInterfaceStyle;
+}
+
+static void LGApplyIslandHostedAppearance(id element, id settings) {
+    id scene = [element scene];
+    if (!scene || ![settings respondsToSelector:@selector(userInterfaceStyle)]
+        || ![settings respondsToSelector:@selector(setUserInterfaceStyle:)]
+        || ![scene respondsToSelector:@selector(updateSettingsWithBlock:)]) return;
+    LGIslandSceneAppearance *state = [sLGIslandHostedScenes objectForKey:scene];
+    NSInteger hostStyle = LGIslandHostAppearance();
+    BOOL enabled = LGIslandContentEnabled()
+        && (hostStyle == UIUserInterfaceStyleLight || hostStyle == UIUserInterfaceStyleDark);
+    if (!enabled) {
+        if (state) {
+            if ([settings userInterfaceStyle] != state.nativeStyle)
+                [settings setUserInterfaceStyle:state.nativeStyle];
+            [sLGIslandHostedScenes removeObjectForKey:scene];
+        }
+        return;
+    }
+    NSInteger incoming = [settings userInterfaceStyle];
+    if (!state) {
+        if (!sLGIslandHostedScenes) sLGIslandHostedScenes = [NSMapTable weakToStrongObjectsMapTable];
+        state = [LGIslandSceneAppearance new];
+        state.nativeStyle = incoming;
+        [sLGIslandHostedScenes setObject:state forKey:scene];
+    } else if (incoming != state.appliedStyle) {
+        state.nativeStyle = incoming;
+    }
+    state.appliedStyle = hostStyle;
+    if (incoming != hostStyle) [settings setUserInterfaceStyle:hostStyle];
+}
+
+static void LGRefreshIslandHostedScenes(void) {
+    if (!LGIsSpringBoardProcess() || !sLGIslandHostedScenes.count) return;
+    NSInteger hostStyle = LGIslandHostAppearance();
+    BOOL enabled = LGIslandContentEnabled()
+        && (hostStyle == UIUserInterfaceStyleLight || hostStyle == UIUserInterfaceStyleDark);
+    for (id scene in sLGIslandHostedScenes.keyEnumerator.allObjects) {
+        LGIslandSceneAppearance *state = [sLGIslandHostedScenes objectForKey:scene];
+        NSInteger desired = enabled ? hostStyle : state.nativeStyle;
+        id current = [scene settings];
+        if ([current respondsToSelector:@selector(userInterfaceStyle)]
+            && [current userInterfaceStyle] != desired) {
+            [scene updateSettingsWithBlock:^(id mutableSettings) {
+                if ([mutableSettings respondsToSelector:@selector(setUserInterfaceStyle:)])
+                    [mutableSettings setUserInterfaceStyle:desired];
+            }];
+        }
+        if (enabled) state.appliedStyle = desired;
+        else [sLGIslandHostedScenes removeObjectForKey:scene];
+    }
+}
+
+%group LGIslandHostedAppearanceLifecycle
+%hook SBSystemApertureSceneElement
+- (void)_updateMutableSceneSettings:(id)settings withParameters:(id)parameters {
+    %orig(settings, parameters);
+    LGApplyIslandHostedAppearance(self, settings);
+}
+%end
+%end
+
+static void LGInstallIslandHostedAppearanceHooks(void) {
+    if (!LGIsSpringBoardProcess()) return;
+    // The iOS 16.5 startup regression is a separate open investigation.
+    if (@available(iOS 17.0, *)) {
+        Class element = NSClassFromString(@"SBSystemApertureSceneElement");
+        if (!class_getInstanceMethod(element, @selector(_updateMutableSceneSettings:withParameters:))) return;
+        %init(LGIslandHostedAppearanceLifecycle);
+        lgObservePreferenceReload(^{ LGRefreshIslandHostedScenes(); });
+    }
+}
+
 static void LGInstallIslandMediaHooks(void) {
     static BOOL installed;
     if (installed) return;
@@ -307,9 +404,11 @@ static void LGIslandContentImageAdded(const struct mach_header *header, intptr_t
 }
 
 %ctor {
+    if ([NSProcessInfo.processInfo.processName isEqualToString:@"backboardd"]) return;
     if (@available(iOS 16.0, *)) {
         LGInstallIslandContentHooks();
         LGInstallIslandMediaHooks();
+        LGInstallIslandHostedAppearanceHooks();
         _dyld_register_func_for_add_image(LGIslandContentImageAdded);
     }
 }
