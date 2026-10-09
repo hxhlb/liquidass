@@ -1,0 +1,62 @@
+iOS 16 Dynamic Island glass — banana38 private test build
+
+Branch: iya/ios16-dynamic-island-glass
+Base: 4d1953f (vertical Dock fix merged and pushed to banana)
+Reported target: iOS 16.3; black background both collapsed and expanded.
+Tester model and jailbreak scheme are not yet known.
+
+Cause and fix:
+- The entire island constructor required iOS 17.0, so iOS 16.3 never installed it.
+- Enable it on iOS 16+ only when all four required backing-view ivars exist.
+  Add the missing _contentClippingView guard before any native-background hook.
+- iOS 16.3 has _configureTransitionShadowViewIfNecessary, but lacks
+  _layoutTransitionShadowView. Probe these separately; on the older layout,
+  refresh shadow suppression after viewDidLayoutSubviews.
+- iOS 17+ retains its dedicated shadow-layout callback when available.
+
+Static evidence (not device rendering proof):
+Apple IPSW: iPhone15,2_16.3_20D47_Restore.ipsw (iPhone 14 Pro)
+https://updates.cdn-apple.com/2023WinterFCS/fullrestores/032-36066/CC05C7DF-B6C7-4495-B63C-6E71118777E1/iPhone15,2_16.3_20D47_Restore.ipsw
+Tool: ipsw 3.1.720, dyld macho --objc and dyld disass.
+Local evidence is under ignored packages/ios16-island-research/.
+
+SpringBoard SBSystemApertureContainerView declares:
+_blobEnablingBlackFillView, _gainMapView, _backgroundGroupingView,
+_contentClippingView, _lightBkgKeyLineView, _darkBkgKeyLineView, _shadowView.
+initIncludingSensorRegion: disassembly confirms:
+- 0x1c801bc78: container adds _contentClippingView.
+- 0x1c801bf80: _contentClippingView adds _backgroundGroupingView.
+- 0x1c801bfd8: _backgroundGroupingView adds _blobEnablingBlackFillView.
+This satisfies the existing driver's fill-parent and clip-descendant checks.
+The gain-map view and magicians-curtain classes exist, as does
+SBSystemApertureController systemApertureViewController:containsAnyContent:.
+SystemApertureUI declares the transition-shadow ivar and configure method.
+Its configure IMP is 0x21164ff58; viewDidLayoutSubviews is 0x21164e180.
+ipsw reported an ObjC optimization-table EOF during disassembly; class metadata
+and the shown functions were still decoded. No claim of complete cache analysis.
+
+Host regression:
+python3.11 tests/test_dynamic_island_compat.py
+Runs the production constructor with Foundation runtime fixtures.
+Checks iOS 16/17/18 selection, every missing required ivar, absent container,
+iOS 15 exclusion, process guard, disabled preference, and old/new shadow hooks.
+Observed failures before fixes: supported OS skipped hooks; iOS16 shadow hook skipped.
+
+Tester acceptance:
+1. Use the package matching Rootless or RootHide; retain the previous package.
+2. Enable the master switch and Dynamic Island glass, then manually restart
+   userspace using the jailbreak's normal action after installation/engine changes.
+   SpringBoard must restart so the gain-map layer class is recreated.
+   The package itself does not restart backboardd.
+3. Start a timer or music activity. Inspect the software background while
+   collapsed, long-press to expand, collapse again, and switch Home/App.
+4. Check both Classic and Enhanced modes, readable content, normal touch actions,
+   no remaining rectangular black overlay, and correct geometry during transitions.
+5. End the activity and test HideWhenInactive; disable island glass and verify
+   restoration. Re-enable and restart SpringBoard for a clean comparison.
+6. Report model, exact OS, jailbreak/scheme, renderer, previous version, and
+   screenshots/video of active collapsed + expanded states. Physical camera/sensor
+   cutouts remain black and cannot show wallpaper; assess surrounding software UI.
+
+No iOS 16 device/simulator rendering validation, device installation, restart,
+GitHub release, or APT publication is implied by host/build checks.

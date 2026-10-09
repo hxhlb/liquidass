@@ -494,7 +494,21 @@ static void LGUpdateIslandTransitionShadow(UIViewController *controller) {
     %orig;
     LGUpdateIslandTransitionShadow((UIViewController *)self);
 }
+%end
+%end
+
+%group LGIslandTransitionShadowLayoutLifecycle
+%hook SAUILayoutSpecifyingElementViewController
 - (void)_layoutTransitionShadowView {
+    %orig;
+    LGUpdateIslandTransitionShadow((UIViewController *)self);
+}
+%end
+%end
+
+%group LGIslandLegacyTransitionShadowLayoutLifecycle
+%hook SAUILayoutSpecifyingElementViewController
+- (void)viewDidLayoutSubviews {
     %orig;
     LGUpdateIslandTransitionShadow((UIViewController *)self);
 }
@@ -617,12 +631,15 @@ static BOOL LGIslandGainMapIsBackground(UIView *view) {
 
 %ctor {
     if (!LGIsSpringBoardProcess()) return;
-    if (@available(iOS 17.0, *)) {
+    // iOS 16.3 (20D47) already has this container and all four backing views.
+    // Keep capability checks: an incomplete layout must not hide native gain maps.
+    if (@available(iOS 16.0, *)) {
         Class containerClass = NSClassFromString(@"SBSystemApertureContainerView");
         if (containerClass
             && class_getInstanceVariable(containerClass, "_blobEnablingBlackFillView")
             && class_getInstanceVariable(containerClass, "_gainMapView")
-            && class_getInstanceVariable(containerClass, "_backgroundGroupingView")) {
+            && class_getInstanceVariable(containerClass, "_backgroundGroupingView")
+            && class_getInstanceVariable(containerClass, "_contentClippingView")) {
             sLGIslandProxyGainMaps = LGIslandEnabled();
             %init(LGDynamicIslandLifecycle);
             if (sLGIslandProxyGainMaps) {
@@ -630,10 +647,16 @@ static BOOL LGIslandGainMapIsBackground(UIView *view) {
             }
             Class shadowController = NSClassFromString(@"SAUILayoutSpecifyingElementViewController");
             if (class_getInstanceMethod(shadowController,
-                    @selector(_configureTransitionShadowViewIfNecessary))
-                && class_getInstanceMethod(shadowController,
-                    @selector(_layoutTransitionShadowView))) {
+                    @selector(_configureTransitionShadowViewIfNecessary))) {
                 %init(LGIslandTransitionShadowLifecycle);
+                if (class_getInstanceMethod(shadowController,
+                        @selector(_layoutTransitionShadowView))) {
+                    %init(LGIslandTransitionShadowLayoutLifecycle);
+                } else if (class_getInstanceMethod(shadowController,
+                        @selector(viewDidLayoutSubviews))) {
+                    // iOS 16 has no dedicated shadow-layout selector.
+                    %init(LGIslandLegacyTransitionShadowLayoutLifecycle);
+                }
             }
             if (NSClassFromString(@"_SBSystemApertureMagiciansCurtainView")) {
                 %init(LGIslandCurtainLifecycle);
