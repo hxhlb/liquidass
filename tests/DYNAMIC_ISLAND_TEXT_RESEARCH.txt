@@ -1,0 +1,57 @@
+banana42 — native text raster recoloring, not another content-specific palette
+
+User requirement: Light uses default black text; Dark uses default white text.
+No adaptive backdrop, gradient, extra preference or automatic device restart.
+
+Read-only reference analysis:
+User-supplied MCP: http://127.0.0.1:13341/mcp
+Loaded image: Liquidify.dylib from Liquidify88.
+SHA256: 2749e5c36dcde9b99f0df776a9731026791832a5935538d19ca0b63d307ac514
+- 0x41f00c installs UILabel drawTextInRect:, drawContentsInRect:,
+  _drawTextInRect: and _drawFullMarqueeTextInRect: hooks.
+- 0x41f7a4 limits drawing work to the island context and preserves the native
+  draw operation while using its raster as a glyph mask.
+- 0x420b90 identifies aperture/island ancestors and windows.
+- 0x41fef8 reads native/adaptive/gradient mode; 0x420114 creates an adaptive
+  masked backdrop. These modes and the adaptive filter chain were NOT imported.
+- A separate notification-label path exists; it is outside this change's scope.
+No IDB edits, binary patches, runtime loading, or licensing changes were made.
+
+Independent implementation:
+- Capture the native UILabel draw into one transparent image and apply a solid
+  black/white source-in fill, then draw it back at the original rectangle.
+- Retain native font/layout/truncation and alpha, including attributed white
+  foreground runs. No textColor/attributedText/scene settings are modified.
+- Scene session role SystemAperture, the dedicated island windows, or an aperture
+  ancestor define scope, including native offscreen aperture content. Normal app labels bypass.
+- The host publishes a small versioned appearance/state value via Darwin notify.
+  Content services consume that value rather than their own forced-Dark traits
+  or sandbox-specific preference reads. Invalid/missing/disabled state is native.
+- Host activation follows actual attached glass; theme changes invalidate only
+  tracked labels. No callback touches UIScreen in backboardd.
+- Plain bitmap bounds/scale are checked before allocation. Nested UIKit draw
+  aliases call their originals without another capture.
+- Method return types are checked before hooking. Real iOS 17.4 reports CGRect
+  for _drawTextInRect: but void for _drawFullMarqueeTextInRect:. Support both
+  known return shapes for the latter rather than trusting decompiler output.
+- This recolors label ink, including inline colored glyphs rasterized by UILabel.
+  It does not intercept UIImageView artwork or arbitrary custom/SwiftUI canvases.
+
+Validation:
+python3.11 tests/test_dynamic_island_text.py
+python3.11 tests/build_island_text_probe.py
+The builder only builds; it does not boot/erase/install/launch a simulator.
+The real-UIKit probe was run on the isolated Codex island iOS 17.4 simulator.
+Default dedicated iOS 18.6 simulator and its data were not replaced.
+- Seven pixel cases PASS: plain Light, attributed Light with alpha, Dark,
+  disabled, ordinary non-island label, nonzero origin, windowless aperture label.
+- At device scale, plain Light/Dark/native cases each had 11840 ink pixels and
+  2059 partial-alpha pixels. Light ink was black; Dark/native ink was white.
+- A separate simulator process published Light, Dark and disabled states.
+  The UIKit app received each and rendered 16908 matching black/white pixels.
+- UILabel textColor and attributedText data remained unchanged.
+Evidence: ignored packages/island-text-probe/results-ios17.4/.
+
+Boundary: these are real UIKit rendering and IPC tests, not an assertion that
+the user's music/recording interface is already fixed on the phone. Validate
+the resulting device pixels; native textColor getters intentionally stay native.

@@ -1,121 +1,39 @@
-Dynamic Island content appearance — banana39 private test build
+Dynamic Island black/white text — banana42 test plan
 
-2026-10-09 UPDATE: an iOS 16 userspace-restart spinner hang has been reported.
-Pause the restart acceptance steps below pending version/log identification.
-See DYNAMIC_ISLAND_STARTUP_INVESTIGATION.txt; host checks are not startup proof.
+Current implementation and measured proof: DYNAMIC_ISLAND_TEXT_RESEARCH.txt.
+Scope: Light black text, Dark white text. No extra setting or gradients.
+The failed banana39–41 content-specific trait/palette/scene adapters were removed.
+Previous experiments remain in Git history; their host checks were not phone proof.
 
-User confirmed banana38 glass works. New issue affects both system content and
-third-party Live Activities: white text loses contrast on glass in Light mode.
-This is a general island appearance problem, not an iOS 16-only compatibility fix.
+Manual device acceptance (agent must not install or restart):
+1. Install the matching package yourself and reload the relevant UI processes
+   when ready. The package postinst performs no automatic reload.
+2. Enable the existing Dynamic Island glass switch. With a Light system theme,
+   check music title/artist/time and screen-recording text, collapsed and expanded.
+3. Check long scrolling titles, attributed strings and changing timer values.
+   Layout, font, clipping and opacity should remain native; artwork is unaffected.
+4. Switch Dark -> Light while content remains active. Text should be white in
+   Dark and black in Light, with secondary opacity retained.
+5. Disable island glass, then inspect ordinary App pages, Lock Screen and Control
+   Center text. Their original drawing and colors should remain unchanged.
+6. Report the actual visible result, including the content/activity and state.
+   Do not infer failure merely from UILabel.textColor remaining white: this
+   implementation changes the final glyph raster, not the stored text attributes.
 
-Evidence:
-- iOS 16.3 20D47 SpringBoardUIServices:
-  SBUISystemApertureElementSource _updateTraitCollectionForElementIfNeeded
-  at 0x1a477b80c checks for userInterfaceStyle 2 and constructs Dark child traits
-  at 0x1a477b920 before applying them at 0x1a477b9a4.
-- The iOS 18.2 decompilation also shows forced Dark overrides on the element
-  controller and its loaded view in _ensureElementViewControllerIsInAWindow,
-  then forced Dark child traits in _updateTraitCollectionForElementIfNeeded.
-  https://github.com/EthanArbuckle/iPhone17-1_18.2_22C152_Restore/blob/main/System/Library/PrivateFrameworks/SpringBoardUIServices.framework/SBUISystemApertureElementSource.m
-- Local evidence: ignored packages/ios16-island-research/source-traits.asm and
-  element-source-18.2.m. The previous IPSW metadata/disassembly caveat still applies.
+Known earlier device observations:
+- banana40 was installed on iPhone 13 Pro Max / iOS 17.3.1 RootHide. Both music
+  and recording services mapped liquidass.dylib; injection was not absent.
+- SpringBoard was Light while the music Activity scene was forced Dark.
+- banana41's scene hook was loaded and changed that scene to Light, but the user
+  still saw white text. Scene appearance alone therefore did not solve the issue.
+- Attaching Frida 16.1.4 to MediaRemoteUI triggered EXC_GUARD at
+  task_swap_exception_ports. No further content-process attach was attempted.
+  SpringBoard-only snapshots were read successfully. Do not silently retry the
+  known failing attach path or alter device security/tooling.
 
-Implementation:
-- Hooks only live SBUISystemApertureElementSource content ownership. The main
-  tweak already loads in UIKit processes; no injection filter expansion.
-- While the native source updater runs, replace only userInterfaceStyle in
-  the exact parent/child trait assignment. Keep native Dynamic Type and all
-  other traits. Unrelated controller setters pass through unchanged.
-- Synchronize the owned controller and view overrides with the screen's system
-  appearance. Window theme changes and preference reloads refresh tracked sources.
-- A guarded late framework-load callback supports content frameworks loaded
-  after tweak initialization. Runtime work is deferred out of the dyld callback.
-- Restore native overrides on disable, view replacement, detach and source cleanup.
-- No global label recoloring, image inversion, or content-layer color filters.
-  Explicit hard-coded white colors may ignore traits; report those separately.
-
-Host check:
-python3.11 tests/test_dynamic_island_content.py
-Covers Light/Dark/Light, preservation of Dynamic Type/contrast, 1000 stable
-callbacks without trait writes, unrelated children, reentry, replacement,
-disable, detach and source cleanup. This is not UIKit/SwiftUI rendering proof.
-
-Device acceptance:
-1. Install the correct Rootless/RootHide package and manually restart userspace
-   so SpringBoard and content-producing processes load the new hook.
-2. Enable island glass. In Light mode test music, timer and at least one
-   third-party Live Activity, both collapsed and expanded, on a light background.
-3. Confirm semantic text becomes dark and readable; artwork and accent colors
-   retain their meaning. Test both Classic and Enhanced.
-4. While the activity remains active, change Light -> Dark -> Light. Dark mode
-   should retain white text; no layout churn, flicker or repeated resize.
-5. Change text size, replace/end activities, open the source App, and disable
-   island glass. Normal App pages and restored native black islands stay correct.
-6. If any text remains white, report the App/activity, OS and collapsed/expanded
-   state with a screenshot/video. Distinguish semantic text from fixed-color text.
-
-No device validation, installation, restart, GitHub release or APT publication
-was performed by the agent. Retain banana38 as the known working glass baseline.
-
-banana40 follow-up (user screenshot, iOS 17, userspace restart confirmed):
-- banana39 still showed white music title, time labels and playback controls.
-- iOS 17.6.1 MRUActivityNowPlayingViewController viewDidLoad explicitly assigns
-  systemWhiteColor to view.stylingProvider.primaryColor, independent of traits:
-  https://github.com/SuperChaoM/iPhone15-3_17.6.1_21G101_Restore/blob/main/System/Library/PrivateFrameworks/MediaControls.framework/MRUActivityNowPlayingViewController.m
-- MRUActivityNowPlayingView distributes its provider to header/time/transport
-  controls. Their native update methods consume its semantic style colors.
-- Supply a separate provider only to this view in Light mode. Resolve its
-  primary/secondary/tertiary/quaternary/separator colors explicitly for Light.
-  Disable vibrancy on this private provider; do not invert any content layers.
-- Preserve the original provider without mutating it. Restore it in Dark mode,
-  on disable or detachment, and remember replacement providers from the system.
-- Reconcile a native late systemWhiteColor write after provider assignment;
-  stable layouts do not reassign providers or rewrite colors.
-- The same class/property path exists in iOS 16.3 metadata. Hook installation is
-  guarded and also handles MediaControls loading after tweak initialization.
-
-Additional host check: python3.11 tests/test_dynamic_island_media.py
-Covers explicit-white replacement, original-provider preservation, late white
-writes, 1000 stable layouts, theme/disable/detach and provider replacement.
-
-banana40 device check: repeat the reported music panel in Light mode, including
-title, artist, elapsed/remaining time, play/skip/favorite and AirPlay. Verify the
-cover is unchanged; then Dark -> Light, track change and collapsed -> expanded.
-Control Center and Lock Screen music should retain their native palettes.
-This fixes the confirmed music path; it does not prove all other activity types
-or app-defined fixed colors are covered. No additional user setting is required.
-
-banana41 investigation and candidate (iPhone 13 Pro Max, iOS 17.3.1 RootHide):
-- Installed package was verified as banana40. The user reports music and recording
-  content still white. Do not count banana39/40 host tests as device success.
-- Read-only SpringBoard snapshots show UIScreen style 1 and island window style 1.
-  The active com.apple.MediaRemoteUI SBSystemApertureSceneElement exposes
-  ActivityUIServices.ActivitySceneSettings with userInterfaceStyle 2.
-- SpringBoard method IMPs for both source and music hooks resolve to liquidass.dylib.
-  OS file-mapping inspection confirms liquidass.dylib also loads in MediaRemoteUI
-  and ReplayKitAngel. The generic injection filter was therefore not the problem.
-- Frida attachment to MediaRemoteUI failed and its PID changed; no repeat attach,
-  process kill or automatic relaunch was performed. Remaining content-process
-  state was not read. Do not claim exact remote per-view colors were observed.
-- A real UIKit iOS 18.6 probe independently shows an App forced Dark can report
-  UIScreen style 2 while the simulator remains globally Light. UIScreen inside
-  a content service is not an authoritative SpringBoard-theme source.
-- Candidate hooks the existing SBSystemApertureSceneElement mutable-settings
-  update, after the original, to apply the host's style to that dedicated scene.
-  Preserves the native value for disable/restoration and updates tracked scenes
-  on host theme changes. No ordinary app scenes are registered by this adapter.
-- Gate the new host adapter to iOS 17+ and SpringBoard; do not access UIScreen
-  from non-host refresh callbacks or initialize island content in backboardd.
-- Additional host regression: python3.11 tests/test_dynamic_island_host_appearance.py
-
-Acceptance for the prepared RootHide candidate:
-1. Installation/restart on the iPhone requires separate authorization; the user
-   has authorized only read-only diagnostics so far.
-2. After installation, re-read the host scene settings: SpringBoard Light must
-   propagate style 1 to the active music scene, and Dark must propagate style 2.
-3. Confirm title, time and playback controls in actual expanded/collapsed UI,
-   with artwork preserved; repeat the user's recording case.
-4. If scene style is fixed but text remains white, inspect that actual content
-   path before adding another palette adapter. No success claim before this.
-5. Keep the iOS 16.5/banana38 startup report separate; the supplied .ips matches
-   iOS 16.3/banana33 and does not close that investigation.
+iOS 16 startup remains a separate issue:
+- The initial supplied report matched banana33's old keyboard callback.
+- Later reports confirm a recurring GainMap encoder crash in backboardd on
+  iOS 16.3 / iPhone14Pro. See DYNAMIC_ISLAND_STARTUP_INVESTIGATION.txt.
+- This text package is not a verified fix for that startup failure. Do not ask
+  the affected iOS 16 tester to repeat userspace restart as text acceptance.

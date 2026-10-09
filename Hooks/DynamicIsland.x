@@ -92,6 +92,7 @@ static UIView *sLGIslandNativeGainMap;
 @end
 
 static void LGRefreshAllIslands(void);
+extern void LGIslandPublishTextAppearance(UIWindow *window, BOOL glassActive);
 
 static UIView *LGIslandViewIvar(id host, const char *name) {
     Ivar ivar = class_getInstanceVariable([host class], name);
@@ -440,6 +441,17 @@ static void LGRefreshIsland(UIView *container) {
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     [driver refresh];
+    UIWindow *window = container.window;
+    BOOL glassActive = NO;
+    for (UIView *known in sLGIslandContainers.allObjects) {
+        LGIslandGlassDriver *knownDriver = objc_getAssociatedObject(known, &kLGIslandDriverKey);
+        if (known.window && knownDriver.glass.superview) {
+            window = known.window;
+            glassActive = YES;
+            break;
+        }
+    }
+    LGIslandPublishTextAppearance(window, LGIslandEnabled() && glassActive);
 }
 
 static void LGRefreshAllIslands(void) {

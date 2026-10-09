@@ -1,414 +1,204 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
-#import <mach-o/dyld.h>
-#import <dlfcn.h>
+#import <notify.h>
+#import <math.h>
+#import <stdint.h>
+#import <stdatomic.h>
+#import <stdlib.h>
 #import <string.h>
 #import "../Shared/LGSharedSupport.h"
-#import "../Shared/LGGlassKit.h"
 
-@interface NSObject (LGIslandContentSource)
-- (UIViewController *)systemApertureElement;
-- (UIViewController *)containerViewController;
-- (void)_updateTraitCollectionForElementIfNeeded;
-@end
+// SpringBoard owns the glass and appearance. A content service can have its own
+// forced-Dark traits/preferences, so it must not decide the island's text theme.
+static const char *kLGIslandTextNotification = "dylv.liquidass/island-text-appearance";
+static const uint64_t kLGIslandTextMagic = UINT64_C(0x4c47495400010000);
+static int sLGIslandTextToken = -1;
+static _Atomic uint64_t sLGIslandTextState;
+static NSHashTable<UILabel *> *sLGIslandTextLabels;
+static __thread NSUInteger sLGIslandTextDrawingDepth;
 
-// Content may be rendered in another UIKit process, not in SpringBoard.
-// Only a live SBUISystemApertureElementSource grants ownership of these objects.
-@interface LGIslandContentState : NSObject
-@property (nonatomic, weak) UIViewController *element;
-@property (nonatomic, weak) UIViewController *parent;
-@property (nonatomic, weak) UIView *view;
-@property (nonatomic) UIUserInterfaceStyle controllerStyle;
-@property (nonatomic) UIUserInterfaceStyle viewStyle;
-@property (nonatomic) UIUserInterfaceStyle appliedStyle;
-@property (nonatomic, strong) UITraitCollection *nativeChildTraits;
-@property (nonatomic, strong) UITraitCollection *appliedChildTraits;
-@property (nonatomic) BOOL updating;
-- (void)restore;
-@end
+static uint64_t LGIslandTextEncode(NSInteger style, BOOL enabled) {
+    if (style != UIUserInterfaceStyleLight && style != UIUserInterfaceStyleDark) return 0;
+    return kLGIslandTextMagic | ((uint64_t)style << 1) | (enabled ? 1 : 0);
+}
 
-@implementation LGIslandContentState
-- (void)restore {
-    if (self.element.overrideUserInterfaceStyle == self.appliedStyle)
-        self.element.overrideUserInterfaceStyle = self.controllerStyle;
-    if (self.view.overrideUserInterfaceStyle == self.appliedStyle)
-        self.view.overrideUserInterfaceStyle = self.viewStyle;
-    if (self.element && self.parent && self.appliedChildTraits
-        && [[self.parent overrideTraitCollectionForChildViewController:self.element]
-            isEqual:self.appliedChildTraits]) {
-        [self.parent setOverrideTraitCollection:self.nativeChildTraits
-                        forChildViewController:self.element];
+static NSInteger LGIslandTextDecode(uint64_t state) {
+    if ((state & ~UINT64_C(7)) != kLGIslandTextMagic || !(state & 1)) return UIUserInterfaceStyleUnspecified;
+    NSInteger style = (NSInteger)((state >> 1) & 3);
+    return style == UIUserInterfaceStyleLight || style == UIUserInterfaceStyleDark
+        ? style : UIUserInterfaceStyleUnspecified;
+}
+
+static void LGInvalidateIslandText(void) {
+    NSArray<UILabel *> *labels;
+    @synchronized (sLGIslandTextLabels) { labels = sLGIslandTextLabels.allObjects; }
+    for (UILabel *label in labels) [label setNeedsDisplay];
+}
+
+void LGIslandPublishTextAppearance(UIWindow *window, BOOL glassActive) {
+    if (!LGIsSpringBoardProcess() || sLGIslandTextToken < 0) return;
+    NSInteger style = window.traitCollection.userInterfaceStyle;
+    if (style != UIUserInterfaceStyleLight && style != UIUserInterfaceStyleDark)
+        style = (NSInteger)((sLGIslandTextState >> 1) & 3);
+    uint64_t next = LGIslandTextEncode(style, glassActive);
+    if (next == sLGIslandTextState) return;
+    if (notify_set_state(sLGIslandTextToken, next) != NOTIFY_STATUS_OK) return;
+    sLGIslandTextState = next;
+    LGInvalidateIslandText();
+    notify_post(kLGIslandTextNotification);
+}
+
+static BOOL LGIsIslandTextLabel(UILabel *label) {
+    UIWindow *window = label.window;
+    NSString *role = window.windowScene.session.role;
+    if (role.length && [role rangeOfString:@"SystemAperture" options:NSCaseInsensitiveSearch].location != NSNotFound) return YES;
+    NSString *windowName = window ? NSStringFromClass(window.class) : nil;
+    if ([windowName isEqualToString:@"SBSystemApertureWindow"]
+        || [windowName isEqualToString:@"SBUISystemApertureSecureWindow"]) return YES;
+    UIView *ancestor = label.superview;
+    // Some native activity labels are rasterized before their view tree gets a
+    // window. The aperture ancestor still identifies that offscreen content.
+    for (NSUInteger depth = 0; ancestor && depth < 24; depth++, ancestor = ancestor.superview) {
+        NSString *name = NSStringFromClass(ancestor.class);
+        if ([name rangeOfString:@"SystemAperture" options:NSCaseInsensitiveSearch].location != NSNotFound) return YES;
     }
-    self.element = nil;
-    self.parent = nil;
-    self.view = nil;
-    self.nativeChildTraits = nil;
-    self.appliedChildTraits = nil;
-}
-- (void)dealloc {
-    [self restore];
-}
-@end
-
-static char kLGIslandContentStateKey;
-static NSHashTable *sLGIslandContentSources;
-// Stack-scoped to the native source updater; unrelated controller calls pass through.
-static __thread void *sLGIslandContentUpdateState;
-
-static BOOL LGIslandContentEnabled(void) {
-    return LG_globalEnabled() && LG_prefBool(@"DynamicIsland.Enabled", NO);
+    return NO;
 }
 
-static UITraitCollection *LGIslandContentTraits(UITraitCollection *traits,
-                                               UIUserInterfaceStyle style) {
-    UITraitCollection *appearance = [UITraitCollection traitCollectionWithUserInterfaceStyle:style];
-    return [UITraitCollection traitCollectionWithTraitsFromCollections:
-        traits ? @[traits, appearance] : @[appearance]];
+static BOOL LGIslandTextRectIsUsable(CGRect rect, CGFloat scale) {
+    return isfinite(rect.origin.x) && isfinite(rect.origin.y)
+        && isfinite(rect.size.width) && isfinite(rect.size.height)
+        && isfinite(scale) && scale > 0.0 && scale <= 4.0
+        && rect.size.width > 0.0 && rect.size.height > 0.0
+        && rect.size.width * scale <= 8192.0
+        && rect.size.height * scale <= 8192.0
+        && rect.size.width * rect.size.height * scale * scale <= 4194304.0;
 }
 
-static void LGUpdateIslandContent(id source, void (^nativeUpdate)(void)) {
-    if (!NSThread.isMainThread) { nativeUpdate(); return; }
-    LGIslandContentState *state = objc_getAssociatedObject(source, &kLGIslandContentStateKey);
-    if (state.updating) return;
-    if (!sLGIslandContentSources) sLGIslandContentSources = [NSHashTable weakObjectsHashTable];
-    [sLGIslandContentSources addObject:source];
-    if (!state) {
-        state = [LGIslandContentState new];
-        objc_setAssociatedObject(source, &kLGIslandContentStateKey, state,
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    state.updating = YES;
-    void *previous = sLGIslandContentUpdateState;
+static void LGDrawIslandText(UILabel *label, CGRect rect, void (^nativeDraw)(void)) {
+    if (sLGIslandTextDrawingDepth) { nativeDraw(); return; }
+    sLGIslandTextDrawingDepth++;
     @try {
-        UIViewController *element = [source systemApertureElement];
-        UIViewController *parent = [source containerViewController];
-        UIView *view = [element isKindOfClass:UIViewController.class] ? element.viewIfLoaded : nil;
-        UIScreen *screen = view.window.screen ?: UIScreen.mainScreen;
-        UIUserInterfaceStyle style = screen.traitCollection.userInterfaceStyle;
-        if (!LGIslandContentEnabled() || !view.window
-            || ![parent isKindOfClass:UIViewController.class]
-            || element.parentViewController != parent
-            || (style != UIUserInterfaceStyleLight && style != UIUserInterfaceStyleDark)) {
-            [state restore];
-            nativeUpdate();
+        if (!LGIsIslandTextLabel(label)) { nativeDraw(); return; }
+        @synchronized (sLGIslandTextLabels) { [sLGIslandTextLabels addObject:label]; }
+        NSInteger style = LGIslandTextDecode(sLGIslandTextState);
+        CGFloat scale = label.contentScaleFactor;
+        if (!style || !UIGraphicsGetCurrentContext() || !LGIslandTextRectIsUsable(rect, scale)) {
+            nativeDraw();
             return;
         }
-        if (state.element != element || state.parent != parent || state.view != view) {
-            [state restore];
-            state.element = element;
-            state.parent = parent;
-            state.view = view;
-            state.controllerStyle = element.overrideUserInterfaceStyle;
-            state.viewStyle = view.overrideUserInterfaceStyle;
-            state.nativeChildTraits = [parent overrideTraitCollectionForChildViewController:element];
-        }
-        state.appliedStyle = style;
-        sLGIslandContentUpdateState = (__bridge void *)state;
-        // Keep Apple's layout-specific Dynamic Type calculation. The scoped setter
-        // below changes only userInterfaceStyle in its resulting child traits.
-        nativeUpdate();
-        sLGIslandContentUpdateState = previous;
-        if (element.overrideUserInterfaceStyle != style) element.overrideUserInterfaceStyle = style;
-        if (view.overrideUserInterfaceStyle != style) view.overrideUserInterfaceStyle = style;
-        UITraitCollection *current = [parent overrideTraitCollectionForChildViewController:element];
-        UITraitCollection *desired = LGIslandContentTraits(current ?: element.traitCollection, style);
-        if (![current isEqual:desired]) [parent setOverrideTraitCollection:desired forChildViewController:element];
-        state.appliedChildTraits = [parent overrideTraitCollectionForChildViewController:element];
+        UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat];
+        format.opaque = NO;
+        format.scale = scale;
+        format.preferredRange = UIGraphicsImageRendererFormatRangeStandard;
+        UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:rect.size format:format];
+        UIImage *ink = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+            CGContextRef cg = context.CGContext;
+            CGContextSaveGState(cg);
+            CGContextTranslateCTM(cg, -rect.origin.x, -rect.origin.y);
+            nativeDraw();
+            CGContextRestoreGState(cg);
+            // Recolor only the native glyph raster. Keep its antialiasing/alpha,
+            // layout, font, truncation and marquee result; do not mutate label data.
+            UIColor *color = style == UIUserInterfaceStyleLight ? UIColor.blackColor : UIColor.whiteColor;
+            CGContextSetBlendMode(cg, kCGBlendModeSourceIn);
+            CGContextSetFillColorWithColor(cg, color.CGColor);
+            CGContextFillRect(cg, (CGRect){CGPointZero, rect.size});
+        }];
+        [ink drawInRect:rect];
     } @finally {
-        sLGIslandContentUpdateState = previous;
-        state.updating = NO;
+        sLGIslandTextDrawingDepth--;
     }
 }
 
-static void LGRefreshIslandContent(UIWindow *window) {
-    for (id source in sLGIslandContentSources.allObjects) {
-        LGIslandContentState *state = objc_getAssociatedObject(source, &kLGIslandContentStateKey);
-        if (!window || state.view.window == window) [source _updateTraitCollectionForElementIfNeeded];
-    }
-}
-
-static void LGRefreshIslandMedia(UIWindow *window);
-static void LGRefreshIslandHostedScenes(void);
-
-%group LGIslandContentLifecycle
-%hook SBUISystemApertureElementSource
-- (void)_updateTraitCollectionForElementIfNeeded {
-    LGUpdateIslandContent(self, ^{ %orig; });
-}
-%end
-
-%hook UIViewController
-- (void)setOverrideTraitCollection:(UITraitCollection *)traits forChildViewController:(UIViewController *)child {
-    LGIslandContentState *state = (__bridge LGIslandContentState *)sLGIslandContentUpdateState;
-    if (state && state.parent == self && state.element == child) {
-        state.nativeChildTraits = traits;
-        traits = LGIslandContentTraits(traits, state.appliedStyle);
-        state.appliedChildTraits = traits;
-        if ([[self overrideTraitCollectionForChildViewController:child] isEqual:traits]) return;
-    }
-    %orig(traits, child);
-}
-%end
-
-%hook UIWindow
-- (void)traitCollectionDidChange:(UITraitCollection *)previous {
-    %orig(previous);
-    if (previous.userInterfaceStyle != self.traitCollection.userInterfaceStyle) {
-        LGRefreshIslandContent(self);
-        LGRefreshIslandMedia(self);
-        LGRefreshIslandHostedScenes();
-    }
-}
-%end
-%end
-
-#pragma mark - Music island's explicit white palette
-
-@interface MRUVisualStylingProvider : NSObject
-@property (nonatomic, strong) UIColor *primaryColor;
-@property (nonatomic, strong) UIColor *secondaryColor;
-@property (nonatomic, strong) UIColor *tertiaryColor;
-@property (nonatomic, strong) UIColor *quaternaryColor;
-@property (nonatomic, strong) UIColor *separatorColor;
-@property (nonatomic) BOOL supportsVibrancy;
+@interface UILabel (LGIslandPrivateDrawing)
+- (void)drawContentsInRect:(CGRect)rect;
+- (CGRect)_drawTextInRect:(CGRect)rect;
+- (void)_drawFullMarqueeTextInRect:(CGRect)rect;
 @end
 
-@interface MRUActivityNowPlayingView : UIView
-@property (nonatomic, strong) MRUVisualStylingProvider *stylingProvider;
-@end
-
-@interface LGIslandMediaState : NSObject
-@property (nonatomic, strong) MRUVisualStylingProvider *nativeProvider;
-@property (nonatomic, strong) MRUVisualStylingProvider *lightProvider;
-@property (nonatomic, strong) NSArray<UIColor *> *lightColors;
-@property (nonatomic) BOOL applying;
-@end
-@implementation LGIslandMediaState @end
-
-static char kLGIslandMediaStateKey;
-static NSHashTable<MRUActivityNowPlayingView *> *sLGIslandMediaViews;
-
-static void LGUpdateIslandMedia(MRUActivityNowPlayingView *view) {
-    LGIslandMediaState *state = objc_getAssociatedObject(view, &kLGIslandMediaStateKey);
-    if (state.applying) return;
-    if (!sLGIslandMediaViews) sLGIslandMediaViews = [NSHashTable weakObjectsHashTable];
-    [sLGIslandMediaViews addObject:view];
-    UIScreen *screen = view.window.screen ?: UIScreen.mainScreen;
-    BOOL light = LGIslandContentEnabled() && view.window
-        && screen.traitCollection.userInterfaceStyle == UIUserInterfaceStyleLight;
-    MRUVisualStylingProvider *current = view.stylingProvider;
-    if (!state && (!light || !current)) return;
-    if (!state) {
-        state = [LGIslandMediaState new];
-        objc_setAssociatedObject(view, &kLGIslandMediaStateKey, state,
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    if (current != state.lightProvider) state.nativeProvider = current;
-    state.applying = YES;
-    @try {
-        if (!light || !state.nativeProvider) {
-            if (current && current == state.lightProvider)
-                view.stylingProvider = state.nativeProvider;
-            return;
-        }
-        if (!state.lightProvider) {
-            // A private provider for this island view; never recolor a shared
-            // Control Center/Lock Screen provider or the album artwork itself.
-            MRUVisualStylingProvider *palette = [NSClassFromString(@"MRUVisualStylingProvider") new];
-            if (!palette) return;
-            UITraitCollection *traits = [UITraitCollection traitCollectionWithUserInterfaceStyle:UIUserInterfaceStyleLight];
-            state.lightColors = @[
-                [UIColor.labelColor resolvedColorWithTraitCollection:traits],
-                [UIColor.secondaryLabelColor resolvedColorWithTraitCollection:traits],
-                [UIColor.tertiaryLabelColor resolvedColorWithTraitCollection:traits],
-                [UIColor.quaternaryLabelColor resolvedColorWithTraitCollection:traits],
-                [UIColor.separatorColor resolvedColorWithTraitCollection:traits]
-            ];
-            state.lightProvider = palette;
-        }
-        MRUVisualStylingProvider *palette = state.lightProvider;
-        // viewDidLoad may set systemWhiteColor after assigning the provider.
-        // Reconcile that write on layout, with no notifications for stable colors.
-        if (![palette.primaryColor isEqual:state.lightColors[0]]) palette.primaryColor = state.lightColors[0];
-        if (![palette.secondaryColor isEqual:state.lightColors[1]]) palette.secondaryColor = state.lightColors[1];
-        if (![palette.tertiaryColor isEqual:state.lightColors[2]]) palette.tertiaryColor = state.lightColors[2];
-        if (![palette.quaternaryColor isEqual:state.lightColors[3]]) palette.quaternaryColor = state.lightColors[3];
-        if (![palette.separatorColor isEqual:state.lightColors[4]]) palette.separatorColor = state.lightColors[4];
-        if (palette.supportsVibrancy) palette.supportsVibrancy = NO;
-        if (current != state.lightProvider) view.stylingProvider = state.lightProvider;
-    } @finally {
-        state.applying = NO;
-    }
-}
-
-static void LGRefreshIslandMedia(UIWindow *window) {
-    for (MRUActivityNowPlayingView *view in sLGIslandMediaViews.allObjects)
-        if (!window || view.window == window) LGUpdateIslandMedia(view);
-}
-
-%group LGIslandMediaLifecycle
-%hook MRUActivityNowPlayingView
-- (void)setStylingProvider:(MRUVisualStylingProvider *)provider {
-    %orig(provider);
-    LGUpdateIslandMedia((MRUActivityNowPlayingView *)self);
-}
-- (void)didMoveToWindow {
-    %orig;
-    LGUpdateIslandMedia((MRUActivityNowPlayingView *)self);
-}
-- (void)layoutSubviews {
-    %orig;
-    LGUpdateIslandMedia((MRUActivityNowPlayingView *)self);
-}
-- (void)traitCollectionDidChange:(UITraitCollection *)previous {
-    %orig(previous);
-    LGUpdateIslandMedia((MRUActivityNowPlayingView *)self);
+%group LGIslandPublicTextDrawing
+%hook UILabel
+- (void)drawTextInRect:(CGRect)rect {
+    LGDrawIslandText(self, rect, ^{ %orig(rect); });
 }
 %end
 %end
 
-#pragma mark - Authoritative appearance for remote island scenes
-
-@interface NSObject (LGIslandHostedScene)
-- (id)scene;
-- (id)settings;
-- (NSInteger)userInterfaceStyle;
-- (void)setUserInterfaceStyle:(NSInteger)style;
-- (void)updateSettingsWithBlock:(void (^)(id settings))block;
-@end
-
-@interface LGIslandSceneAppearance : NSObject
-@property (nonatomic) NSInteger nativeStyle;
-@property (nonatomic) NSInteger appliedStyle;
-@end
-@implementation LGIslandSceneAppearance @end
-
-static NSMapTable<id, LGIslandSceneAppearance *> *sLGIslandHostedScenes;
-
-static NSInteger LGIslandHostAppearance(void) {
-    // Called only in SpringBoard. The remote service's UIScreen may itself be
-    // forced Dark by its ActivitySceneSettings, even when SpringBoard is Light.
-    return UIScreen.mainScreen.traitCollection.userInterfaceStyle;
-}
-
-static void LGApplyIslandHostedAppearance(id element, id settings) {
-    id scene = [element scene];
-    if (!scene || ![settings respondsToSelector:@selector(userInterfaceStyle)]
-        || ![settings respondsToSelector:@selector(setUserInterfaceStyle:)]
-        || ![scene respondsToSelector:@selector(updateSettingsWithBlock:)]) return;
-    LGIslandSceneAppearance *state = [sLGIslandHostedScenes objectForKey:scene];
-    NSInteger hostStyle = LGIslandHostAppearance();
-    BOOL enabled = LGIslandContentEnabled()
-        && (hostStyle == UIUserInterfaceStyleLight || hostStyle == UIUserInterfaceStyleDark);
-    if (!enabled) {
-        if (state) {
-            if ([settings userInterfaceStyle] != state.nativeStyle)
-                [settings setUserInterfaceStyle:state.nativeStyle];
-            [sLGIslandHostedScenes removeObjectForKey:scene];
-        }
-        return;
-    }
-    NSInteger incoming = [settings userInterfaceStyle];
-    if (!state) {
-        if (!sLGIslandHostedScenes) sLGIslandHostedScenes = [NSMapTable weakToStrongObjectsMapTable];
-        state = [LGIslandSceneAppearance new];
-        state.nativeStyle = incoming;
-        [sLGIslandHostedScenes setObject:state forKey:scene];
-    } else if (incoming != state.appliedStyle) {
-        state.nativeStyle = incoming;
-    }
-    state.appliedStyle = hostStyle;
-    if (incoming != hostStyle) [settings setUserInterfaceStyle:hostStyle];
-}
-
-static void LGRefreshIslandHostedScenes(void) {
-    if (!LGIsSpringBoardProcess() || !sLGIslandHostedScenes.count) return;
-    NSInteger hostStyle = LGIslandHostAppearance();
-    BOOL enabled = LGIslandContentEnabled()
-        && (hostStyle == UIUserInterfaceStyleLight || hostStyle == UIUserInterfaceStyleDark);
-    for (id scene in sLGIslandHostedScenes.keyEnumerator.allObjects) {
-        LGIslandSceneAppearance *state = [sLGIslandHostedScenes objectForKey:scene];
-        NSInteger desired = enabled ? hostStyle : state.nativeStyle;
-        id current = [scene settings];
-        if ([current respondsToSelector:@selector(userInterfaceStyle)]
-            && [current userInterfaceStyle] != desired) {
-            [scene updateSettingsWithBlock:^(id mutableSettings) {
-                if ([mutableSettings respondsToSelector:@selector(setUserInterfaceStyle:)])
-                    [mutableSettings setUserInterfaceStyle:desired];
-            }];
-        }
-        if (enabled) state.appliedStyle = desired;
-        else [sLGIslandHostedScenes removeObjectForKey:scene];
-    }
-}
-
-%group LGIslandHostedAppearanceLifecycle
-%hook SBSystemApertureSceneElement
-- (void)_updateMutableSceneSettings:(id)settings withParameters:(id)parameters {
-    %orig(settings, parameters);
-    LGApplyIslandHostedAppearance(self, settings);
+%group LGIslandContentsTextDrawing
+%hook UILabel
+- (void)drawContentsInRect:(CGRect)rect {
+    LGDrawIslandText(self, rect, ^{ %orig(rect); });
 }
 %end
 %end
 
-static void LGInstallIslandHostedAppearanceHooks(void) {
-    if (!LGIsSpringBoardProcess()) return;
-    // The iOS 16.5 startup regression is a separate open investigation.
-    if (@available(iOS 17.0, *)) {
-        Class element = NSClassFromString(@"SBSystemApertureSceneElement");
-        if (!class_getInstanceMethod(element, @selector(_updateMutableSceneSettings:withParameters:))) return;
-        %init(LGIslandHostedAppearanceLifecycle);
-        lgObservePreferenceReload(^{ LGRefreshIslandHostedScenes(); });
-    }
+%group LGIslandPrivateTextDrawing
+%hook UILabel
+- (CGRect)_drawTextInRect:(CGRect)rect {
+    __block CGRect result = CGRectZero;
+    LGDrawIslandText(self, rect, ^{ result = %orig(rect); });
+    return result;
 }
+%end
+%end
 
-static void LGInstallIslandMediaHooks(void) {
-    static BOOL installed;
-    if (installed) return;
-    Class view = NSClassFromString(@"MRUActivityNowPlayingView");
-    Class provider = NSClassFromString(@"MRUVisualStylingProvider");
-    if (!class_getInstanceMethod(view, @selector(stylingProvider))
-        || !class_getInstanceMethod(view, @selector(setStylingProvider:))) return;
-    for (NSString *name in @[@"setPrimaryColor:", @"setSecondaryColor:", @"setTertiaryColor:",
-                             @"setQuaternaryColor:", @"setSeparatorColor:", @"setSupportsVibrancy:"]) {
-        if (!class_getInstanceMethod(provider, NSSelectorFromString(name))) return;
-    }
-    installed = YES;
-    %init(LGIslandMediaLifecycle);
-    lgObservePreferenceReload(^{ LGRefreshIslandMedia(nil); });
+%group LGIslandMarqueeVoidDrawing
+%hook UILabel
+- (void)_drawFullMarqueeTextInRect:(CGRect)rect {
+    LGDrawIslandText(self, rect, ^{ %orig(rect); });
 }
+%end
+%end
 
-static void LGInstallIslandContentHooks(void) {
-    static BOOL installed;
-    if (installed) return;
-    Class source = NSClassFromString(@"SBUISystemApertureElementSource");
-    if (!class_getInstanceMethod(source, @selector(_updateTraitCollectionForElementIfNeeded))
-        || !class_getInstanceMethod(source, @selector(systemApertureElement))
-        || !class_getInstanceMethod(source, @selector(containerViewController))) return;
-    installed = YES;
-    %init(LGIslandContentLifecycle);
-    lgObservePreferenceReload(^{ LGRefreshIslandContent(nil); });
+%group LGIslandMarqueeRectDrawing
+%hook UILabel
+- (CGRect)_drawFullMarqueeTextInRect:(CGRect)rect {
+    __block CGRect result = CGRectZero;
+    LGDrawIslandText(self, rect, ^{ result = %orig(rect); });
+    return result;
 }
+%end
+%end
 
-static void LGIslandContentImageAdded(const struct mach_header *header, intptr_t slide) {
-    Dl_info image = {0};
-    if (!dladdr(header, &image) || !image.dli_fname) return;
-    BOOL content = strstr(image.dli_fname, "/SpringBoardUIServices.framework/") != NULL;
-    BOOL media = strstr(image.dli_fname, "/MediaControls.framework/") != NULL;
-    if (!content && !media) return;
-    // Avoid Objective-C/runtime work under dyld's image-loading callback.
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (content) LGInstallIslandContentHooks();
-        if (media) LGInstallIslandMediaHooks();
-    });
+static BOOL LGIslandDrawingMethodHasReturn(SEL selector, const char *type) {
+    Method method = class_getInstanceMethod(UILabel.class, selector);
+    if (!method) return NO;
+    char *actual = method_copyReturnType(method);
+    BOOL matches = actual && strcmp(actual, type) == 0;
+    free(actual);
+    return matches;
 }
 
 %ctor {
     if ([NSProcessInfo.processInfo.processName isEqualToString:@"backboardd"]) return;
     if (@available(iOS 16.0, *)) {
-        LGInstallIslandContentHooks();
-        LGInstallIslandMediaHooks();
-        LGInstallIslandHostedAppearanceHooks();
-        _dyld_register_func_for_add_image(LGIslandContentImageAdded);
+        sLGIslandTextLabels = [NSHashTable weakObjectsHashTable];
+        uint32_t status = notify_register_dispatch(kLGIslandTextNotification, &sLGIslandTextToken,
+                                                   dispatch_get_main_queue(), ^(int token) {
+            uint64_t state = 0;
+            if (notify_get_state(token, &state) == NOTIFY_STATUS_OK && state != sLGIslandTextState) {
+                sLGIslandTextState = state;
+                LGInvalidateIslandText();
+            }
+        });
+        if (status != NOTIFY_STATUS_OK) { sLGIslandTextToken = -1; return; }
+        uint64_t initial = 0;
+        if (notify_get_state(sLGIslandTextToken, &initial) == NOTIFY_STATUS_OK)
+            sLGIslandTextState = initial;
+        if (LGIslandDrawingMethodHasReturn(@selector(drawTextInRect:), @encode(void))) {
+            %init(LGIslandPublicTextDrawing);
+        }
+        if (LGIslandDrawingMethodHasReturn(@selector(drawContentsInRect:), @encode(void))) {
+            %init(LGIslandContentsTextDrawing);
+        }
+        if (LGIslandDrawingMethodHasReturn(@selector(_drawTextInRect:), @encode(CGRect))) {
+            %init(LGIslandPrivateTextDrawing);
+        }
+        if (LGIslandDrawingMethodHasReturn(@selector(_drawFullMarqueeTextInRect:), @encode(CGRect))) {
+            %init(LGIslandMarqueeRectDrawing);
+        } else if (LGIslandDrawingMethodHasReturn(@selector(_drawFullMarqueeTextInRect:), @encode(void))) {
+            %init(LGIslandMarqueeVoidDrawing);
+        }
     }
 }

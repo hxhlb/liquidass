@@ -56,3 +56,30 @@ Received backboardd-2026-10-09-173721.ips:
   cold-start failure. An old mapped process or post-rollback report is possible;
   do not infer either explanation without matched timing/version evidence.
 - Keep the iOS 16 startup investigation open until the matching report arrives.
+
+Additional reports establish a separate display-server crash loop:
+- backboardd-2026-10-09-170125.ips: launch 17:01:22.2224, crash 17:01:25.2633.
+- backboardd-2026-10-09-170136.ips: PID 3225, launch 17:01:32.2670,
+  crash 17:01:35.3132.
+- backboardd-2026-10-09-170146.ips: PID 3249, launch 17:01:42.3182,
+  crash 17:01:45.5089.
+- backboardd-2026-10-09-170156.ips: PID 3274, launch 17:01:52.5182,
+  crash 17:01:55.7839.
+- backboardd-2026-10-09-172808.ips repeats the same stack at 17:27:53.2903,
+  approximately 11 seconds after process launch.
+- All identify iPhone15,2 and iOS 16.3 / 20D47, not the verbally reported 16.5.
+- All fault in com.apple.coreanimation.display.primary with SIGSEGV at 0xD:
+  bw_set -> IOMFBgainencoder_finish -> IOMFBGainEncoderFinishEncoding ->
+  CA::WindowServer::IOMFBDisplay::finish_update.
+- The crashed x0 is zero. The exact iOS16.3 IOMobileFramebuffer UUID
+  AE7A6C9E-B4FC-34AC-BC01-A937782994ED matches the extracted IPSW image.
+  Its bw_set entry 0x1b0f7004c is `ldrb w8, [x0, #0xd]`.
+  The caller loads that null field from gain-encoder context +0x18.
+- This proves repeated display-server failure consistent with the spinner.
+  It is distinct from the 17:37 banana33 keyboard exception.
+- These native-only stacks carry no LiquidAss frame/UUID. They do not identify
+  the installed tweak version or exclude remote layer-tree input as a cause.
+- Primary code review target: replacing native gain-map layers before the
+  keeper exists, and a keeper frame (-2,-2,1,1) fully outside the visible window.
+  Their causal role remains a hypothesis pending validation. No experimental
+  GainMap change has been delivered or claimed as a fix yet.

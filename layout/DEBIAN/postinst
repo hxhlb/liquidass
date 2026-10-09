@@ -1,11 +1,5 @@
 #!/bin/sh
 
-if [ "${1:-}" = "configure" ]; then
-    (
-        sleep 1
-        killall chronod >/dev/null 2>&1 || true
-        killall WidgetRenderer_Default WidgetRenderer_CarPlay >/dev/null 2>&1 || true
-    ) &
-fi
+# Process reloads are performed manually by the user after installation.
 
 exit 0
