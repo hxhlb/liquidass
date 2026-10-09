@@ -52,3 +52,31 @@ Device acceptance:
 
 No device validation, installation, restart, GitHub release or APT publication
 was performed by the agent. Retain banana38 as the known working glass baseline.
+
+banana40 follow-up (user screenshot, iOS 17, userspace restart confirmed):
+- banana39 still showed white music title, time labels and playback controls.
+- iOS 17.6.1 MRUActivityNowPlayingViewController viewDidLoad explicitly assigns
+  systemWhiteColor to view.stylingProvider.primaryColor, independent of traits:
+  https://github.com/SuperChaoM/iPhone15-3_17.6.1_21G101_Restore/blob/main/System/Library/PrivateFrameworks/MediaControls.framework/MRUActivityNowPlayingViewController.m
+- MRUActivityNowPlayingView distributes its provider to header/time/transport
+  controls. Their native update methods consume its semantic style colors.
+- Supply a separate provider only to this view in Light mode. Resolve its
+  primary/secondary/tertiary/quaternary/separator colors explicitly for Light.
+  Disable vibrancy on this private provider; do not invert any content layers.
+- Preserve the original provider without mutating it. Restore it in Dark mode,
+  on disable or detachment, and remember replacement providers from the system.
+- Reconcile a native late systemWhiteColor write after provider assignment;
+  stable layouts do not reassign providers or rewrite colors.
+- The same class/property path exists in iOS 16.3 metadata. Hook installation is
+  guarded and also handles MediaControls loading after tweak initialization.
+
+Additional host check: python3.11 tests/test_dynamic_island_media.py
+Covers explicit-white replacement, original-provider preservation, late white
+writes, 1000 stable layouts, theme/disable/detach and provider replacement.
+
+banana40 device check: repeat the reported music panel in Light mode, including
+title, artist, elapsed/remaining time, play/skip/favorite and AirPlay. Verify the
+cover is unchanged; then Dark -> Light, track change and collapsed -> expanded.
+Control Center and Lock Screen music should retain their native palettes.
+This fixes the confirmed music path; it does not prove all other activity types
+or app-defined fixed colors are covered. No additional user setting is required.

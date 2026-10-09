@@ -127,6 +127,8 @@ static void LGRefreshIslandContent(UIWindow *window) {
     }
 }
 
+static void LGRefreshIslandMedia(UIWindow *window);
+
 %group LGIslandContentLifecycle
 %hook SBUISystemApertureElementSource
 - (void)_updateTraitCollectionForElementIfNeeded {
@@ -150,11 +152,134 @@ static void LGRefreshIslandContent(UIWindow *window) {
 %hook UIWindow
 - (void)traitCollectionDidChange:(UITraitCollection *)previous {
     %orig(previous);
-    if (previous.userInterfaceStyle != self.traitCollection.userInterfaceStyle)
+    if (previous.userInterfaceStyle != self.traitCollection.userInterfaceStyle) {
         LGRefreshIslandContent(self);
+        LGRefreshIslandMedia(self);
+    }
 }
 %end
 %end
+
+#pragma mark - Music island's explicit white palette
+
+@interface MRUVisualStylingProvider : NSObject
+@property (nonatomic, strong) UIColor *primaryColor;
+@property (nonatomic, strong) UIColor *secondaryColor;
+@property (nonatomic, strong) UIColor *tertiaryColor;
+@property (nonatomic, strong) UIColor *quaternaryColor;
+@property (nonatomic, strong) UIColor *separatorColor;
+@property (nonatomic) BOOL supportsVibrancy;
+@end
+
+@interface MRUActivityNowPlayingView : UIView
+@property (nonatomic, strong) MRUVisualStylingProvider *stylingProvider;
+@end
+
+@interface LGIslandMediaState : NSObject
+@property (nonatomic, strong) MRUVisualStylingProvider *nativeProvider;
+@property (nonatomic, strong) MRUVisualStylingProvider *lightProvider;
+@property (nonatomic, strong) NSArray<UIColor *> *lightColors;
+@property (nonatomic) BOOL applying;
+@end
+@implementation LGIslandMediaState @end
+
+static char kLGIslandMediaStateKey;
+static NSHashTable<MRUActivityNowPlayingView *> *sLGIslandMediaViews;
+
+static void LGUpdateIslandMedia(MRUActivityNowPlayingView *view) {
+    LGIslandMediaState *state = objc_getAssociatedObject(view, &kLGIslandMediaStateKey);
+    if (state.applying) return;
+    if (!sLGIslandMediaViews) sLGIslandMediaViews = [NSHashTable weakObjectsHashTable];
+    [sLGIslandMediaViews addObject:view];
+    UIScreen *screen = view.window.screen ?: UIScreen.mainScreen;
+    BOOL light = LGIslandContentEnabled() && view.window
+        && screen.traitCollection.userInterfaceStyle == UIUserInterfaceStyleLight;
+    MRUVisualStylingProvider *current = view.stylingProvider;
+    if (!state && (!light || !current)) return;
+    if (!state) {
+        state = [LGIslandMediaState new];
+        objc_setAssociatedObject(view, &kLGIslandMediaStateKey, state,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (current != state.lightProvider) state.nativeProvider = current;
+    state.applying = YES;
+    @try {
+        if (!light || !state.nativeProvider) {
+            if (current && current == state.lightProvider)
+                view.stylingProvider = state.nativeProvider;
+            return;
+        }
+        if (!state.lightProvider) {
+            // A private provider for this island view; never recolor a shared
+            // Control Center/Lock Screen provider or the album artwork itself.
+            MRUVisualStylingProvider *palette = [NSClassFromString(@"MRUVisualStylingProvider") new];
+            if (!palette) return;
+            UITraitCollection *traits = [UITraitCollection traitCollectionWithUserInterfaceStyle:UIUserInterfaceStyleLight];
+            state.lightColors = @[
+                [UIColor.labelColor resolvedColorWithTraitCollection:traits],
+                [UIColor.secondaryLabelColor resolvedColorWithTraitCollection:traits],
+                [UIColor.tertiaryLabelColor resolvedColorWithTraitCollection:traits],
+                [UIColor.quaternaryLabelColor resolvedColorWithTraitCollection:traits],
+                [UIColor.separatorColor resolvedColorWithTraitCollection:traits]
+            ];
+            state.lightProvider = palette;
+        }
+        MRUVisualStylingProvider *palette = state.lightProvider;
+        // viewDidLoad may set systemWhiteColor after assigning the provider.
+        // Reconcile that write on layout, with no notifications for stable colors.
+        if (![palette.primaryColor isEqual:state.lightColors[0]]) palette.primaryColor = state.lightColors[0];
+        if (![palette.secondaryColor isEqual:state.lightColors[1]]) palette.secondaryColor = state.lightColors[1];
+        if (![palette.tertiaryColor isEqual:state.lightColors[2]]) palette.tertiaryColor = state.lightColors[2];
+        if (![palette.quaternaryColor isEqual:state.lightColors[3]]) palette.quaternaryColor = state.lightColors[3];
+        if (![palette.separatorColor isEqual:state.lightColors[4]]) palette.separatorColor = state.lightColors[4];
+        if (palette.supportsVibrancy) palette.supportsVibrancy = NO;
+        if (current != state.lightProvider) view.stylingProvider = state.lightProvider;
+    } @finally {
+        state.applying = NO;
+    }
+}
+
+static void LGRefreshIslandMedia(UIWindow *window) {
+    for (MRUActivityNowPlayingView *view in sLGIslandMediaViews.allObjects)
+        if (!window || view.window == window) LGUpdateIslandMedia(view);
+}
+
+%group LGIslandMediaLifecycle
+%hook MRUActivityNowPlayingView
+- (void)setStylingProvider:(MRUVisualStylingProvider *)provider {
+    %orig(provider);
+    LGUpdateIslandMedia((MRUActivityNowPlayingView *)self);
+}
+- (void)didMoveToWindow {
+    %orig;
+    LGUpdateIslandMedia((MRUActivityNowPlayingView *)self);
+}
+- (void)layoutSubviews {
+    %orig;
+    LGUpdateIslandMedia((MRUActivityNowPlayingView *)self);
+}
+- (void)traitCollectionDidChange:(UITraitCollection *)previous {
+    %orig(previous);
+    LGUpdateIslandMedia((MRUActivityNowPlayingView *)self);
+}
+%end
+%end
+
+static void LGInstallIslandMediaHooks(void) {
+    static BOOL installed;
+    if (installed) return;
+    Class view = NSClassFromString(@"MRUActivityNowPlayingView");
+    Class provider = NSClassFromString(@"MRUVisualStylingProvider");
+    if (!class_getInstanceMethod(view, @selector(stylingProvider))
+        || !class_getInstanceMethod(view, @selector(setStylingProvider:))) return;
+    for (NSString *name in @[@"setPrimaryColor:", @"setSecondaryColor:", @"setTertiaryColor:",
+                             @"setQuaternaryColor:", @"setSeparatorColor:", @"setSupportsVibrancy:"]) {
+        if (!class_getInstanceMethod(provider, NSSelectorFromString(name))) return;
+    }
+    installed = YES;
+    %init(LGIslandMediaLifecycle);
+    lgObservePreferenceReload(^{ LGRefreshIslandMedia(nil); });
+}
 
 static void LGInstallIslandContentHooks(void) {
     static BOOL installed;
@@ -170,15 +295,21 @@ static void LGInstallIslandContentHooks(void) {
 
 static void LGIslandContentImageAdded(const struct mach_header *header, intptr_t slide) {
     Dl_info image = {0};
-    if (!dladdr(header, &image) || !image.dli_fname
-        || !strstr(image.dli_fname, "/SpringBoardUIServices.framework/")) return;
+    if (!dladdr(header, &image) || !image.dli_fname) return;
+    BOOL content = strstr(image.dli_fname, "/SpringBoardUIServices.framework/") != NULL;
+    BOOL media = strstr(image.dli_fname, "/MediaControls.framework/") != NULL;
+    if (!content && !media) return;
     // Avoid Objective-C/runtime work under dyld's image-loading callback.
-    dispatch_async(dispatch_get_main_queue(), ^{ LGInstallIslandContentHooks(); });
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (content) LGInstallIslandContentHooks();
+        if (media) LGInstallIslandMediaHooks();
+    });
 }
 
 %ctor {
     if (@available(iOS 16.0, *)) {
         LGInstallIslandContentHooks();
+        LGInstallIslandMediaHooks();
         _dyld_register_func_for_add_image(LGIslandContentImageAdded);
     }
 }
