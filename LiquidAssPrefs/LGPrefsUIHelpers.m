@@ -2,6 +2,7 @@
 #import "LGPrefsDataSupport.h"
 #import "../Shared/LGLiveBackdropView.h"
 #import "../Shared/LGSharedSupport.h"
+#import "../Shared/LGColorEncoding.h"
 #import "../Shared/LGFramework.h"
 #import <Preferences/PSListController.h>
 #import <dlfcn.h>
@@ -1279,26 +1280,12 @@ static UIView *LGMakeRespringBar(id target, SEL respringAction, SEL laterAction)
     return card;
 }
 UIColor *LGColorFromRGBAHex(NSString *hex) {
-    NSString *value = [[hex ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]
-        stringByReplacingOccurrencesOfString:@"#" withString:@""];
-    if (value.length != 6 && value.length != 8) return UIColor.clearColor;
-
-    unsigned parsed = 0;
-    if (![[NSScanner scannerWithString:value] scanHexInt:&parsed]) return UIColor.clearColor;
-
-    CGFloat red, green, blue, alpha;
-    if (value.length == 6) {
-        red = ((parsed >> 16) & 0xff) / 255.0;
-        green = ((parsed >> 8) & 0xff) / 255.0;
-        blue = (parsed & 0xff) / 255.0;
-        alpha = 1.0;
-    } else {
-        red = ((parsed >> 24) & 0xff) / 255.0;
-        green = ((parsed >> 16) & 0xff) / 255.0;
-        blue = ((parsed >> 8) & 0xff) / 255.0;
-        alpha = (parsed & 0xff) / 255.0;
-    }
-    return [UIColor colorWithRed:red green:green blue:blue alpha:alpha];
+    uint32_t rgba;
+    if (!LGReadRGBAHex(hex, &rgba)) return UIColor.clearColor;
+    return [UIColor colorWithRed:((rgba >> 24) & 0xff) / 255.0
+                           green:((rgba >> 16) & 0xff) / 255.0
+                            blue:((rgba >> 8) & 0xff) / 255.0
+                           alpha:(rgba & 0xff) / 255.0];
 }
 
 NSString *LGRGBAHexFromColor(UIColor *color) {

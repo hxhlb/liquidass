@@ -2,6 +2,7 @@
 #import "LGHostRegistry.h"
 #import "LGCoverSheetState.h"
 #import "LGSharedSupport.h"
+#import "LGRendererDiagnostics.h"
 #import "LGFramework.h"
 #import <CoreMotion/CoreMotion.h>
 #import <QuartzCore/QuartzCore.h>
@@ -214,6 +215,14 @@ static void LGParametersReloaded(CFNotificationCenterRef center, void *observer,
 
         // clear cached prefs before rebuilding every live filter
         LGInvalidateGlassPreferenceCache();
+        uint32_t status = 0, light = 0, dark = 0;
+        if (LGRendererDiagRead(&status, &light, &dark)) {
+            LGLog(@"[renderer-prefs] source=CFPreferences read=%@ keys=%u running=%@ requested=%@ island.light=#%08X island.dark=#%08X",
+                  status & 1 ? @"ok" : @"failed", (status >> 8) & 65535,
+                  status & 2 ? @"enhanced" : @"classic",
+                  !(status & 1) ? @"unknown" : (status & 4 ? @"enhanced" : @"classic"), light, dark);
+            if (!(status & 1)) return;
+        }
         NSArray<LGLiveBackdropView *> *glasses = sLGAllGlasses.allObjects;
         LGLog(@"render parameters ready; refreshing %lu live filters",
               (unsigned long)glasses.count);

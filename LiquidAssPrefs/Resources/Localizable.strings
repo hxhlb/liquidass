@@ -270,3 +270,6 @@
 "prefs.bezel.mode.ratio" = "Compatible ratio";
 "prefs.bezel.mode.points" = "Fixed width";
 "prefs.bezel.width.subtitle" = "Width in points, capped at half the surface’s shortest side.";
+
+"prefs.clock.adaptive_tint.title" = "Adaptive clock tint";
+"prefs.clock.adaptive_tint.subtitle" = "Use wallpaper colors when available. Turn off to use custom Light and Dark tints.";

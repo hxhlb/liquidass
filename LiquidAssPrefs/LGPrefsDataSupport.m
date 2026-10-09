@@ -973,6 +973,10 @@ NSArray<NSDictionary *> *LGClockItems(void) {
         LGLocalized(@"prefs.control.clock_fps_limit"),
         LGLocalized(@"prefs.subtitle.clock_fps_limit"),
         maximumFPS, 1.0, maximumFPS, 0) atIndex:2];
+    [rendererItems insertObject:LGSwitchSetting(@"Clock.AdaptiveTint.Enabled",
+        LGLocalized(@"prefs.clock.adaptive_tint.title"),
+        LGLocalized(@"prefs.clock.adaptive_tint.subtitle"),
+        !LGSelectedRendererEnhanced()) atIndex:3];
     return LGJoinItemGroups(@[
         rendererItems,
         LGClockVariableFontItems(),

@@ -1,0 +1,49 @@
+banana43 — renderer preference reads and tint diagnostics
+
+Observed input: device settings saved Enhanced.DynamicIsland.LightTintColor and
+reported successful commits; UI processes received parameter refresh events.
+The supplied log had no backboardd parameter/render entries. This narrows the
+investigation but does not prove the old RootHide path was the device's cause.
+
+Change:
+- Both schemes use CFPreferencesAppSynchronize + CFPreferencesCopyMultiple on
+  dylv.liquidassprefs, current user/any host, matching the Settings writer.
+- Synchronization failure, a null result or a non-dictionary result is a failed
+  read. Preserve existing applied parameters; initialize safe complete defaults
+  if the failure occurs on first load. An empty valid dictionary is a reset.
+- Mirror read status, key count, running/requested profiles and loaded island
+  RGBA through versioned, generation-matched Darwin states. Existing UI logging
+  prints [renderer-prefs] records even if backboardd cannot write the log file.
+- A reported failed read skips the UI filter refresh; no misleading ready log.
+- Renderer profile remains latched until restart, as before. Diagnostics expose
+  a pending profile mismatch without hot-swapping shader engines.
+- No change to island text/button treatment or the independent iOS 16 GainMap issue.
+- All 30 renderer hosts receive independent Light/Dark color-path checks in both
+  engines (300 cases per runtime profile), including legacy RGB/strength, modern
+  hex precedence, invalid hex and transparent alpha. Both real Metal shaders
+  also render 30 RGB/black/white cases at zero/half/full alpha on the host GPU.
+- Clock custom tint no longer inherits Notification colors. An engine-scoped
+  Clock.AdaptiveTint.Enabled toggle selects wallpaper adaptation or manual
+  Light/Dark tint, retaining Classic-on/Enhanced-off defaults. Shared hex parsing
+  fixes six-digit RGB in the clock pull overlay. Clock UI/defaults and the actual
+  render-time adaptive branch are exercised by the profile test.
+
+Host checks:
+python3.11 tests/test_renderer_preference_reader.py
+python3.11 tests/test_renderer_profiles.py
+python3.11 tests/test_filter_registration.py
+python3.11 tests/test_blur_modes.py
+python3.11 tests/test_geometry_shader.py
+python3.11 tests/test_clock_modes.py
+
+Device acceptance (not performed by the agent):
+1. Install the matching scheme and reload backboardd using the user's normal
+   process to load the new renderer binary. The package does not do this itself.
+2. Enable debug logging; set island Light red and Dark green with 100% opacity.
+3. Without another restart, inspect the expanded island and exported log.
+   [renderer-prefs] must report read=ok, matching running/requested profile,
+   island.light=#FF0000FF and island.dark=#00FF00FF.
+4. Check read=failed or profile mismatch before attributing any remaining issue
+   to tint math. A matching read record alone does not prove final device pixels.
+5. Restore the desired colors after validation; confirm alpha-zero restores
+   transparent glass. Preserve earlier packages for rollback.

@@ -16,6 +16,7 @@
 #import "../Shared/LGGlassKit.h"
 #import "../Shared/LGHostRegistry.h"
 #import "../Shared/LGSharedSupport.h"
+#import "../Shared/LGColorEncoding.h"
 #import "../Shared/LGLensRectState.h"
 #import "../Shared/LGLiveBackdropView.h"
 
@@ -1179,13 +1180,14 @@ static void LGClockRestoreDirectFontState(LGClockState *state) {
 }
 
 static UIColor *LGClockPullTint(UITraitCollection *traits) {
+    if (LG_prefBool(@"Clock.AdaptiveTint.Enabled", !LGRendererUsesEnhancedAtLaunch()))
+        return UIColor.clearColor;
     const LGHostDefinition *host = LGActiveHostDefinitionForPrefix(@"Clock");
     BOOL dark = traits.userInterfaceStyle == UIUserInterfaceStyleDark;
     NSString *fallback = [NSString stringWithUTF8String:dark ? host->darkTintHex : host->lightTintHex];
-    const char *hex = LG_prefString(dark ? @"Clock.DarkTintColor" : @"Clock.LightTintColor",
-                                    fallback).UTF8String;
-    unsigned int rgba = 0;
-    if (hex) sscanf(hex[0] == '#' ? hex + 1 : hex, "%x", &rgba);
+    NSString *hex = LG_prefString(dark ? @"Clock.DarkTintColor" : @"Clock.LightTintColor", fallback);
+    uint32_t rgba;
+    if (!LGReadRGBAHex(hex, &rgba)) return UIColor.clearColor;
     return [UIColor colorWithRed:((rgba >> 24) & 0xff) / 255.0
                            green:((rgba >> 16) & 0xff) / 255.0
                             blue:((rgba >> 8) & 0xff) / 255.0

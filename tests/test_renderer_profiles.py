@@ -15,10 +15,14 @@ SUPPORT=r'''
 #import "LGHostRegistry.h"
 #import "LGBezelGeometry.h"
 #import "LGRendererPreferences.h"
+#import "LGRendererDiagnostics.h"
+#import "LGColorEncoding.h"
 static NSMutableDictionary *stored;
 static bool g_enhancedRenderer, gLGBackboardDebugLogging;
 static id LGUnscopedPreferenceValue(NSString *key){return stored[key];}
 static NSDictionary *lgReadHostPreferences(void){return stored;}
+static bool lastReadOK;
+static void lgPublishHostPrefsDiagnostics(NSDictionary *prefs,bool readOK){lastReadOK=readOK;}
 static id LGReadPreferenceObject(NSString *key,id fallback){return stored[key] ?: fallback;}
 static NSNumber *LGReadPreference(NSString *key,NSNumber *fallback){id v=stored[key];return [v isKindOfClass:NSNumber.class]?v:fallback;}
 static void LGWritePreferenceObject(NSString *key,id value){stored[key]=value;}
@@ -33,15 +37,18 @@ static NSString *kLGDynamicDefaultPrefix=@"__dynamic_default.";
 @interface UIScreen : NSObject
 + (instancetype)mainScreen;
 @property CGRect bounds;
+@property NSInteger maximumFramesPerSecond;
 @end
 @implementation UIScreen
-+ (instancetype)mainScreen{UIScreen *s=[UIScreen new];s.bounds=CGRectMake(0,0,428,926);return s;}
++ (instancetype)mainScreen{UIScreen *s=[UIScreen new];s.bounds=CGRectMake(0,0,428,926);s.maximumFramesPerSecond=60;return s;}
 @end
 '''
 MAIN=r'''
 static NSDictionary *item(NSArray *items,NSString *key){for(NSDictionary *i in items)if([i[@"key"] isEqual:key])return i;return nil;}
 static NSArray *keys(NSArray *items){NSMutableArray *a=[NSMutableArray new];for(NSDictionary *i in items)if(i[@"key"])[a addObject:i[@"key"]];return a;}
 int main(int argc,char **argv){@autoreleasepool{
+    stored=nil;g_hostParamsInit=false;assert(!lgReloadHostPrefs() && g_hostParamsInit);
+    for(int i=0;i<kHostCount;i++)assert(strcmp(g_hostParams[i].prefPrefix,kHostDefaults[i].prefPrefix)==0);
     for(size_t i=0;i<LGHostIdentifierCount;i++) {
         const LGHostDefinition *d=LGHostDefinitionForProfile(kLGHostRegistry[i].preferencePrefix,YES);
         assert(d && LGHostIdentifierForDefinition(d)==i);
@@ -89,6 +96,64 @@ int main(int argc,char **argv){@autoreleasepool{
     assert(g_hostParams[LGHostIdentifierDock].bezelWidthPoints==17.5f);
     g_enhancedRenderer=false;lgReloadHostPrefs();assert(!g_hostParams[LGHostIdentifierDock].pointBezel);
 
+    // Read errors preserve the applied state; a valid empty domain is a reset.
+    NSMutableDictionary *beforeFailure=stored;
+    float oldThickness=g_hostParams[LGHostIdentifierDock].glassThickness;
+    stored=nil;assert(!lgReloadHostPrefs() && !lastReadOK);
+    assert(g_hostParams[LGHostIdentifierDock].glassThickness==oldThickness);
+    stored=[NSMutableDictionary new];assert(lgReloadHostPrefs() && lastReadOK);
+    assert(g_hostParams[LGHostIdentifierDock].glassThickness==kHostDefaults[LGHostIdentifierDock].glassThickness);
+    stored=beforeFailure;lgReloadHostPrefs();
+
+    simd_float4 decoded;
+    uint32_t rgba;
+    assert(LGReadRGBAHex(@"#112233",&rgba) && rgba==0x112233FF);
+    assert(LGReadRGBAHex(@"11223344",&rgba) && rgba==0x11223344);
+    assert(!LGReadRGBAHex(@"FF#0000",&rgba));
+    assert(lgDecodeTintColor(@"#112233",&decoded) && decoded.w==1);
+    assert(!lgDecodeTintColor(@"#12ZZZZ",&decoded));
+    assert(!lgDecodeTintColor(@"#FF0000ZZ",&decoded));
+    assert(!lgDecodeTintColor(@"# 10000",&decoded));
+    NSUInteger colorCases=0;
+    for(int mode=0;mode<2;mode++) {
+        g_enhancedRenderer=mode;
+        stored[@"Renderer.Profile"]=mode?@"enhanced":@"classic";
+        NSDictionary *toggle=item(LGClockItems(),LGRendererPreferenceKey(@"Clock.AdaptiveTint.Enabled",mode));
+        assert(toggle && [toggle[@"default"] boolValue]==!mode);
+        for(int host=0;host<kHostCount;host++) {
+            NSString *prefix=@(kHostDefaults[host].prefPrefix);
+            NSString *light=LGRendererPreferenceKey([prefix stringByAppendingString:@".LightTintColor"],mode);
+            NSString *dark=LGRendererPreferenceKey([prefix stringByAppendingString:@".DarkTintColor"],mode);
+            NSMutableDictionary *saved=stored;stored=[NSMutableDictionary new];
+            stored[light]=@"#FF0000FF";stored[dark]=@"#00FF00FF";
+            // The other engine's blue must never override this engine's red.
+            stored[LGRendererPreferenceKey([prefix stringByAppendingString:@".LightTintColor"],!mode)]=@"#0000FFFF";
+            assert(lgReloadHostPrefs());auto p=g_hostParams[host];
+            assert(g_clockAdaptiveTint==!mode);
+            NSString *adaptive=LGRendererPreferenceKey(@"Clock.AdaptiveTint.Enabled",mode);
+            stored[adaptive]=@YES;assert(lgReloadHostPrefs() && g_clockAdaptiveTint);
+            stored[adaptive]=@NO;assert(lgReloadHostPrefs() && !g_clockAdaptiveTint);
+            assert(LGRendererDiagRGBA(p.tintR,p.tintG,p.tintB,p.tintStrength)==0xFF0000FF);
+            assert(LGRendererDiagRGBA(p.darkTintR,p.darkTintG,p.darkTintB,p.darkTintStrength)==0x00FF00FF);
+            stored[light]=@"#00000000";assert(lgReloadHostPrefs());assert(g_hostParams[host].tintStrength==0);
+            [stored removeObjectForKey:light];
+            for(NSString *field in @[@"TintR",@"TintG",@"TintB",@"TintStrength"])
+                stored[LGRendererPreferenceKey([prefix stringByAppendingFormat:@".%@",field],mode)]=[field isEqual:@"TintStrength"]?@0.5:@0.25;
+            assert(lgReloadHostPrefs());p=g_hostParams[host];
+            assert(p.tintR==0.25f && p.tintG==0.25f && p.tintB==0.25f && p.tintStrength==0.5f);
+            stored[light]=@"#FF0000FF";assert(lgReloadHostPrefs());assert(g_hostParams[host].tintR==1 && g_hostParams[host].tintG==0);
+            stored=saved;colorCases+=5;
+        }
+    }
+    printf("PASS %lu all-host color cases: engines, Light/Dark, alpha-zero, legacy values and modern precedence\n",(unsigned long)colorCases);
+    auto manual=clockTintForTest(false,false,"Clock");
+    assert(manual.x==1 && manual.y==0 && manual.w==1);
+    auto automatic=clockTintForTest(true,false,"Clock");
+    assert(automatic.y>0 && automatic.w<1);
+    auto other=clockTintForTest(true,false,"Dock");assert(other.x==1 && other.y==0 && other.w==1);
+    wallpaperAvailable=false;automatic=clockTintForTest(true,true,"Clock");
+    assert(automatic.x==1 && fabs(automatic.w-0.12f)<1e-6);
+
     stored[@"Renderer.Profile"]=@"classic";
     NSArray *classic=LGRendererItemsForHostPrefix(@"Dock");
     assert([item(classic,@"Dock.GlassThickness")[@"default"] doubleValue]==20);
@@ -128,11 +193,27 @@ def main():
  a=back.index('typedef struct {\n    const char *typeName;');b=back.index('static NSDictionary *lgReadHostPreferences',a)
  code=SUPPORT+back[a:b]
  code+='static bool lgDecodeTintColor(NSString *hex, simd_float4 *out);\n'
- for sig in ['static void lgApplyHistoricalTintDefault(', 'static bool lgDecodeTintColor(', 'static void lgReloadHostPrefs(']:code+=definition(back,sig)+'\n'
+ for sig in ['static void lgApplyHistoricalTintDefault(', 'static bool lgDecodeTintColor(', 'static bool lgReloadHostPrefs(']:code+=definition(back,sig)+'\n'
  for sig in ['BOOL LGRendererUsesEnhancedAtLaunch(', 'id LGPreferenceValue(', 'BOOL LGHasExplicitPreferenceValue(']:code+=definition(shared,sig)+'\n'
  code+=definition(data,'static BOOL LGSelectedRendererEnhanced(')+'\n'
  code+='''static const CGFloat kLGUniversalBlurMax=50,kLGUniversalThicknessMax=500,kLGUniversalRefractiveIndexMax=5,kLGUniversalRefractionMax=5,kLGUniversalDispersionMax=10,kLGCoverSheetCornerRadiusPoints=64;\n'''
  for sig in ['NSDictionary *LGSwitchSetting(', 'NSDictionary *LGSliderSetting(', 'NSDictionary *LGMenuSetting(', 'static NSDictionary *LGSettingControlledByKey(', 'NSDictionary *LGGlassEnabledSetting(', 'static CGFloat LGDefaultBezelRatioForHost(', 'static NSDictionary *LGGlassThicknessSetting(', 'static NSDictionary *LGGlassRefractionSetting(', 'static NSDictionary *LGGlassRefractiveIndexSetting(', 'static NSDictionary *LGGlassSpecularSetting(', 'static NSDictionary *LGGlassBlurSetting(', 'NSArray<NSDictionary *> *LGRendererItemsForHostPrefix(']:code+=definition(data,sig)+'\n'
+ code+='''static NSArray *LGClockVariableFontItems(void){return @[];}
+static NSArray *LGClockDateFormatItems(void){return @[];}\n'''
+ code+=definition(data,'static NSArray<NSDictionary *> *LGJoinItemGroups(')+'\n'
+ code+=definition(data,'NSArray<NSDictionary *> *LGClockItems(')+'\n'
+ code+='''
+struct LGSpatialClockColorState { unsigned appearance; float contrast; bool depthActive; };
+struct LGClockColorSelection { bool valid; simd_float3 color; };
+static bool wallpaperAvailable=true;
+static bool lgReadSpatialClockColor(LGSpatialClockColorState *s){s->appearance=1;s->contrast=0.2;s->depthActive=false;return wallpaperAvailable;}
+static LGClockColorSelection lgSelectSpatialClockColor(const LGSpatialClockColorState *s){return {true,simd_make_float3(0,1,0)};}
+static simd_float4 clockTintForTest(bool adaptive,bool darkTint,const char *prefix){
+ g_clockAdaptiveTint=adaptive;LGHostParams host={};host.prefPrefix=prefix;const LGHostParams *hp=&host;
+ struct {simd_float4 tintColor;} lu={simd_make_float4(1,0,0,1)};
+'''
+ code+=function(back,'if (!strcmp(hp->prefPrefix, "Clock") && g_clockAdaptiveTint)')
+ code+='\nreturn lu.tintColor;}\n'
  code+='''static NSArray *LGAllSurfaceItems(void){return LGRendererItemsForHostPrefix(@"Dock");}
 static NSArray *LGMoreOptionsItems(void){return @[@{@"key":@"Renderer.Profile"},@{@"key":@"Global.Enabled"}];}
 static NSArray *LGPrefsSettingsItems(void){return @[];}\n'''

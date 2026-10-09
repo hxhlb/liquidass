@@ -4,6 +4,8 @@
 #import "../Shared/LGHostRegistry.h"
 #import "../Shared/LGBezelGeometry.h"
 #import "../Shared/LGRendererPreferences.h"
+#import "../Shared/LGRendererDiagnostics.h"
+#import "../Shared/LGColorEncoding.h"
 #import "../Shared/LGLensRectState.h"
 #import "LGSymbolResolver.h"
 #import "../Shared/LGCoverSheetState.h"
@@ -1533,6 +1535,7 @@ static_assert(kHostCount == LGHostIdentifierCount, "registry and renderer host o
 static LGHostParams g_hostParams[kHostCount];
 static uint32_t g_darkAtoms[kHostCount];
 static bool         g_hostParamsInit = false;
+static bool         g_clockAdaptiveTint = true;
 static float        g_fresnelGlareStrength = 0.5f;
 static bool         g_coverSheetBezelRatioOverride = false;
 static float        g_coverSheetCornerRadiusPoints = 64.0f;
@@ -1573,20 +1576,14 @@ static const LGHostParams *lgHostParamsForAtom(uint32_t atom, bool *dark) {
 }
 
 static NSDictionary *lgReadHostPreferences(void) {
-#if __has_include(<roothide.h>)
-    // Preserve the existing RootHide shared-data path.
-    return [NSDictionary dictionaryWithContentsOfFile:
-        @"/var/mobile/Library/Preferences/dylv.liquidassprefs.plist"];
-#else
-    // Use the same preference service as the settings UI. Rootless jailbreaks
-    // may redirect this domain into /var/jb/var/mobile instead of /var/mobile.
+    // Match the Settings writer in both jailbreak environments. A hardcoded
+    // plist path can see a different/stale domain from CFPreferences.
     CFStringRef domain = CFSTR("dylv.liquidassprefs");
-    CFPreferencesAppSynchronize(domain);
+    if (!CFPreferencesAppSynchronize(domain)) return nil;
     CFDictionaryRef values = CFPreferencesCopyMultiple(NULL, domain,
         kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
     NSDictionary *prefs = CFBridgingRelease(values);
-    return [prefs isKindOfClass:NSDictionary.class] ? prefs : @{};
-#endif
+    return [prefs isKindOfClass:NSDictionary.class] ? prefs : nil;
 }
 static NSString * const kLGPrefsReloadNote = @"dylv.liquidassprefs/Reload";
 static CFStringRef const kLGRestartBackboarddNote =
@@ -1609,21 +1606,40 @@ static void lgApplyHistoricalTintDefault(int host, LGHostParams *p, bool dark) {
 }
 
 static bool lgDecodeTintColor(NSString *hex, simd_float4 *out) {
-    if (![hex isKindOfClass:[NSString class]] || !out) return false;
-    NSString *s = [[hex stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]
-        stringByReplacingOccurrencesOfString:@"#" withString:@""];
-    if (s.length != 6 && s.length != 8) return false;
-    unsigned value = 0;
-    if (![[NSScanner scannerWithString:s] scanHexInt:&value]) return false;
-    float r, g, b, a;
-    if (s.length == 6) { r = ((value >> 16) & 0xff) / 255.f; g = ((value >> 8) & 0xff) / 255.f; b = (value & 0xff) / 255.f; a = 1.f; }
-    else { r = ((value >> 24) & 0xff) / 255.f; g = ((value >> 16) & 0xff) / 255.f; b = ((value >> 8) & 0xff) / 255.f; a = (value & 0xff) / 255.f; }
-    *out = simd_make_float4(r, g, b, a);
+    uint32_t value;
+    if (!out || !LGReadRGBAHex(hex, &value)) return false;
+    *out = simd_make_float4(((value >> 24) & 0xff) / 255.f,
+        ((value >> 16) & 0xff) / 255.f, ((value >> 8) & 0xff) / 255.f, (value & 0xff) / 255.f);
     return true;
 }
 
-static void lgReloadHostPrefs(void) {
-    NSDictionary *prefs = LGRendererPreferenceValues(lgReadHostPreferences(), g_enhancedRenderer);
+static void lgPublishHostPrefsDiagnostics(NSDictionary *stored, bool readOK) {
+    static uint16_t generation;
+    generation++;
+    const LGHostParams *island = &g_hostParams[LGHostIdentifierDynamicIsland];
+    uint32_t status = (readOK ? 1u : 0u) | (g_enhancedRenderer ? 2u : 0u)
+        | ([stored[@"Renderer.Profile"] isEqual:@"enhanced"] ? 4u : 0u)
+        | ((uint32_t)MIN(stored.count, 65535u) << 8);
+    LGRendererDiagWrite(LGRendererDiagLight, generation,
+        LGRendererDiagRGBA(island->tintR, island->tintG, island->tintB, island->tintStrength));
+    LGRendererDiagWrite(LGRendererDiagDark, generation,
+        LGRendererDiagRGBA(island->darkTintR, island->darkTintG, island->darkTintB, island->darkTintStrength));
+    LGRendererDiagWrite(LGRendererDiagStatus, generation, status);
+}
+
+static bool lgReloadHostPrefs(void) {
+    NSDictionary *stored = lgReadHostPreferences();
+    bool readOK = stored != nil;
+    if (!readOK && g_hostParamsInit) {
+        lglog("prefs read failed; keeping last applied parameters");
+        lgPublishHostPrefsDiagnostics(nil, false);
+        return false;
+    }
+    // First launch still needs a complete default table if the service fails.
+    NSDictionary *prefs = LGRendererPreferenceValues(stored, g_enhancedRenderer);
+    NSNumber *adaptiveTint = prefs[@"Clock.AdaptiveTint.Enabled"];
+    g_clockAdaptiveTint = [adaptiveTint isKindOfClass:NSNumber.class]
+        ? adaptiveTint.boolValue : !g_enhancedRenderer;
     NSNumber *debugLogging = prefs[@"Debug.Logging.Enabled"];
     gLGBackboardDebugLogging = [debugLogging isKindOfClass:NSNumber.class]
         ? debugLogging.boolValue : false;
@@ -1715,30 +1731,32 @@ static void lgReloadHostPrefs(void) {
         clock->blur = notification->blur;
         clock->specularOpacity = notification->specularOpacity;
         clock->dispersionStrength = notification->dispersionStrength;
-        clock->tintR = notification->tintR;
-        clock->tintG = notification->tintG;
-        clock->tintB = notification->tintB;
-        clock->tintStrength = notification->tintStrength;
-        clock->darkTintR = notification->darkTintR;
-        clock->darkTintG = notification->darkTintG;
-        clock->darkTintB = notification->darkTintB;
-        clock->darkTintStrength = notification->darkTintStrength;
+        // Clock tint belongs to its own settings. Adaptive mode is applied at
+        // draw time; custom mode must not inherit notification colors.
     }
     g_hostParamsInit = true;
 
     lglog("lgReloadHostPrefs: %s (%d hosts, %d overrides) banner.bezel=%.3f refr=%.2f",
-          prefs ? "loaded prefs" : "defaults", kHostCount, overrides,
+          readOK ? "loaded prefs" : "read failed; startup defaults", kHostCount, overrides,
           g_hostParams[4].bezelRatio, g_hostParams[4].refractionScale);
+    lgPublishHostPrefsDiagnostics(stored, readOK);
+    const LGHostParams *island = &g_hostParams[LGHostIdentifierDynamicIsland];
+    lglog("prefs CFPreferences read=%d keys=%lu running=%s requested=%s island.light=#%08x island.dark=#%08x",
+          readOK, (unsigned long)stored.count, g_enhancedRenderer ? "enhanced" : "classic",
+          !readOK ? "unknown" : ([stored[@"Renderer.Profile"] isEqual:@"enhanced"] ? "enhanced" : "classic"),
+          LGRendererDiagRGBA(island->tintR, island->tintG, island->tintB, island->tintStrength),
+          LGRendererDiagRGBA(island->darkTintR, island->darkTintG, island->darkTintB, island->darkTintStrength));
+    return readOK;
 }
 
 static void lgPrefsReloadCallback(CFNotificationCenterRef c, void *o, CFStringRef n,
                                    const void *obj, CFDictionaryRef info) {
     lglog("prefs Reload received; re-reading host preferences");
-    lgReloadHostPrefs();
+    bool readOK = lgReloadHostPrefs();
 
     CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
         kLGParametersReloadedNote, NULL, NULL, true);
-    lglog("prefs parameters ready notification posted");
+    lglog("prefs result notification posted: %s", readOK ? "applied" : "read failed; retained previous values");
 }
 
 static void lgRestartBackboarddCallback(CFNotificationCenterRef center, void *observer,
@@ -1851,7 +1869,7 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
         : 0.0f;
     lu.tintColor          = darkTint ? simd_make_float4(hp->darkTintR, hp->darkTintG, hp->darkTintB, hp->darkTintStrength)
                                   : simd_make_float4(hp->tintR, hp->tintG, hp->tintB, hp->tintStrength);
-    if (!enhancedPipeline && !strcmp(hp->prefPrefix, "Clock")) {
+    if (!strcmp(hp->prefPrefix, "Clock") && g_clockAdaptiveTint) {
         LGSpatialClockColorState spatialColor = {};
         bool matchingSpatialColor = lgReadSpatialClockColor(&spatialColor) &&
             spatialColor.appearance == (darkTint ? 2u : 1u);
@@ -2065,10 +2083,12 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
     bool firstSuccessfulAtom = g_loggedRenderAtoms.insert(ftype).second;
     os_unfair_lock_unlock(&g_loggedRenderAtomsLock);
     if (firstSuccessfulAtom) {
-        lglog("render destination ready atom=0x%x host=%s src=%llux%llu dst=%lux%lu radius=%.2f bezel=%.2f aux=%.1f",
+        lglog("render destination ready atom=0x%x host=%s src=%llux%llu dst=%lux%lu radius=%.2f bezel=%.2f aux=%.1f profile=%s appearance=%s tint=#%08x",
               ftype, hp->prefPrefix, w, h,
               (unsigned long)destTex.width, (unsigned long)destTex.height, lu.radius,
-              lu.bezelWidth, lu.useGlyphMask);
+              lu.bezelWidth, lu.useGlyphMask, enhancedPipeline ? "enhanced" : "classic",
+              darkTint ? "dark" : "light",
+              LGRendererDiagRGBA(lu.tintColor.x, lu.tintColor.y, lu.tintColor.z, lu.tintColor.w));
     }
     R13TRACE("R13[%llu] CA destination surf=%p tex=%p dims=%lux%lu",
              callN, destSurf, rawDestTex,

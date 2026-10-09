@@ -66,6 +66,23 @@ int main(void){@autoreleasepool{
     assert(pixels[outside+3]==0);
     assert(pixels[edge+3]==255 && pixels[edge]>=85 && pixels[edge]<=90);
     assert(pixels[center+3]==255 && abs((int)pixels[center]-51)<=1);
+    // Exercise the actual fragment shaders, not a CPU copy of tint mixing.
+    u.shapeOrigin=simd_make_float2(0,0);u.shapeSize=simd_make_float2(0,0);
+    u.radius=10;u.borderWidthPixels=0;u.useGlyphMask=0;
+    const simd_float3 colors[]={simd_make_float3(1,0,0),simd_make_float3(0,1,0),
+        simd_make_float3(0,0,1),simd_make_float3(0),simd_make_float3(1)};
+    for(id<MTLLibrary> library in @[classic,enhanced]) {
+        pd.vertexFunction=[library newFunctionWithName:@"liquidGlassVertex"];
+        pd.fragmentFunction=[library newFunctionWithName:@"liquidGlassFragment"];
+        pipeline=[device newRenderPipelineStateWithDescriptor:pd error:&error];assert(pipeline);
+        for(simd_float3 color:colors) for(float alpha:{0.0f,0.5f,1.0f}) {
+            u.tintColor=simd_make_float4(color,alpha);render(u,false,pixels);
+            for(int channel=0;channel<3;channel++)
+                assert(abs((int)pixels[center+channel]-(int)lroundf(51*(1-alpha)+255*color[channel]*alpha))<=2);
+            assert(pixels[center+3]==255);
+        }
+    }
+    puts("PASS 30 GPU tint cases: both shaders, RGB/black/white and zero/half/full alpha");
     puts("PASS both Metal shaders compile; GPU verified cover top, keyboard bottom, subshape alpha and border brightness");
 }return 0;}
 '''

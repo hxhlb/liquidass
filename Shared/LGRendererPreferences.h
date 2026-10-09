@@ -22,7 +22,7 @@ static inline NSDictionary<NSString *, NSString *> *LGRendererPreferenceKeyMap(v
             }
         }
         for (NSString *key in @[@"Global.Quality", @"Renderer.FresnelGlareStrength",
-                               @"Renderer.BlurMode", @"Clock.FPS", @"Specular.Motion.Enabled",
+                               @"Renderer.BlurMode", @"Clock.FPS", @"Clock.AdaptiveTint.Enabled", @"Specular.Motion.Enabled",
                                @"Specular.Motion.Sensitivity", @"Keyboard.Overhang",
                                @"Keyboard.KeyRadius", @"ControlCenter.FullscreenBackdropBlurRadius"])
             keys[key] = [@"Enhanced." stringByAppendingString:key];

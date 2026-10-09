@@ -295,3 +295,6 @@
 "prefs.bezel.mode.ratio" = "相容比例";
 "prefs.bezel.mode.points" = "固定寬度";
 "prefs.bezel.width.subtitle" = "以 pt 為單位，實際寬度不超過表面短邊的一半。";
+
+"prefs.clock.adaptive_tint.title" = "時鐘自適應色調";
+"prefs.clock.adaptive_tint.subtitle" = "可用時跟隨桌布配色；關閉後使用自訂 Light 和 Dark 色調。";
