@@ -1,0 +1,54 @@
+Dynamic Island content appearance — banana39 private test build
+
+User confirmed banana38 glass works. New issue affects both system content and
+third-party Live Activities: white text loses contrast on glass in Light mode.
+This is a general island appearance problem, not an iOS 16-only compatibility fix.
+
+Evidence:
+- iOS 16.3 20D47 SpringBoardUIServices:
+  SBUISystemApertureElementSource _updateTraitCollectionForElementIfNeeded
+  at 0x1a477b80c checks for userInterfaceStyle 2 and constructs Dark child traits
+  at 0x1a477b920 before applying them at 0x1a477b9a4.
+- The iOS 18.2 decompilation also shows forced Dark overrides on the element
+  controller and its loaded view in _ensureElementViewControllerIsInAWindow,
+  then forced Dark child traits in _updateTraitCollectionForElementIfNeeded.
+  https://github.com/EthanArbuckle/iPhone17-1_18.2_22C152_Restore/blob/main/System/Library/PrivateFrameworks/SpringBoardUIServices.framework/SBUISystemApertureElementSource.m
+- Local evidence: ignored packages/ios16-island-research/source-traits.asm and
+  element-source-18.2.m. The previous IPSW metadata/disassembly caveat still applies.
+
+Implementation:
+- Hooks only live SBUISystemApertureElementSource content ownership. The main
+  tweak already loads in UIKit processes; no injection filter expansion.
+- While the native source updater runs, replace only userInterfaceStyle in
+  the exact parent/child trait assignment. Keep native Dynamic Type and all
+  other traits. Unrelated controller setters pass through unchanged.
+- Synchronize the owned controller and view overrides with the screen's system
+  appearance. Window theme changes and preference reloads refresh tracked sources.
+- A guarded late framework-load callback supports content frameworks loaded
+  after tweak initialization. Runtime work is deferred out of the dyld callback.
+- Restore native overrides on disable, view replacement, detach and source cleanup.
+- No global label recoloring, image inversion, or content-layer color filters.
+  Explicit hard-coded white colors may ignore traits; report those separately.
+
+Host check:
+python3.11 tests/test_dynamic_island_content.py
+Covers Light/Dark/Light, preservation of Dynamic Type/contrast, 1000 stable
+callbacks without trait writes, unrelated children, reentry, replacement,
+disable, detach and source cleanup. This is not UIKit/SwiftUI rendering proof.
+
+Device acceptance:
+1. Install the correct Rootless/RootHide package and manually restart userspace
+   so SpringBoard and content-producing processes load the new hook.
+2. Enable island glass. In Light mode test music, timer and at least one
+   third-party Live Activity, both collapsed and expanded, on a light background.
+3. Confirm semantic text becomes dark and readable; artwork and accent colors
+   retain their meaning. Test both Classic and Enhanced.
+4. While the activity remains active, change Light -> Dark -> Light. Dark mode
+   should retain white text; no layout churn, flicker or repeated resize.
+5. Change text size, replace/end activities, open the source App, and disable
+   island glass. Normal App pages and restored native black islands stay correct.
+6. If any text remains white, report the App/activity, OS and collapsed/expanded
+   state with a screenshot/video. Distinguish semantic text from fixed-color text.
+
+No device validation, installation, restart, GitHub release or APT publication
+was performed by the agent. Retain banana38 as the known working glass baseline.
