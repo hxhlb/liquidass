@@ -3,6 +3,7 @@
 #import "../Shared/LGLiveBackdropView.h"
 #import "../Shared/LGGlassKit.h"
 #import "../Shared/LGSharedSupport.h"
+#import "../Shared/LGWidgetCompatibility.h"
 #import <objc/runtime.h>
 
 static const CGFloat kWidgetCornerRadius = 20.2;
@@ -10,6 +11,30 @@ static void *kWidgetGlassKey = &kWidgetGlassKey;
 static void *kWidgetContainerStateKey = &kWidgetContainerStateKey;
 static void *kLegacyWidgetHostKey = &kLegacyWidgetHostKey;
 static void *kWidgetContentBackgroundHiddenKey = &kWidgetContentBackgroundHiddenKey;
+static char kWidgetPhotoContentKey;
+static char kLegacyWidgetBackgroundOriginalHiddenKey;
+static NSHashTable<UIView *> *sLegacyWidgetBackgrounds;
+
+static BOOL widgetHostAllowsBackgroundRemoval(UIViewController *host) {
+    NSString *identifier = LGWidgetIdentifierForObject(host);
+    BOOL photo = LGWidgetPreservesPhotoContent(identifier);
+    if (host.isViewLoaded && identifier.length)
+        objc_setAssociatedObject(host.view, &kWidgetPhotoContentKey, @(photo), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return identifier.length && !photo;
+}
+
+static BOOL widgetViewPreservesPhotoContent(UIView *view) {
+    for (UIView *ancestor = view; ancestor; ancestor = ancestor.superview) {
+        NSNumber *marked = objc_getAssociatedObject(ancestor, &kWidgetPhotoContentKey);
+        if (marked) return marked.boolValue;
+        if (LGWidgetPreservesPhotoContent(LGWidgetIdentifierForObject(ancestor))) return YES;
+    }
+    for (UIResponder *responder = view; responder; responder = responder.nextResponder) {
+        NSString *identifier = LGWidgetIdentifierForObject(responder);
+        if (identifier.length) return LGWidgetPreservesPhotoContent(identifier);
+    }
+    return NO;
+}
 
 static BOOL widgetUsesLegacyDirectGlass(void) {
     NSInteger majorVersion = NSProcessInfo.processInfo.operatingSystemVersion.majorVersion;
@@ -112,8 +137,8 @@ static BOOL isWidgetContentBackgroundMaterial(UIView *view) {
 
 static void updateWidgetContentBackground(UIView *view) {
     NSNumber *originalHidden = objc_getAssociatedObject(view, kWidgetContentBackgroundHiddenKey);
-    if (view.window && widgetBackgroundRemovalEnabled() &&
-        isWidgetContentBackgroundMaterial(view)) {
+    if (view.window && widgetBackgroundRemovalEnabled() && isWidgetContentBackgroundMaterial(view)
+        && !widgetViewPreservesPhotoContent(view)) {
         if (!originalHidden) {
             objc_setAssociatedObject(view, kWidgetContentBackgroundHiddenKey,
                                      @(view.hidden), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -134,6 +159,7 @@ static BOOL isWidgetStackBackgroundMaterial(UIView *mat) {
     if (!isExactClass(parent, @"UIView")) return NO;
     UIViewController *vc = widgetNearestStackController(parent);
     if (!vc) return NO;
+    if (widgetViewPreservesPhotoContent(mat)) return NO;
     return vc.view == parent || parent.superview == vc.view;
 }
 
@@ -243,21 +269,31 @@ static void updateLegacyWidgetWrapper(SBHWidgetWrapperView *wrapper) {
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
+static void widgetSetLegacyBackgroundSuppressed(UIView *view, BOOL suppress) {
+    if (!view) return;
+    NSNumber *original = objc_getAssociatedObject(view, &kLegacyWidgetBackgroundOriginalHiddenKey);
+    if (suppress) {
+        if (!original) objc_setAssociatedObject(view, &kLegacyWidgetBackgroundOriginalHiddenKey,
+                                                @(view.hidden), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        view.hidden = YES;
+    } else if (original) {
+        view.hidden = original.boolValue;
+        objc_setAssociatedObject(view, &kLegacyWidgetBackgroundOriginalHiddenKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    }
+}
+
 static void updateLegacyWidgetBackground(SBHWidgetWrapperBackgroundView *background) {
+    if (!sLegacyWidgetBackgrounds) sLegacyWidgetBackgrounds = [NSHashTable weakObjectsHashTable];
+    [sLegacyWidgetBackgrounds addObject:background];
     UIView *underlying = [background respondsToSelector:
         @selector(underlyingBackgroundView)] ? background.underlyingBackgroundView : nil;
     UIView *widget = [background respondsToSelector:
         @selector(widgetBackgroundView)] ? background.widgetBackgroundView : nil;
     BOOL suppress = widgetUsesLegacyDirectGlass() &&
-                    widgetBackgroundRemovalEnabled() && background.window;
-    if (underlying) {
-        if (suppress) lgSuppressStock(underlying, @"Widgets", YES);
-        else underlying.hidden = NO;
-    }
-    if (widget) {
-        if (suppress) lgSuppressStock(widget, @"Widgets", YES);
-        else widget.hidden = NO;
-    }
+                    widgetBackgroundRemovalEnabled() && background.window
+                    && !widgetViewPreservesPhotoContent(background);
+    widgetSetLegacyBackgroundSuppressed(underlying, suppress);
+    widgetSetLegacyBackgroundSuppressed(widget, suppress);
 }
 
 #pragma mark - hooks
@@ -280,7 +316,7 @@ static void updateLegacyWidgetBackground(SBHWidgetWrapperBackgroundView *backgro
 - (void)setHidden:(BOOL)hidden {
     UIView *self_ = (UIView *)self;
     if (self_.window && widgetBackgroundRemovalEnabled() &&
-        isWidgetContentBackgroundMaterial(self_)) {
+        isWidgetContentBackgroundMaterial(self_) && !widgetViewPreservesPhotoContent(self_)) {
         if (!objc_getAssociatedObject(self_, kWidgetContentBackgroundHiddenKey)) {
             objc_setAssociatedObject(self_, kWidgetContentBackgroundHiddenKey,
                                      @(hidden), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -297,6 +333,7 @@ static void updateLegacyWidgetBackground(SBHWidgetWrapperBackgroundView *backgro
 
 %hook CHUISAvocadoHostViewController
 - (void)_updateBackgroundMaterialAndColor {
+    if (!widgetHostAllowsBackgroundRemoval((UIViewController *)self)) { %orig; return; }
     if (widgetUsesLegacyDirectGlass() && widgetBackgroundRemovalEnabled()) {
         [self setBackgroundViewMode:0];
         return;
@@ -305,14 +342,17 @@ static void updateLegacyWidgetBackground(SBHWidgetWrapperBackgroundView *backgro
     %orig;
 }
 - (NSInteger)_expectedBackgroundViewMode {
+    if (!widgetHostAllowsBackgroundRemoval((UIViewController *)self)) return %orig;
     if (widgetUsesLegacyDirectGlass() && widgetBackgroundRemovalEnabled()) return 0;
     return %orig;
 }
 - (void)setBackgroundViewMode:(NSInteger)mode {
+    if (!widgetHostAllowsBackgroundRemoval((UIViewController *)self)) { %orig(mode); return; }
     if (widgetUsesLegacyDirectGlass() && widgetBackgroundRemovalEnabled()) mode = 0;
     %orig(mode);
 }
 - (id)screenshotManager {
+    if (!widgetHostAllowsBackgroundRemoval((UIViewController *)self)) return %orig;
     if (widgetBackgroundRemovalEnabled() && self.widget.extensionBundleIdentifier.length) return nil;
     return %orig;
 }
@@ -320,18 +360,22 @@ static void updateLegacyWidgetBackground(SBHWidgetWrapperBackgroundView *backgro
 
 %hook CHUISWidgetHostViewController
 - (void)_updateBackgroundMaterialAndColor {
+    if (!widgetHostAllowsBackgroundRemoval((UIViewController *)self)) { %orig; return; }
     if (widgetBackgroundRemovalEnabled() && self.widget.extensionBundleIdentifier.length) return;
     %orig;
 }
 - (void)_updatePersistedSnapshotContent {
+    if (!widgetHostAllowsBackgroundRemoval((UIViewController *)self)) { %orig; return; }
     if (widgetBackgroundRemovalEnabled() && self.widget.extensionBundleIdentifier.length) return;
     %orig;
 }
 - (void)_updatePersistedSnapshotContentIfNecessary {
+    if (!widgetHostAllowsBackgroundRemoval((UIViewController *)self)) { %orig; return; }
     if (widgetBackgroundRemovalEnabled() && self.widget.extensionBundleIdentifier.length) return;
     %orig;
 }
 - (id)_snapshotImageFromURL:(id)arg1 {
+    if (!widgetHostAllowsBackgroundRemoval((UIViewController *)self)) return %orig(arg1);
     if (widgetBackgroundRemovalEnabled() && self.widget.extensionBundleIdentifier.length) return nil;
     return %orig;
 }
@@ -400,6 +444,10 @@ static void updateLegacyWidgetBackground(SBHWidgetWrapperBackgroundView *backgro
 
 %ctor {
     %init;
+    lgObservePreferenceReload(^{
+        for (SBHWidgetWrapperBackgroundView *background in sLegacyWidgetBackgrounds.allObjects)
+            updateLegacyWidgetBackground(background);
+    });
     if (widgetUsesLegacyDirectGlass() &&
         NSClassFromString(@"SBHWidgetWrapperView")) {
         %init(LGLegacyWidgetWrapperLifecycle);

@@ -15,7 +15,7 @@ SUPPORT = r'''
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #include <stdio.h>
-static BOOL springboard = YES, enabled = YES, sLGIslandProxyGainMaps;
+static BOOL springboard = YES, enabled = YES, sLGIslandProxyGainMaps, sLGIslandNeedsNativeGainMap;
 static double version;
 static NSMutableDictionary<NSString *, Class> *classes;
 static NSMutableSet<NSString *> *groups;
@@ -41,7 +41,7 @@ static Class fixture(NSString *missing) {
 }
 static void reset(double osVersion, Class container) {
     version = osVersion; springboard = YES; enabled = YES;
-    sLGIslandProxyGainMaps = NO; observers = 0;
+    sLGIslandProxyGainMaps = NO; sLGIslandNeedsNativeGainMap = NO; observers = 0;
     groups = [NSMutableSet new]; classes = [NSMutableDictionary new];
     if (container) classes[@"SBSystemApertureContainerView"] = container;
 }
@@ -52,9 +52,9 @@ int main(void) { @autoreleasepool {
     for (NSNumber *os in @[@16.0, @16.3, @16.7, @17.0, @18.0]) {
         reset(os.doubleValue, full); runConstructor();
         CHECK([groups containsObject:@"LGDynamicIslandLifecycle"], "supported OS skipped island hooks");
-        CHECK([groups containsObject:@"LGIslandNativeGainMapLifecycle"], "enabled island missed native gain-map hook");
+        CHECK([groups containsObject:@"LGIslandNativeGainMapLifecycle"] == (os.doubleValue >= 17), "wrong native gain-map policy for OS");
         CHECK(observers == 1, "preference reload observer missing");
-        CHECK(groups.count == 2, "absent optional class was hooked");
+        CHECK(groups.count == (os.doubleValue >= 17 ? 2 : 1), "absent optional class was hooked");
     }
     for (NSString *missing in @[@"_blobEnablingBlackFillView", @"_gainMapView",
                                 @"_backgroundGroupingView", @"_contentClippingView"]) {

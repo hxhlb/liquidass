@@ -1,0 +1,49 @@
+banana44 scoped compatibility candidate
+
+Scope: iOS16 Island gain-map keeper, tab-bar exclusion reload, Photos widget
+protection, bounded filter retries. No gradient/nav-button/activity-clear work.
+
+Reference: user confirmed the supplied Liquid (Gl)ass 27 package can show the
+Island on the target phone. Static evidence is in ignored reference-13338.
+This is not evidence that the Banana candidate has passed on that device.
+
+Island: the iOS16 constructor no longer installs the native-keeper lifecycle,
+and the shared installer refuses to create it even when called from refresh.
+Existing proxy enable gating is retained. iOS17/18 keeper behavior is unchanged.
+The known null-writer GainMap crash is a hypothesis-guided candidate, not a
+proven fix based on host tests. Preserve the previous package for recovery.
+
+Tab bar: test the production exclusion predicate and restoration functions,
+including pending selection cancellation before stop(), appearance/glyph/filter
+restoration, button frame/transform restoration and repeated disable/re-enable.
+State originally hidden/clipped must be captured once, not overwritten by our
+own later layouts. UIKit layout is requested to restore native bar height.
+
+Photos: common Apple-photo identity policy, no third-party blanket exclusion.
+Both RWB and Widgets bypass background/snapshot removal. The render-window
+check is independent of the cached removal flag, so a generic renderer cannot
+override a known photo scene. Unknown identity is not a claim of photo safety;
+device checks must include system Photos and Memories/Relive scene variants.
+Legacy hidden-state restoration preserves both true and false originals.
+
+Filter retries: weak target, one queued callback per generation, five attempts
+at 0.2/1/3/8/20 seconds. Successful attachment, detach and parameter reload reset
+the generation; callbacks recheck master/host enable and attached window.
+
+Host checks:
+python3.11 tests/test_dynamic_island_compat.py
+python3.11 tests/test_tabbar_reload.py
+python3.11 tests/test_widget_backgrounds.py
+python3.11 tests/test_widget_host.py
+python3.11 tests/test_filter_retry.py
+python3.11 tests/test_blur_modes.py
+
+Device acceptance, performed only by the user/tester:
+- iOS16.3: Island disabled/enabled, idle, expanded/collapsed, music/recording/call,
+  lock/unlock and recoverable startup testing; monitor longer sessions as well.
+- iOS14/15: no Island hooks, legacy widgets and tab bars still function.
+- iOS17/18: Island keeper unchanged, modern widgets and tab bars unchanged except
+  the requested corrections. Photos image and snapshots must remain visible.
+- Exclude/include an already-open App repeatedly; check height, colors, touch
+  targets, selected tab, RTL/landscape and no duplicate overlays.
+- No device installation or restart is performed by the agent or package script.

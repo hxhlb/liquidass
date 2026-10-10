@@ -1,5 +1,5 @@
 #!/usr/bin/env python3.11
-"""Test native widget material restoration and the renderer rollback."""
+"""Test widget material restoration and photo protection on host and renderer paths."""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -13,6 +13,7 @@ support = support.replace("@property CGRect bounds;", """@property CGRect bounds
 support = support.replace("@interface BSUIScrollView : UIView", """@interface UIScrollView : UIView @end
 @implementation UIScrollView @end
 @interface BSUIScrollView : UIScrollView""")
+support += '#import "LGWidgetCompatibility.h"\n'
 support += r'''
 @interface MTMaterialView : UIView @end
 @implementation MTMaterialView @end
@@ -37,6 +38,8 @@ support += r'''
 @implementation UIWindow @end
 static BOOL removalEnabled = YES, kIsEnabled = YES, kIsEnabledForSystemWidgets = YES;
 static BOOL widgetBackgroundRemovalEnabled(void) { return removalEnabled; }
+static char kWidgetPhotoContentKey;
+static char kLegacyWidgetBackgroundOriginalHiddenKey;
 static void *kWidgetContentBackgroundHiddenKey = &kWidgetContentBackgroundHiddenKey;
 static CHSWidget *widget(NSString *identifier) {
     CHSWidget *w = [CHSWidget new]; w.extensionBundleIdentifier = identifier; return w;
@@ -55,7 +58,7 @@ int main(void) { @autoreleasepool {
     vc.widget = widget(@"com.apple.Batteries.BatteriesAvocadoWidgetExtension");
     container.nextResponder = vc;
     MTMaterialView *material = [MTMaterialView new];
-    material.superview = container; material.window = [UIView new];
+    material.superview = container; material.nextResponder = container; material.window = [UIView new];
     container.subviews = @[material];
     CHECK(isWidgetContentBackgroundMaterial(material), "native widget material not recognized");
     updateWidgetContentBackground(material);
@@ -72,7 +75,26 @@ int main(void) { @autoreleasepool {
     material.superview = [UIView new]; updateWidgetContentBackground(material);
     CHECK(!material.hidden, "moving out of widget failed to restore material");
     material.superview = container;
-    puts("PASS native widget material lifecycle and restore");
+    vc.widget=widget(@"com.apple.mobileslideshow.PhotosReliveWidget");
+    updateWidgetContentBackground(material);
+    CHECK(!material.hidden, "Photos background was removed");
+    CHECK(!ShouldHandleWidget(vc.widget.extensionBundleIdentifier), "RWB claimed Photos");
+    UIWindow *window=[UIWindow new];CHUISWidgetScene *scene=[CHUISWidgetScene new];
+    scene.widget=vc.widget;window.windowScene=scene;window.rwb_shouldHideBackground=@YES;
+    CHECK(RWBWindowPreservesPhotoContent(window), "renderer window bypassed Photos protection");
+    CHECK(ShouldHandleWidget(@"com.apple.Batteries.BatteriesAvocadoWidgetExtension"), "ordinary widget was excluded");
+    CHECK(ShouldHandleWidget(@"com.example.photos.widget"), "third-party widget was mistaken for system Photos");
+    for(NSString *identifier in @[@"com.apple.PhotosWidget",@"com.apple.mobileslideshow.Widget",@"com.apple.memories.widget"])
+        CHECK(LGWidgetPreservesPhotoContent(identifier), "system photo identity missed");
+    vc.widget=widget(@"com.apple.Batteries.BatteriesAvocadoWidgetExtension");
+    updateWidgetContentBackground(material);CHECK(material.hidden,"ordinary widget no longer hides its background");
+    UIView *legacy=[UIView new];legacy.hidden=YES;
+    widgetSetLegacyBackgroundSuppressed(legacy,NO);CHECK(legacy.hidden,"untouched legacy background revealed");
+    widgetSetLegacyBackgroundSuppressed(legacy,YES);widgetSetLegacyBackgroundSuppressed(legacy,YES);
+    widgetSetLegacyBackgroundSuppressed(legacy,NO);CHECK(legacy.hidden,"hidden legacy state lost");
+    legacy.hidden=NO;widgetSetLegacyBackgroundSuppressed(legacy,YES);widgetSetLegacyBackgroundSuppressed(legacy,NO);
+    CHECK(!legacy.hidden,"visible legacy state lost");
+    puts("PASS native/legacy widget restore, photo exclusion in host/RWB, and ordinary/third-party widget preservation");
     return 0;
 } }
 '''
@@ -81,7 +103,9 @@ int main(void) { @autoreleasepool {
 def main():
     source = support
     widgets = (ROOT / "Hooks/Widgets.x").read_text()
-    for signature in ["static UIViewController *widgetNearestStackController(",
+    for signature in ["static BOOL widgetViewPreservesPhotoContent(",
+                      "static void widgetSetLegacyBackgroundSuppressed(",
+                      "static UIViewController *widgetNearestStackController(",
                       "static BOOL widgetHasAncestorNamedWithinDepth(",
                       "static BOOL widgetSubtreeContainsClass(",
                       "static UIView *widgetFindDescendantNamed(",
@@ -90,35 +114,14 @@ def main():
                       "static BOOL isWidgetContentBackgroundMaterial(",
                       "static void updateWidgetContentBackground("]:
         source += function(widgets, signature)
-    for path in ["LiquidAssRWB/Tweak.x", "Shared/LGSharedSupport.h", "Shared/LGSharedSupport.m"]:
-        baseline = subprocess.check_output(["git", "show", "3d237d6:" + path], cwd=ROOT)
-        current = (ROOT / path).read_bytes()
-        # The upstream process exclusion helper is independent of widget removal.
-        # Strip only that addition; all pre-existing shared behavior stays locked.
-        if path.endswith("LGSharedSupport.h"):
-            current = current.replace(b'#import "LGHostRegistry.h"\n', b'')
-            current = current.replace(b'BOOL LGRendererUsesEnhancedAtLaunch(void);\n', b'')
-            current = current.replace(b'const LGHostDefinition *LGActiveHostDefinitionForPrefix(NSString *prefix);\n', b'')
-            current = current.replace(b"BOOL LGIsExcludedSystemProcess(void);\n", b"")
-        elif path.endswith("LGSharedSupport.m"):
-            text = current.decode().replace('#import "LGRendererPreferences.h"\n', '')
-            original = baseline.decode()
-            start = text.index('BOOL LGRendererUsesEnhancedAtLaunch(void)')
-            end = text.index('BOOL LG_prefBool(', start)
-            old_start = original.index('BOOL LGHasExplicitPreferenceValue(')
-            old_end = original.index('BOOL LG_prefBool(', old_start)
-            text = text[:start] + original[old_start:old_end] + text[end:]
-            text = text.replace('static id LGUnscopedPreferenceValue(', 'id LGPreferenceValue(', 1)
-            current = text.encode()
-            added = function(current.decode(), "BOOL LGIsExcludedSystemProcess(void)")
-            current = current.replace((added + "\n\n").encode(), b"")
-        assert current == baseline, f"rollback mismatch: {path}"
-    print("PASS widget renderer and existing shared support match widgets1")
+    rwb=(ROOT / "LiquidAssRWB/Tweak.x").read_text()
+    source += function(rwb, "static BOOL ShouldHandleWidget(")
+    source += function(rwb, "static BOOL RWBWindowPreservesPhotoContent(")
     with tempfile.TemporaryDirectory(prefix="liquidass-widget-background-") as tmp:
         test, binary = Path(tmp)/"test.m", Path(tmp)/"test"
         test.write_text(source + checks)
         subprocess.run(["xcrun", "clang", "-fobjc-arc", "-framework", "Foundation",
-                        "-framework", "CoreGraphics", str(test), "-o", str(binary)], check=True)
+                        "-framework", "CoreGraphics", "-I"+str(ROOT/"Shared"), str(test), "-o", str(binary)], check=True)
         subprocess.run([str(binary)], check=True)
 
 

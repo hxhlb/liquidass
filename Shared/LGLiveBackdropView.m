@@ -205,6 +205,8 @@ static CGFloat LGScaleForSize(CGSize s) {
 - (void)applySpecularAngle:(CGFloat)angle;
 - (void)reapplyFilterForParameterReload;
 - (void)updateNativeBlurOverlayWithRadius:(CGFloat)radius;
+- (void)lgScheduleFilterRetry;
+- (void)lgCancelFilterRetry;
 @end
 
 static void LGParametersReloaded(CFNotificationCenterRef center, void *observer,
@@ -372,6 +374,9 @@ static const CGFloat kLGGlassEdgeWidth = 1.0;
     NSInteger        _lastRadiusStep;
     BOOL             _hasAppliedSpecularAngle;
     CGFloat          _appliedSpecularAngle;
+    NSUInteger       _filterRetryGeneration;
+    NSUInteger       _filterRetryAttempts;
+    BOOL             _filterRetryScheduled;
 }
 
 - (NSString *)lgEffectiveFilterType {
@@ -450,6 +455,8 @@ static const CGFloat kLGGlassEdgeWidth = 1.0;
 
 - (void)didMoveToWindow {
     [super didMoveToWindow];
+    [self lgCancelFilterRetry];
+    if (!self.window) return;
     [self applyFilters];
 }
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
@@ -710,13 +717,14 @@ static const CGFloat kLGGlassEdgeWidth = 1.0;
                 return;
             }
         }
-        if (!filterCls) { sblog("CAFilter class not found"); return; }
+        if (!filterCls) { sblog("CAFilter class not found"); [self lgScheduleFilterRetry]; return; }
 
         id glassFilter = ((id (*)(Class, SEL, NSString *))objc_msgSend)(
             filterCls, NSSelectorFromString(@"filterWithType:"), wantType);
 
         if (!glassFilter) {
             LGLog(@"glass#%u filterWithType nil (not registered yet?)", _lgId);
+            [self lgScheduleFilterRetry];
             return;
         }
 
@@ -727,6 +735,7 @@ static const CGFloat kLGGlassEdgeWidth = 1.0;
 
         layer.filters = @[glassFilter];
         _filterAttached = YES;
+        [self lgCancelFilterRetry];
         [[NSNotificationCenter defaultCenter]
             postNotificationName:@"LGLiveBackdropViewFilterDidAttach" object:self];
     } @catch (NSException *e) {
@@ -734,8 +743,40 @@ static const CGFloat kLGGlassEdgeWidth = 1.0;
     }
 }
 
+- (void)lgCancelFilterRetry {
+    _filterRetryGeneration++;
+    _filterRetryAttempts = 0;
+    _filterRetryScheduled = NO;
+}
+
+- (void)lgScheduleFilterRetry {
+    static const NSTimeInterval delays[] = {0.2, 1.0, 3.0, 8.0, 20.0};
+    if (_filterAttached || _filterRetryScheduled || !self.window || !LG_globalEnabled()
+        || _filterRetryAttempts >= sizeof(delays) / sizeof(delays[0])) return;
+    const LGHostDefinition *host = LGHostDefinitionForFilterType(_lgFilterType.UTF8String);
+    NSString *key = host ? [NSString stringWithFormat:@"%s.Enabled", host->preferencePrefix] : nil;
+    id enabled = key ? LGGlassPreferenceValue(key) : nil;
+    if ([enabled isKindOfClass:NSNumber.class] && ![enabled boolValue]) return;
+    NSTimeInterval delay = delays[_filterRetryAttempts++];
+    _filterRetryScheduled = YES;
+    NSUInteger generation = _filterRetryGeneration;
+    __weak LGLiveBackdropView *weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        LGLiveBackdropView *view = weakSelf;
+        if (!view || view->_filterRetryGeneration != generation) return;
+        view->_filterRetryScheduled = NO;
+        id current = key ? LGGlassPreferenceValue(key) : nil;
+        if (!view.window || !LG_globalEnabled()
+            || ([current isKindOfClass:NSNumber.class] && ![current boolValue])) return;
+        [view applyFilters];
+        [view updateSpecular];
+    });
+}
+
 - (void)reapplyFilterForParameterReload {
 
+    [self lgCancelFilterRetry];
     _parameterRefreshVariant = !_parameterRefreshVariant;
 
     _appliedScale = -1.0;

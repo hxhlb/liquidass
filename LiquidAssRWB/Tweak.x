@@ -4,6 +4,7 @@
 #import <objc/runtime.h>
 #import <unistd.h>
 #import "../Shared/LGSharedSupport.h"
+#import "../Shared/LGWidgetCompatibility.h"
 
 static BOOL kIsEnabled = YES;
 static BOOL kIsEnabledForSystemWidgets = YES;
@@ -175,9 +176,15 @@ static void RWBRestartChronodCallback(
 
 static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
     if (!kIsEnabled || bundleIdentifier.length == 0) return NO;
+    if (LGWidgetPreservesPhotoContent(bundleIdentifier)) return NO;
     if (!kIsEnabledForSystemWidgets && [bundleIdentifier hasPrefix:@"com.apple."])
         return NO;
     return YES;
+}
+
+static BOOL RWBWindowPreservesPhotoContent(UIWindow *window) {
+    return LGWidgetPreservesPhotoContent(LGWidgetIdentifierForObject(window.windowScene))
+        || LGWidgetPreservesPhotoContent(NSBundle.mainBundle.bundleIdentifier);
 }
 
 %group RWBSpringBoard
@@ -295,6 +302,7 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
         !window.rwb_shouldHideBackground.boolValue) {
         window.rwb_shouldHideBackground = @YES;
     }
+    if (window && RWBWindowPreservesPhotoContent(window)) window.rwb_shouldHideBackground = @NO;
     if (window && kIsEnabled && kForceDarkMode) {
         if (!objc_getAssociatedObject(window, kRWBOriginalWindowStyleKey)) {
             objc_setAssociatedObject(window, kRWBOriginalWindowStyleKey,
@@ -309,7 +317,7 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
 - (void)setWindowScene:(UIWindowScene *)scene {
     %orig;
     if (sRWBIsWidgetRenderer && kIsEnabled) {
-        self.rwb_shouldHideBackground = @YES;
+        self.rwb_shouldHideBackground = @(!RWBWindowPreservesPhotoContent(self));
     }
     if (!sRWBWindows) sRWBWindows = [NSHashTable weakObjectsHashTable];
     [sRWBWindows addObject:self];
@@ -350,7 +358,7 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
     %orig;
     if ([NSStringFromClass([self class]) containsString:@"UIHostingView"]) return;
     id original = objc_getAssociatedObject(self, kRWBOriginalBackgroundColorKey);
-    if (kIsEnabled) {
+    if (kIsEnabled && self.window && !RWBWindowPreservesPhotoContent(self.window)) {
         if (!original) {
             objc_setAssociatedObject(self, kRWBOriginalBackgroundColorKey,
                                      self.backgroundColor ?: NSNull.null,
@@ -371,7 +379,8 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
 - (void)display {
     UIView *view = (UIView *)self.delegate;
 
-    if (kIsEnabled && [view isKindOfClass:[UIView class]] && view.window.rwb_shouldHideBackground.boolValue) {
+    if (kIsEnabled && [view isKindOfClass:[UIView class]]
+        && !RWBWindowPreservesPhotoContent(view.window) && view.window.rwb_shouldHideBackground.boolValue) {
         NSMutableDictionary *threadDict = [NSThread currentThread].threadDictionary;
         threadDict[@"rwb_shouldHideBackground"] = @YES;
         if (@available(iOS 17, *)) {

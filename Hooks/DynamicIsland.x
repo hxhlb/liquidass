@@ -12,6 +12,7 @@ static NSMapTable<UIView *, NSMutableDictionary *> *sLGIslandCurtains;
 static BOOL sLGIslandUpdatingCurtains;
 static NSMapTable<UIView *, NSNumber *> *sLGIslandTransitionShadows;
 static BOOL sLGIslandProxyGainMaps;
+static BOOL sLGIslandNeedsNativeGainMap;
 static BOOL sLGIslandCreatingNativeGainMap;
 static UIView *sLGIslandNativeGainMap;
 
@@ -105,7 +106,7 @@ static BOOL LGIslandEnabled(void) {
 }
 
 static void LGInstallIslandNativeGainMap(void) {
-    if (!sLGIslandProxyGainMaps || sLGIslandNativeGainMap) return;
+    if (!sLGIslandNeedsNativeGainMap || !sLGIslandProxyGainMaps || sLGIslandNativeGainMap) return;
     UIWindow *rootWindow = nil;
     Class rootClass = NSClassFromString(@"SBRootSceneWindow");
     for (UIWindow *window in UIApplication.sharedApplication.windows) {
@@ -653,8 +654,11 @@ static BOOL LGIslandGainMapIsBackground(UIView *view) {
             && class_getInstanceVariable(containerClass, "_backgroundGroupingView")
             && class_getInstanceVariable(containerClass, "_contentClippingView")) {
             sLGIslandProxyGainMaps = LGIslandEnabled();
+            // iOS 16 follows the confirmed working reference without creating
+            // an offscreen native gain-map layer. Preserve the iOS 17+ path.
+            if (@available(iOS 17.0, *)) sLGIslandNeedsNativeGainMap = sLGIslandProxyGainMaps;
             %init(LGDynamicIslandLifecycle);
-            if (sLGIslandProxyGainMaps) {
+            if (sLGIslandNeedsNativeGainMap) {
                 %init(LGIslandNativeGainMapLifecycle);
             }
             Class shadowController = NSClassFromString(@"SAUILayoutSpecifyingElementViewController");
