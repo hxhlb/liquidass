@@ -2017,14 +2017,17 @@ static void LGScheduleTabBarDump(UITabBar *bar, NSString *reason) {
 
 %end
 
-static void LGRefreshTabBarsInView(UIView *view) {
+static void LGRefreshTabBarsInView(UIView *view, BOOL requestLayout) {
     if ([view isKindOfClass:UITabBar.class]) {
         LGStyleStockTabBar((UITabBar *)view);
-        [view invalidateIntrinsicContentSize];
-        [view setNeedsLayout];
-        [view.superview setNeedsLayout];
+        // Host layout callbacks must not schedule another host layout pass.
+        if (requestLayout) {
+            [view invalidateIntrinsicContentSize];
+            [view setNeedsLayout];
+            [view.superview setNeedsLayout];
+        }
     }
-    for (UIView *subview in view.subviews) LGRefreshTabBarsInView(subview);
+    for (UIView *subview in view.subviews) LGRefreshTabBarsInView(subview, requestLayout);
 }
 
 static NSMutableDictionary<NSString *, NSValue *> *g_tabBarHostOrigs;
@@ -2039,7 +2042,7 @@ static void LGHookedHostDidLayout(id self, SEL _cmd) {
     if (!LGTabBarAllowed()) return;
     if (![self respondsToSelector:@selector(view)]) return;
     UIView *view = ((UIView *(*)(id, SEL))objc_msgSend)(self, @selector(view));
-    if (view) LGRefreshTabBarsInView(view);
+    if (view) LGRefreshTabBarsInView(view, NO);
 }
 
 static void LGHookTabBarHostControllers(void) {
@@ -2183,7 +2186,7 @@ static UITabBar *LGFindTabBarInView(UIView *view) {
     lgObservePreferenceReload(^{
         dispatch_async(dispatch_get_main_queue(), ^{
             for (UIWindow *window in UIApplication.sharedApplication.windows) {
-                LGRefreshTabBarsInView(window);
+                LGRefreshTabBarsInView(window, YES);
             }
         });
     });
