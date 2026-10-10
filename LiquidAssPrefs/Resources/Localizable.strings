@@ -155,6 +155,8 @@
 "prefs.rwb.section.title" = "Remove Widget Background";
 "prefs.rwb.section.subtitle" = "Optional transparent-glass mode for all widgets.";
 "prefs.rwb.enabled.title" = "Remove Widget Background";
+"prefs.widgets.exclude_photos.title" = "Exclude Photos Widgets";
+"prefs.widgets.exclude_photos.subtitle" = "Off by default. When enabled, preserve native backgrounds and snapshots in Apple's Photos widgets. Restart System UI after changing this option.";
 "prefs.rwb.enabled.subtitle" = "Make widget backgrounds transparent before applying the glass effect. Restart backboardd after changing this option.";
 "prefs.rwb.restart_required.title" = "Restart Required";
 "prefs.rwb.restart_required.body" = "Return to the Liquid (Gl)ass settings home page and tap Restart System UI. This refreshes backboardd, SpringBoard, and the required widget rendering service.";

@@ -10,6 +10,7 @@ static BOOL kIsEnabled = YES;
 static BOOL kIsEnabledForSystemWidgets = YES;
 static BOOL kIsEnabledForMaterialView = NO;
 static BOOL kForceDarkMode = NO;
+static BOOL kExcludePhotos = NO;
 static CGFloat kMaxWidgetWidth = 140.0;
 static CGFloat kMaxWidgetHeight = 140.0;
 static NSSet<NSString *> *kWidgetBundleIdentifiers = nil;
@@ -62,6 +63,9 @@ static NSArray<NSString *> *RWBParseThirdPartyBundleIDs(NSString *rawText) {
 }
 
 static void ReloadPrefs(void) {
+    // Use the Settings domain for this new shared option in every process.
+    LGReloadPreferences();
+    kExcludePhotos = LG_prefBool(@"Widgets.ExcludePhotos.Enabled", NO);
     NSDictionary<NSString *, id> *preferences = RWBCopyPreferences();
     kIsEnabled = RWBPreferenceBool(preferences, @"Global.Enabled", YES) &&
                  RWBPreferenceBool(preferences, @"Widgets.Enabled", YES) &&
@@ -176,13 +180,14 @@ static void RWBRestartChronodCallback(
 
 static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
     if (!kIsEnabled || bundleIdentifier.length == 0) return NO;
-    if (LGWidgetPreservesPhotoContent(bundleIdentifier)) return NO;
+    if (kExcludePhotos && LGWidgetPreservesPhotoContent(bundleIdentifier)) return NO;
     if (!kIsEnabledForSystemWidgets && [bundleIdentifier hasPrefix:@"com.apple."])
         return NO;
     return YES;
 }
 
 static BOOL RWBWindowPreservesPhotoContent(UIWindow *window) {
+    if (!kExcludePhotos) return NO;
     return LGWidgetPreservesPhotoContent(LGWidgetIdentifierForObject(window.windowScene))
         || LGWidgetPreservesPhotoContent(NSBundle.mainBundle.bundleIdentifier);
 }
@@ -358,7 +363,8 @@ static BOOL RWBWindowPreservesPhotoContent(UIWindow *window) {
     %orig;
     if ([NSStringFromClass([self class]) containsString:@"UIHostingView"]) return;
     id original = objc_getAssociatedObject(self, kRWBOriginalBackgroundColorKey);
-    if (kIsEnabled && self.window && !RWBWindowPreservesPhotoContent(self.window)) {
+    if (kIsEnabled && (!kExcludePhotos || self.window)
+        && !RWBWindowPreservesPhotoContent(self.window)) {
         if (!original) {
             objc_setAssociatedObject(self, kRWBOriginalBackgroundColorKey,
                                      self.backgroundColor ?: NSNull.null,

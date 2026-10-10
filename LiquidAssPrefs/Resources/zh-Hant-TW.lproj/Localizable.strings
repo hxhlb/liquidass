@@ -135,6 +135,8 @@
 "prefs.rwb.section.title" = "移除小工具背景";
 "prefs.rwb.section.subtitle" = "為全部小工具提供可選的透明玻璃模式。";
 "prefs.rwb.enabled.title" = "移除小工具背景";
+"prefs.widgets.exclude_photos.title" = "排除照片小工具";
+"prefs.widgets.exclude_photos.subtitle" = "預設關閉。開啟後保留系統照片小工具的原始背景與快照。修改後請重新啟動系統介面。";
 "prefs.rwb.enabled.subtitle" = "先將小工具背景透明化，再顯示玻璃效果。修改後需要重新啟動 backboardd。";
 "prefs.rwb.restart_required.title" = "需要重新啟動";
 "prefs.rwb.restart_required.body" = "請返回 Liquid (Gl)ass 設定首頁，點擊「重新啟動系統介面」。此操作會刷新 backboardd、SpringBoard 與目前系統所需的小工具渲染服務。";

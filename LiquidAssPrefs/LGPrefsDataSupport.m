@@ -1043,12 +1043,19 @@ NSArray<NSDictionary *> *LGWidgetItems(void) {
                         LGLocalized(@"prefs.rwb.enabled.subtitle"), YES),
         @"Widgets.Enabled", @YES) mutableCopy];
     removeBackground[@"requires_backboard_restart"] = @YES;
+    NSMutableDictionary *excludePhotos = [LGSettingControlledByKey(
+        LGSwitchSetting(@"Widgets.ExcludePhotos.Enabled",
+                        LGLocalized(@"prefs.widgets.exclude_photos.title"),
+                        LGLocalized(@"prefs.widgets.exclude_photos.subtitle"), NO),
+        @"Widgets.Enabled", @YES) mutableCopy];
+    excludePhotos[@"requires_backboard_restart"] = @YES;
     return LGJoinItemGroups(@[
         LGRendererItemsForHostPrefix(@"Widgets"),
         @[
             LGSectionSetting(LGLocalized(@"prefs.rwb.section.title"),
                              LGLocalized(@"prefs.rwb.section.subtitle")),
             removeBackground.copy,
+            excludePhotos.copy,
             LGSettingControlledByKey(
                 LGSwitchSetting(@"RWB.ForceDarkMode",
                                 LGLocalized(@"prefs.rwb.force_dark.title"),

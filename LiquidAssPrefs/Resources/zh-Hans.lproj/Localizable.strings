@@ -120,6 +120,8 @@
 "prefs.rwb.section.title" = "移除小组件背景";
 "prefs.rwb.section.subtitle" = "为全部小组件提供可选的透明玻璃模式。";
 "prefs.rwb.enabled.title" = "移除小组件背景";
+"prefs.widgets.exclude_photos.title" = "排除照片小组件";
+"prefs.widgets.exclude_photos.subtitle" = "默认关闭。开启后保留系统照片小组件的原始背景与快照。修改后请重启系统界面。";
 "prefs.rwb.enabled.subtitle" = "先将小组件背景透明化，再显示玻璃效果。修改后需要重启 backboardd。";
 "prefs.rwb.restart_required.title" = "需要重启";
 "prefs.rwb.restart_required.body" = "请返回 Liquid (Gl)ass 设置首页，点击“重启系统界面”。此操作会刷新 backboardd、SpringBoard 与当前系统所需的小组件渲染服务。";

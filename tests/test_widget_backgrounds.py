@@ -6,6 +6,7 @@ import tempfile
 from test_widget_host import ROOT, SUPPORT, function
 
 support = SUPPORT.replace("#include <stdio.h>", "#include <stdio.h>\n#import <objc/runtime.h>")
+support = support.replace("@property(strong) UIView *view;", "@property(strong) UIView *view;\n@property BOOL isViewLoaded;")
 support = support.replace("@property CGRect bounds;", """@property CGRect bounds;
 @property CGRect frame;
 @property BOOL hidden;
@@ -37,6 +38,12 @@ support += r'''
 @end
 @implementation UIWindow @end
 static BOOL removalEnabled = YES, kIsEnabled = YES, kIsEnabledForSystemWidgets = YES;
+static BOOL kExcludePhotos = NO;
+static id photoPreference;
+static BOOL LG_prefBool(NSString *key, BOOL fallback) {
+    NSCAssert([key isEqual:@"Widgets.ExcludePhotos.Enabled"], @"unexpected preference");
+    return [photoPreference isKindOfClass:NSNumber.class] ? [photoPreference boolValue] : fallback;
+}
 static BOOL widgetBackgroundRemovalEnabled(void) { return removalEnabled; }
 static char kWidgetPhotoContentKey;
 static char kLegacyWidgetBackgroundOriginalHiddenKey;
@@ -48,6 +55,9 @@ static CHSWidget *widget(NSString *identifier) {
 
 checks = r'''
 int main(void) { @autoreleasepool {
+    CHECK(!widgetPhotoExclusionEnabled(), "unset option must default off");
+    CHECK(widgetHostAllowsBackgroundRemoval([UIViewController new]), "disabled exclusion changed legacy unidentified host behavior");
+    CHECK(ShouldHandleWidget(@"com.apple.mobileslideshow.PhotosReliveWidget"), "unset option still excludes Photos in RWB");
     UIView *root = host(SBHTouchPassThroughView.class);
     UIView *inner = root.subviews.firstObject;
     BSUIScrollView *scroll = (id)inner.subviews.firstObject;
@@ -76,12 +86,24 @@ int main(void) { @autoreleasepool {
     CHECK(!material.hidden, "moving out of widget failed to restore material");
     material.superview = container;
     vc.widget=widget(@"com.apple.mobileslideshow.PhotosReliveWidget");
+    photoPreference=@YES;kExcludePhotos=YES;
+    CHECK(!widgetHostAllowsBackgroundRemoval(vc), "enabled exclusion did not protect Photos host");
     updateWidgetContentBackground(material);
     CHECK(!material.hidden, "Photos background was removed");
     CHECK(!ShouldHandleWidget(vc.widget.extensionBundleIdentifier), "RWB claimed Photos");
     UIWindow *window=[UIWindow new];CHUISWidgetScene *scene=[CHUISWidgetScene new];
     scene.widget=vc.widget;window.windowScene=scene;window.rwb_shouldHideBackground=@YES;
     CHECK(RWBWindowPreservesPhotoContent(window), "renderer window bypassed Photos protection");
+    photoPreference=@NO;kExcludePhotos=NO;
+    objc_setAssociatedObject(container,&kWidgetPhotoContentKey,@YES,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    CHECK(!widgetViewPreservesPhotoContent(material), "disabled exclusion still honored stale photo marker");
+    CHECK(widgetHostAllowsBackgroundRemoval(vc), "disabled exclusion still blocks Photos host");
+    CHECK(ShouldHandleWidget(vc.widget.extensionBundleIdentifier), "disabled exclusion still blocks Photos RWB");
+    CHECK(!RWBWindowPreservesPhotoContent(window), "disabled exclusion still protects renderer window");
+    updateWidgetContentBackground(material);CHECK(material.hidden, "disabled exclusion does not use ordinary removal path");
+    objc_setAssociatedObject(container,&kWidgetPhotoContentKey,nil,OBJC_ASSOCIATION_ASSIGN);
+    photoPreference=@YES;kExcludePhotos=YES;
+    updateWidgetContentBackground(material);CHECK(!material.hidden, "enabled exclusion did not restore photo background");
     CHECK(ShouldHandleWidget(@"com.apple.Batteries.BatteriesAvocadoWidgetExtension"), "ordinary widget was excluded");
     CHECK(ShouldHandleWidget(@"com.example.photos.widget"), "third-party widget was mistaken for system Photos");
     for(NSString *identifier in @[@"com.apple.PhotosWidget",@"com.apple.mobileslideshow.Widget",@"com.apple.memories.widget"])
@@ -94,7 +116,7 @@ int main(void) { @autoreleasepool {
     widgetSetLegacyBackgroundSuppressed(legacy,NO);CHECK(legacy.hidden,"hidden legacy state lost");
     legacy.hidden=NO;widgetSetLegacyBackgroundSuppressed(legacy,YES);widgetSetLegacyBackgroundSuppressed(legacy,NO);
     CHECK(!legacy.hidden,"visible legacy state lost");
-    puts("PASS native/legacy widget restore, photo exclusion in host/RWB, and ordinary/third-party widget preservation");
+    puts("PASS photo exclusion defaults off, host/RWB on-off paths, stale markers, native/legacy restore and third-party preservation");
     return 0;
 } }
 '''
@@ -103,7 +125,9 @@ int main(void) { @autoreleasepool {
 def main():
     source = support
     widgets = (ROOT / "Hooks/Widgets.x").read_text()
-    for signature in ["static BOOL widgetViewPreservesPhotoContent(",
+    for signature in ["static BOOL widgetPhotoExclusionEnabled(",
+                      "static BOOL widgetHostAllowsBackgroundRemoval(",
+                      "static BOOL widgetViewPreservesPhotoContent(",
                       "static void widgetSetLegacyBackgroundSuppressed(",
                       "static UIViewController *widgetNearestStackController(",
                       "static BOOL widgetHasAncestorNamedWithinDepth(",
@@ -115,6 +139,8 @@ def main():
                       "static void updateWidgetContentBackground("]:
         source += function(widgets, signature)
     rwb=(ROOT / "LiquidAssRWB/Tweak.x").read_text()
+    assert 'kExcludePhotos = LG_prefBool(@"Widgets.ExcludePhotos.Enabled", NO);' in function(rwb, 'static void ReloadPrefs(')
+    assert 'LGReloadPreferences();' in function(rwb, 'static void ReloadPrefs(')
     source += function(rwb, "static BOOL ShouldHandleWidget(")
     source += function(rwb, "static BOOL RWBWindowPreservesPhotoContent(")
     with tempfile.TemporaryDirectory(prefix="liquidass-widget-background-") as tmp:

@@ -15,7 +15,12 @@ static char kWidgetPhotoContentKey;
 static char kLegacyWidgetBackgroundOriginalHiddenKey;
 static NSHashTable<UIView *> *sLegacyWidgetBackgrounds;
 
+static BOOL widgetPhotoExclusionEnabled(void) {
+    return LG_prefBool(@"Widgets.ExcludePhotos.Enabled", NO);
+}
+
 static BOOL widgetHostAllowsBackgroundRemoval(UIViewController *host) {
+    if (!widgetPhotoExclusionEnabled()) return YES;
     NSString *identifier = LGWidgetIdentifierForObject(host);
     BOOL photo = LGWidgetPreservesPhotoContent(identifier);
     if (host.isViewLoaded && identifier.length)
@@ -24,6 +29,7 @@ static BOOL widgetHostAllowsBackgroundRemoval(UIViewController *host) {
 }
 
 static BOOL widgetViewPreservesPhotoContent(UIView *view) {
+    if (!widgetPhotoExclusionEnabled()) return NO;
     for (UIView *ancestor = view; ancestor; ancestor = ancestor.superview) {
         NSNumber *marked = objc_getAssociatedObject(ancestor, &kWidgetPhotoContentKey);
         if (marked) return marked.boolValue;
