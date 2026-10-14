@@ -11,7 +11,8 @@ SUPPORT = r'''
 #import <objc/runtime.h>
 #import "LGWidgetCompatibility.h"
 #include <stdio.h>
-static BOOL kIsEnabled=YES, kExcludePhotos=NO;
+static BOOL kIsEnabled=YES, kExcludePhotos=NO, sActivityColorSupported=NO;
+static BOOL RWBUpdateActivityHostingBackground(id view){return NO;}
 static void *kRWBOriginalBackgroundColorKey=&kRWBOriginalBackgroundColorKey;
 @interface UIColor:NSObject
 +(id)clearColor;

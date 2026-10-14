@@ -1,0 +1,43 @@
+banana53 — keyboard background scene diagnostics
+
+Goal: explain the user's app-dependent background appearance before changing
+blur, tint, refraction or native key layers. Build 52 fixed a highlight control;
+it did not resolve the requested background-refraction behavior.
+
+Reported cases:
+  WeChat / QQ: mostly blurred, little transparency.
+  Sileo / Settings: blurred with some transparency.
+  Unidentified app: very transparent background and letter keys.
+Finding the unidentified app is not required for the first comparison.
+
+Device evidence already supplied: iOS 17.3.1 custom Keyboard render destination
+321x273, Enhanced/Light, tint #D1D3D980. That log precedes GPU encoding and cannot
+prove final pixels or app-dependent view composition.
+
+53 adds only a debug-gated, read-only collector to the 52 keyboard source. It
+logs [keyboard-scene] JSON version=53 tagged with app bundle identifier, window,
+input appearance/type, native render config, relevant view/layer backgrounds,
+filter names, native key background name, glass filter attachment when exposed,
+and stored rendering preferences. It never reads text or changes render state.
+Snapshots are delayed 0.5 seconds, limited to 8 per process / one per window,
+and traverse at most 400 views / emit at most 80 rows per snapshot. Only an
+active app with Keyboard enabled and a primary backdrop >=100pt is sampled.
+
+Local proof: getter ABI regression rejects unsupported struct/void/argument
+methods without calling them. The actual production header ran in a native
+iOS 17.4 UIKit probe: 7 cases plus one scheduled capture; duplicate scheduling
+coalesced; debug-off collected nothing; view metadata was unchanged. Native
+light/dark configs are 3901/2030 and key backgrounds UIKBColorWhite versus
+UIKBColorWhite_Alpha30. This is stock UIKit metadata, not a complete LiquidAss
+render test and not a WeChat-versus-Settings explanation.
+
+真机采样步骤（无需寻找第三个 App）：
+1. 安装 RootHide 53；在更多选项中开启调试日志。
+2. 完全退出并重新打开微信，在输入框展开键盘，停留 2 秒。
+3. 完全退出并重新打开设置，用搜索框展开键盘，停留 2 秒。
+4. 通过更多选项导出日志，发回同一份包含两种 App 的日志。
+   若方便，同时导出偏好设置，可补全未存储键的默认值判断。
+
+Reopening the sampled apps is required to load their updated injection. A
+system-UI restart is not required by this collector. Do not change keyboard
+parameters between the two samples. No automatic install/restart/publication.

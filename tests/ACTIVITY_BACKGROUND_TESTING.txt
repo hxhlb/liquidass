@@ -1,0 +1,116 @@
+banana48 — activity canvas background candidate
+
+Baseline: banana47 with the default Photos exclusion left unchanged.
+Affected device: iPhone 13 Pro Max, iOS 17.3.1, RootHide.
+Observed: native Island fill/gain map hidden, attached glass; Activity content
+is hosted from chronod. A temporary CALayerHost opaque=false test did not
+change the black background. All transient test changes were restored.
+
+The candidate stays inside the existing RWB injection into chronod. It matches
+SystemAperture scene roles or activity: scene identifiers. It clears only the
+RBLayer canvas clearColor and its opaque hint, retaining the native display
+operation. It does not apply screenBlend, remove black pixels, change RBFill
+colors, or use the large-widget rectangle removal path for a matched activity.
+Black text, black artwork and small native primitives must remain intact.
+
+Native ABI sampled from iOS 17.3.1:
+  clearColor         {?=ffff}16@0:8
+  setClearColor:     v32@0:8{?=ffff}16
+Other method layouts bypass this candidate instead of guessing their ABI.
+iOS 14/15 do not enable the new clear-color hook.
+
+After installation chronod must load the new dylib. The tester can run as root:
+  killall chronod
+Then reopen the test Activity if it is not redisplayed automatically.
+This is a manual test step; package installation does not kill processes.
+
+Check compact, minimal and expanded Activity content, including colored icons,
+black/white text, artwork and progress bars. Verify ordinary widgets, Photos,
+native music/recording content, disable/re-enable and scene reuse.
+
+The passive diagnostic state is available through the Darwin notify key
+dylv.liquidass/activity-background-status. Prefix 0xAC48 identifies this build.
+Low bits: 1=ABI available, 2=enabled, 4=activity matched, 8=original opaque,
+16=existing widget background flag. Bits 8..39 are the four original clear-color
+components quantized to eight bits. It records state changes, not every frame.
+No persistent preference or device log file is created by this diagnostic.
+
+Boundary: these checks do not prove that the Activity window on the device has
+matched or that explicit background shapes inside native content are removed.
+The tester's pixels and the diagnostic match bit determine the next step.
+
+
+banana49 — Activity SwiftUI hosting background candidate
+
+Device result for 48: the user retained the same Activity after installation and
+chronod reload. Text/icons remained; black backgrounds did not change. Read-only
+SpringBoard sampling of the passive chronod diagnostic returned
+0xAC48000000000007: compatible ABI, enabled, Activity matched, widget flag false,
+and sampled native clearColor components all zero. Therefore changing the canvas
+clearColor alone did not fix the observed black backgrounds.
+
+49 adds only the Activity UIHostingView background candidate to that path.
+It clears near-black (RGB <= 0.02, alpha > 0) UIView/CALayer backing properties
+and disables the hosting UIView opaque flag. Nonblack backing colors and native
+foreground drawing operations remain intact. Latest native background/opacity
+requests are recorded for restoration. Hosting UI changes run on the main thread;
+worker layer background requests pass through and update the recorded native
+layer color. States hold the hosting view weakly; the registry holds layers weakly.
+Ordinary widgets and other processes do not enter this candidate.
+
+The new passive key is dylv.liquidass/activity-hosting-background-status.
+Prefix 0xAC49; low bits are 1=ABI supported, 2=enabled, 4=Activity canvas seen,
+8=UIHostingView seen, 16=black UIView backing observed,
+32=black CALayer backing observed, 64=native hosting UIView opaque observed.
+Bits 8..39 sample the first matching black hosting observation's native UIView
+RGBA; bits 40..47 sample its native layer background alpha. Observation flags are
+latched across hosting layers until disabled or the process restarts; they are
+not the current pixel/compositing state. The 48 clearColor diagnostic remains.
+Neither key writes persistent preferences or log files.
+
+Install RootHide 49, manually run `killall chronod` as root, and retain the
+current Activity. No need to cancel it solely to load the new dylib. Reopen it if
+it does not redisplay. Compare compact, minimal and expanded content, colored
+icons, black/white text, artwork and progress bars. Check master/Island disabling
+and an ordinary widget. Do not infer visible transparency from metadata alone.
+If black remains, read the new passive flags from SpringBoard before choosing
+another candidate. Do not attach Frida to protected chronod/WidgetRenderer or
+remove foreground shapes/pixels indiscriminately.
+
+Local tests compile actual production helpers and setter bodies on macOS with
+native-color fixtures. They cover black clearing, colored-background/content
+preservation, native updates, restore, migration, scope, worker layer pass-through
+and weak ownership; they do not validate private RenderBox pixel composition.
+
+
+banana50 — parent hosting scope correction
+
+Device 49 result: black remained, with text/icons intact. Passive status was
+0xAC49000000000007, so the Activity canvas path ran but the hosting branch was
+not observed. This does NOT establish that no UIHostingView exists: 49 required
+a UIHostingView to own an RBLayer and only sampled matched RBLayer delegates.
+
+An independent native SwiftUI fixture on the retained iOS 18.6 simulator showed:
+  _UIHostingView<ProbeContent> owns SwiftUI.UIHostingViewDebugLayer (not RBLayer),
+  with native dark background RGBA 0,0,0,1;
+  its SwiftUI.RBDrawingView child owns a RenderBoxLayer subclass of RBLayer,
+  with nil background and opaque=false.
+Clearing only the parent hosting background and UIView opacity removed the black
+frame while text/icons/progress remained. Files are archived under ignored
+packages/activity-render-research-20261013/sim-probe/ (native hierarchy JSON,
+before/after PNGs, source, and visual-check.json). This is a UIHostingController
+fixture, not an ActivityKit or physical-device verification.
+
+50 matches the hosting view's own Activity window scene; it no longer requires
+its own layer to be RBLayer. An Activity RBLayer draw searches up to 32 ancestors
+on the main thread to prepare matching hosting parents. Hosting layers use their
+own weak registry and ordinary CALayer background setter hook, scoped by the
+same Activity-hosting predicate; they never enter RBLayer clearColor restoration.
+Native colors/opacity are restored on disable or migration. Widget scene IDs and
+other processes remain excluded; no shape/glyph/image operation is removed.
+
+The hosting diagnostic key is unchanged, with prefix 0xAC50. Existing low bits
+and sample fields retain their meaning; hostingSeen/black flags can now describe
+a parent hosting view. Install RootHide 50, manually reload chronod as root,
+retain the Activity, and inspect pixels plus status. No source push or APT release
+is authorized by this candidate. Phone validation remains outstanding.

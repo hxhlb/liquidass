@@ -1,0 +1,38 @@
+banana51 — enlarged-icon/open-folder border candidate
+
+User report: the large opened folder's glass border flashes when SnowBoard icon
+enlargement is enabled; restoring default icon size avoids it. This is not the
+small folder icon rim, and the keyboard item is outside this candidate.
+
+Production Folder.x retained iOS 18 recovery callbacks at 0/.16/.38/.72 seconds.
+Forced recovery used to clear layer.filters before applyFilters. If CAFilter
+creation returned nil or was not ready, the old valid filter had already gone.
+The bounded retry mechanism could recover later, leaving a filterless interval.
+
+51 replaces that clear/apply pair with the existing lgInvalidateFilterContents
+API. It toggles the registered refresh variant and requests a fresh filter while
+retaining the previous layer filter until replacement succeeds. All recovery
+delays and ordinary layout discovery remain; geometry, native folder transforms,
+icon size preferences, glyphs and icon image processing are unchanged.
+All host/dark/radius refresh variants are registered in the existing backboardd
+implementation; the registration and bounded retry regressions are retained.
+
+tests/test_folder_filter_recovery.py compiles the production folder traversal and
+invalidation method. With a temporarily unavailable filter factory, baseline
+HEAD fails because the current filter disappears; the candidate keeps it. It
+checks ancestor scale values 1/1.2/1.5 without changing transforms, replacement
+success, ordinary layouts, detached views and icon-sized material exclusions.
+This fixture does not run SnowBoard or prove its installed sizing mechanism.
+
+Native iOS 17.6.1 SpringBoardHome sources and hashes are stored in ignored
+packages/folder-scale-research-20261013/. They show native folder/clip parent
+layout and alpha handling; they do not prove the reported device's root cause.
+No generic transform rewrite or SnowBoard-specific preference override is used.
+
+Device checks: keep SnowBoard enlargement enabled; compare open/close/reopen,
+quick cancellation, repeated opening, FolderOpen disable/re-enable, and default
+size. Check the large folder edge during and after zoom. Also check iOS 18's
+first opening and subsequent openings, since delayed recovery must still work.
+The keyboard issue remains pending, and build 50's Activity fix is unchanged.
+
+No automatic process restart, installation, source push or APT publication.

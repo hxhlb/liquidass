@@ -172,8 +172,8 @@ static void refreshOpenFolderHierarchy(UIView *root, BOOL forceFilterRefresh) {
         if (!glass) continue;
         [CATransaction begin];
         [CATransaction setDisableActions:YES];
-        glass.layer.filters = nil;
-        [glass applyFilters];
+        // Keep the current filter visible until its replacement is ready.
+        [glass lgInvalidateFilterContents];
         [glass.layer setNeedsDisplay];
         [CATransaction commit];
     }

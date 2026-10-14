@@ -351,6 +351,8 @@ static void LGUpdateKeyboardBorder(LGLiveBackdropView *glass) {
     [CATransaction commit];
 }
 
+#import "KeyboardDiagnostics.h"
+
 static void LGUpdateKeyboardGlass(UIView *stock) {
     if (!LGIsKeyboardBackdrop(stock) || !stock.superview) return;
 
@@ -429,7 +431,6 @@ static void LGUpdateKeyboardGlass(UIView *stock) {
         glass = LGCreateRegisteredGlass(mergedFrame, nil, @"Keyboard");
         if (!glass) return;
         glass.userInteractionEnabled = NO;
-        glass.lgSpecularEnabledOverride = @NO;
         [container addSubview:glass];
         objc_setAssociatedObject(primary, kLGKeyboardGlassKey, glass,
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -439,6 +440,9 @@ static void LGUpdateKeyboardGlass(UIView *stock) {
         [container addSubview:glass];
     }
 
+    id specular = LGGlassPreferenceValue(@"Keyboard.SpecularEnabled");
+    glass.lgSpecularEnabledOverride = [specular isKindOfClass:NSNumber.class]
+        ? specular : @YES;
     glass.frame = mergedFrame;
     glass.layer.cornerRadius = LGKeyboardCornerRadius();
     glass.layer.masksToBounds = YES;
@@ -456,6 +460,7 @@ static void LGUpdateKeyboardGlass(UIView *stock) {
         if (backdrop != primary) LGRemoveKeyboardGlass(backdrop);
         LGKeyboardSetStockHidden(backdrop, YES);
     }
+    LGKeyboardScheduleSceneSnapshot(stock.window);
 }
 
 static void LGKeyboardSetVisualEffectHidden(UIView *effectView, BOOL hidden) {
@@ -485,6 +490,7 @@ static void LGUpdateKeyboardVisualEffect(UIView *effectView) {
 
 - (void)didMoveToWindow {
     %orig;
+    if (self.window) LGKeyboardScheduleSceneSnapshot(self.window);
     if (LGIsRemoteKeyboardWindow(self.window)) {
         [gLGKeyboardBackdrops addObject:self];
         LGUpdateKeyboardGlass(self);

@@ -1,0 +1,38 @@
+banana52 — keyboard highlight control
+
+Scope: stock system keyboard; enabled; Enhanced renderer + system blur. User
+reports changed styling but mainly a blurred background.
+
+User-supplied iOS 17.3.1 log, line 597:
+  host=Keyboard src=321x273 dst=321x273 radius=25.59 bezel=13.00
+  aux=0.2 profile=enhanced appearance=light tint=#d1d3d980
+The custom-render path is reached with the keyboard shader marker and compatible
+destination. The log point precedes command encoding; it does not prove every
+GPU submission or the final composited pixels. No unusable-destination message
+for the keyboard appears in this log. Startup filter-table retries eventually
+complete, so they do not establish a persistent registration failure.
+
+The keyboard surface exposes Keyboard.SpecularEnabled (per-engine storage), with
+the same default-on UI contract as other highlight switches. Installation had
+unconditionally set glass.lgSpecularEnabledOverride=@NO. That prevented the
+switch from affecting keyboard glass. 52 reads the existing preference and
+applies its boolean on every update, including an existing glass after a reload.
+Missing/invalid values use the setting's advertised YES default. Explicit NO is
+retained. No host-default table, shared shader/blur path, tint, key rendering,
+input geometry or font preference is changed.
+
+tests/test_keyboard_specular.py fails on the old forced-off production block and
+compiles the new override block to verify default/on/off/invalid values and
+updates on the same view. Renderer-profile and highlight update regressions
+cover existing preference mapping and layer update behavior. Native iOS 18.6
+keyboard hierarchy and standalone GPU shader checks from the earlier diagnostic
+step remain supporting evidence, not physical-device validation of build 52.
+
+Install RootHide 52, manually restart the system UI, and reopen the app showing
+the keyboard. Keep Keyboard > Highlights enabled; verify that toggling it off/on
+changes the rim on an existing keyboard and preserves key input. Compare light
+and dark keyboard appearances. Blur and tint settings remain unchanged; the
+logged light tint has roughly 50% alpha, which can still make the body look matte.
+Do not mark the broader appearance TODO complete before device feedback.
+
+No automatic installation/restart, Rootless build, commit/push or APT release.

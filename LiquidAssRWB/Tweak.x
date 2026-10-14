@@ -3,6 +3,9 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <unistd.h>
+#import <notify.h>
+#import <math.h>
+#import <string.h>
 #import "../Shared/LGSharedSupport.h"
 #import "../Shared/LGWidgetCompatibility.h"
 
@@ -11,6 +14,27 @@ static BOOL kIsEnabledForSystemWidgets = YES;
 static BOOL kIsEnabledForMaterialView = NO;
 static BOOL kForceDarkMode = NO;
 static BOOL kExcludePhotos = NO;
+static BOOL kActivityEnabled = NO;
+static BOOL sActivityColorSupported = NO;
+static NSHashTable *sActivityLayers;
+static char kActivityLayerStateKey;
+static __thread NSUInteger sApplyingActivityColor;
+static int sActivityDiagnosticToken = -1;
+static uint64_t sActivityDiagnosticState;
+static void RWBRestoreActivityLayers(void);
+@class RBLayer;
+static void RWBPrepareActivityHostingBackground(UIView *view);
+static void RWBPrepareActivityHostingAncestors(UIView *view);
+static void RWBRestoreActivityHostingBackground(CALayer *layer);
+static void RWBRestoreActivityHostingLayers(void);
+static BOOL RWBUpdateActivityHostingBackground(UIView *view);
+static NSHashTable *sActivityHostingLayers;
+static __thread NSUInteger sApplyingHostingBackground;
+static char kActivityHostingStateKey;
+static int sHostingDiagnosticToken = -1;
+static uint64_t sHostingDiagnosticState;
+static uint64_t sHostingSeenFlags, sHostingColorSample;
+static void RWBPublishHostingStatus(UIView *view, UIColor *viewColor, UIColor *layerColor, BOOL opaque);
 static CGFloat kMaxWidgetWidth = 140.0;
 static CGFloat kMaxWidgetHeight = 140.0;
 static NSSet<NSString *> *kWidgetBundleIdentifiers = nil;
@@ -66,6 +90,7 @@ static void ReloadPrefs(void) {
     // Use the Settings domain for this new shared option in every process.
     LGReloadPreferences();
     kExcludePhotos = LG_prefBool(@"Widgets.ExcludePhotos.Enabled", NO);
+    kActivityEnabled = LG_globalEnabled() && LG_prefBool(@"DynamicIsland.Enabled", NO);
     NSDictionary<NSString *, id> *preferences = RWBCopyPreferences();
     kIsEnabled = RWBPreferenceBool(preferences, @"Global.Enabled", YES) &&
                  RWBPreferenceBool(preferences, @"Widgets.Enabled", YES) &&
@@ -86,6 +111,7 @@ static void ReloadPrefs(void) {
     kWidgetBundleIdentifiers = [NSSet setWithArray:bundleIDs.array];
 
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (!kActivityEnabled) RWBRestoreActivityLayers();
         for (UIWindow *window in sRWBWindows.allObjects) {
             NSNumber *originalStyle =
                 objc_getAssociatedObject(window, kRWBOriginalWindowStyleKey);
@@ -155,8 +181,276 @@ static void RWBRestartChronodCallback(
 @property (nonatomic, strong) NSNumber *rwb_shouldHideBackground;
 @end
 
+typedef struct { float c0, c1, c2, c3; } LGActivityClearColor;
+
 @interface RBLayer : CALayer
+@property (nonatomic) LGActivityClearColor clearColor;
 @end
+
+static BOOL RWBActivitySceneMatches(NSString *role, NSString *identifier) {
+    return ([role isKindOfClass:NSString.class] &&
+            [role rangeOfString:@"SystemAperture" options:NSCaseInsensitiveSearch].location != NSNotFound)
+        || ([identifier isKindOfClass:NSString.class] && [identifier hasPrefix:@"activity:"]);
+}
+
+static BOOL RWBActivityLayerMatches(RBLayer *layer) {
+    if (!sRWBIsChronod || !kActivityEnabled || !sActivityColorSupported) return NO;
+    id delegate = layer.delegate;
+    if (![delegate isKindOfClass:UIView.class]) return NO;
+    UIWindow *window = ((UIView *)delegate).window;
+    if (!window) return objc_getAssociatedObject(layer, &kActivityLayerStateKey) != nil;
+    UIWindowScene *scene = window.windowScene;
+    if (!scene) return NO;
+    NSString *identifier = scene.session.persistentIdentifier;
+    if (RWBActivitySceneMatches(scene.session.role, identifier)) return YES;
+    id sceneIdentifier = LGWidgetObjectProperty(scene, NSSelectorFromString(@"_sceneIdentifier"));
+    return RWBActivitySceneMatches(nil, sceneIdentifier);
+}
+
+static void RWBPublishActivityStatus(RBLayer *layer, LGActivityClearColor color) {
+    if (sActivityDiagnosticToken < 0) return;
+    uint64_t state = UINT64_C(0xAC48000000000000) | (sActivityColorSupported ? 1u : 0u);
+    state |= kActivityEnabled ? 2u : 0u;
+    if (layer) {
+        state |= 4u;
+        state |= layer.opaque ? 8u : 0u;
+        UIView *view = [layer.delegate isKindOfClass:UIView.class] ? (UIView *)layer.delegate : nil;
+        state |= view.window.rwb_shouldHideBackground.boolValue ? 16u : 0u;
+        const float values[] = {color.c0, color.c1, color.c2, color.c3};
+        for (NSUInteger i = 0; i < 4; i++) {
+            float value = isfinite(values[i]) ? fminf(1, fmaxf(0, values[i])) : 0;
+            state |= ((uint64_t)lrintf(value * 255)) << (8 + i * 8);
+        }
+    }
+    if (state == sActivityDiagnosticState) return;
+    sActivityDiagnosticState = state;
+    notify_set_state(sActivityDiagnosticToken, state);
+}
+
+static void RWBCaptureActivityLayer(RBLayer *layer, LGActivityClearColor color, BOOL nativeRequest) {
+    NSDictionary *state = objc_getAssociatedObject(layer, &kActivityLayerStateKey);
+    if (!state) {
+        state = @{@"opaque": @(layer.opaque),
+                  @"color": [NSValue valueWithBytes:&color objCType:@encode(LGActivityClearColor)]};
+        objc_setAssociatedObject(layer, &kActivityLayerStateKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        @synchronized (sActivityLayers) { [sActivityLayers addObject:layer]; }
+        RWBPublishActivityStatus(layer, color);
+    } else if (nativeRequest) {
+        LGActivityClearColor previous;
+        [state[@"color"] getValue:&previous size:sizeof(previous)];
+        if (memcmp(&previous, &color, sizeof(color)) != 0) {
+            state = @{@"opaque": state[@"opaque"],
+                      @"color": [NSValue valueWithBytes:&color objCType:@encode(LGActivityClearColor)]};
+            objc_setAssociatedObject(layer, &kActivityLayerStateKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        RWBPublishActivityStatus(layer, color);
+    }
+}
+
+static void RWBPrepareActivityLayer(RBLayer *layer) {
+    LGActivityClearColor color = layer.clearColor;
+    RWBCaptureActivityLayer(layer, color, NO);
+    if ([layer.delegate isKindOfClass:UIView.class])
+        RWBPrepareActivityHostingAncestors((UIView *)layer.delegate);
+    if (layer.opaque) layer.opaque = NO;
+    if (color.c0 || color.c1 || color.c2 || color.c3) {
+        sApplyingActivityColor++;
+        layer.clearColor = (LGActivityClearColor){0};
+        sApplyingActivityColor--;
+    }
+}
+
+static void RWBRestoreActivityLayer(RBLayer *layer) {
+    NSDictionary *state = objc_getAssociatedObject(layer, &kActivityLayerStateKey);
+    if (!state) { RWBRestoreActivityHostingBackground(layer); return; }
+    LGActivityClearColor color;
+    [state[@"color"] getValue:&color size:sizeof(color)];
+    sApplyingActivityColor++;
+    layer.clearColor = color;
+    sApplyingActivityColor--;
+    layer.opaque = [state[@"opaque"] boolValue];
+    objc_setAssociatedObject(layer, &kActivityLayerStateKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    @synchronized (sActivityLayers) { [sActivityLayers removeObject:layer]; }
+    RWBRestoreActivityHostingBackground(layer);
+    [layer setNeedsDisplay];
+}
+
+static void RWBRestoreActivityLayers(void) {
+    NSArray *layers;
+    @synchronized (sActivityLayers) { layers = sActivityLayers.allObjects; }
+    for (RBLayer *layer in layers) RWBRestoreActivityLayer(layer);
+    RWBRestoreActivityHostingLayers();
+    RWBPublishActivityStatus(nil, (LGActivityClearColor){0});
+    RWBPublishHostingStatus(nil, nil, nil, NO);
+}
+
+static BOOL RWBFourFloatColorType(const char *type) {
+    const char *fields = type && type[0] == '{' ? strchr(type, '=') : NULL;
+    return fields && strcmp(fields + 1, "ffff}") == 0;
+}
+
+static BOOL RWBActivityColorABICompatible(Class cls) {
+    Method getter = class_getInstanceMethod(cls, @selector(clearColor));
+    Method setter = class_getInstanceMethod(cls, @selector(setClearColor:));
+    if (!getter || !setter || method_getNumberOfArguments(getter) != 2 || method_getNumberOfArguments(setter) != 3) return NO;
+    char *returned = method_copyReturnType(getter);
+    char *argument = method_copyArgumentType(setter, 2);
+    char *setterReturn = method_copyReturnType(setter);
+    BOOL compatible = RWBFourFloatColorType(returned) && RWBFourFloatColorType(argument)
+        && setterReturn && strcmp(setterReturn, @encode(void)) == 0;
+    free(returned); free(argument); free(setterReturn);
+    return compatible;
+}
+
+@interface LGActivityHostingBackgroundState : NSObject
+@property (weak) UIView *view;
+@property (strong) UIColor *viewColor;
+@property (strong) UIColor *layerColor;
+@property BOOL viewOpaque;
+@end
+@implementation LGActivityHostingBackgroundState
+@end
+
+static BOOL RWBIsHostingView(UIView *view) {
+    NSUInteger depth = 0;
+    for (Class cls = object_getClass(view); cls && depth < 16; cls = class_getSuperclass(cls), depth++) {
+        if ([NSStringFromClass(cls) containsString:@"UIHostingView"]) return YES;
+    }
+    return NO;
+}
+
+static BOOL RWBActivityHostingViewMatches(UIView *view) {
+    if (!sActivityColorSupported || !kActivityEnabled || !sRWBIsChronod || !RWBIsHostingView(view)) return NO;
+    UIWindow *window = view.window;
+    if (!window) return objc_getAssociatedObject(view.layer, &kActivityHostingStateKey) != nil;
+    UIWindowScene *scene = window.windowScene;
+    if (!scene) return NO;
+    if (RWBActivitySceneMatches(scene.session.role, scene.session.persistentIdentifier)) return YES;
+    return RWBActivitySceneMatches(nil, LGWidgetObjectProperty(scene, NSSelectorFromString(@"_sceneIdentifier")));
+}
+
+static UIColor *RWBResolvedHostingColor(UIView *view, UIColor *color) {
+    return [color resolvedColorWithTraitCollection:view.traitCollection];
+}
+
+static BOOL RWBHostingColorIsBlack(UIView *view, UIColor *color) {
+    UIColor *resolved = RWBResolvedHostingColor(view, color);
+    CGFloat r = 0, g = 0, b = 0, a = 0;
+    if (![resolved getRed:&r green:&g blue:&b alpha:&a]) return NO;
+    return a > 0 && r >= 0 && g >= 0 && b >= 0 && r <= 0.02 && g <= 0.02 && b <= 0.02;
+}
+
+static UIColor *RWBLayerBackgroundColor(CALayer *layer) {
+    CGColorRef color = layer.backgroundColor;
+    return color ? [UIColor colorWithCGColor:color] : nil;
+}
+
+static void RWBPublishHostingStatus(UIView *view, UIColor *viewColor, UIColor *layerColor, BOOL opaque) {
+    if (sHostingDiagnosticToken < 0) return;
+    uint64_t state = UINT64_C(0xAC50000000000000) | (sActivityColorSupported ? 1u : 0u)
+        | (kActivityEnabled ? 2u : 0u);
+    if (view) {
+        BOOL hosting = RWBIsHostingView(view);
+        uint64_t flags = 4u | (hosting ? 8u : 0u);
+        if (hosting) {
+            flags |= opaque ? 64u : 0u;
+            flags |= RWBHostingColorIsBlack(view, viewColor) ? 16u : 0u;
+            flags |= RWBHostingColorIsBlack(view, layerColor) ? 32u : 0u;
+        }
+        sHostingSeenFlags |= flags;
+        if (!sHostingColorSample && (flags & (16u | 32u))) {
+            CGFloat r = 0, g = 0, b = 0, a = 0;
+            [RWBResolvedHostingColor(view, viewColor) getRed:&r green:&g blue:&b alpha:&a];
+            const CGFloat values[] = {r, g, b, a};
+            for (NSUInteger i = 0; i < 4; i++) {
+                CGFloat v = isfinite(values[i]) ? fmin(1, fmax(0, values[i])) : 0;
+                sHostingColorSample |= ((uint64_t)lrint(v * 255)) << (8 + 8 * i);
+            }
+            CGColorRef layerCGColor = RWBResolvedHostingColor(view, layerColor).CGColor;
+            CGFloat layerAlpha = layerCGColor ? CGColorGetAlpha(layerCGColor) : 0;
+            if (isfinite(layerAlpha)) sHostingColorSample |= ((uint64_t)lrint(fmin(1, fmax(0, layerAlpha)) * 255)) << 40;
+        }
+    } else if (!kActivityEnabled) {
+        sHostingSeenFlags = 0; sHostingColorSample = 0;
+    }
+    state |= sHostingSeenFlags | sHostingColorSample;
+    if (state == sHostingDiagnosticState) return;
+    sHostingDiagnosticState = state;
+    notify_set_state(sHostingDiagnosticToken, state);
+}
+
+static LGActivityHostingBackgroundState *RWBCaptureHostingBackground(UIView *view) {
+    CALayer *layer = view.layer;
+    LGActivityHostingBackgroundState *state = objc_getAssociatedObject(layer, &kActivityHostingStateKey);
+    if (!state) {
+        state = [LGActivityHostingBackgroundState new];
+        state.view = view;
+        state.viewColor = view.backgroundColor;
+        state.layerColor = RWBLayerBackgroundColor(layer);
+        state.viewOpaque = view.opaque;
+        objc_setAssociatedObject(layer, &kActivityHostingStateKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        if (!sActivityHostingLayers) sActivityHostingLayers = [NSHashTable weakObjectsHashTable];
+        [sActivityHostingLayers addObject:layer];
+    }
+    return state;
+}
+
+static void RWBPrepareActivityHostingBackground(UIView *view) {
+    if (![NSThread isMainThread]) return;
+    if (!RWBActivityHostingViewMatches(view)) {
+        RWBPublishHostingStatus(view, view.backgroundColor, RWBLayerBackgroundColor(view.layer), view.opaque);
+        return;
+    }
+    LGActivityHostingBackgroundState *state = RWBCaptureHostingBackground(view);
+    RWBPublishHostingStatus(view, state.viewColor, state.layerColor, state.viewOpaque);
+    sApplyingHostingBackground++;
+    if (RWBHostingColorIsBlack(view, view.backgroundColor)) view.backgroundColor = UIColor.clearColor;
+    if (RWBHostingColorIsBlack(view, RWBLayerBackgroundColor(view.layer))) view.layer.backgroundColor = NULL;
+    if (view.opaque) view.opaque = NO;
+    sApplyingHostingBackground--;
+}
+
+static void RWBPrepareActivityHostingAncestors(UIView *view) {
+    if (![NSThread isMainThread]) return;
+    for (NSUInteger depth = 0; view && depth < 32; depth++, view = view.superview) {
+        RWBPrepareActivityHostingBackground(view);
+    }
+}
+
+static void RWBRestoreActivityHostingBackground(CALayer *layer) {
+    LGActivityHostingBackgroundState *state = objc_getAssociatedObject(layer, &kActivityHostingStateKey);
+    if (!state) return;
+    if (![NSThread isMainThread]) {
+        __weak CALayer *weakLayer = layer;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            CALayer *live = weakLayer;
+            if (live && objc_getAssociatedObject(live, &kActivityHostingStateKey) == state
+                && !RWBActivityHostingViewMatches(state.view)) RWBRestoreActivityHostingBackground(live);
+        });
+        return;
+    }
+    UIView *view = state.view;
+    sApplyingHostingBackground++;
+    if (view && view.layer == layer) {
+        view.backgroundColor = state.viewColor;
+        view.opaque = state.viewOpaque;
+    }
+    layer.backgroundColor = state.layerColor.CGColor;
+    sApplyingHostingBackground--;
+    objc_setAssociatedObject(layer, &kActivityHostingStateKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    [sActivityHostingLayers removeObject:layer];
+    [layer setNeedsDisplay];
+}
+
+static void RWBRestoreActivityHostingLayers(void) {
+    for (CALayer *layer in sActivityHostingLayers.allObjects) RWBRestoreActivityHostingBackground(layer);
+}
+
+static BOOL RWBUpdateActivityHostingBackground(UIView *view) {
+    if (RWBActivityHostingViewMatches(view)) { RWBPrepareActivityHostingBackground(view); return YES; }
+    if (sActivityColorSupported) RWBRestoreActivityHostingBackground(view.layer);
+    return NO;
+}
 
 @interface CHUISWidgetHostViewController : UIViewController
 @property (nonatomic, copy) CHSWidget *widget;
@@ -359,8 +653,18 @@ static BOOL RWBWindowPreservesPhotoContent(UIWindow *window) {
 
 %hook UIView
 
+- (void)didMoveToWindow {
+    %orig;
+    if (sActivityColorSupported && [self.layer isKindOfClass:objc_getClass("RBLayer")]
+        && RWBActivityLayerMatches((RBLayer *)self.layer)) {
+        RWBPrepareActivityLayer((RBLayer *)self.layer);
+        [self.layer setNeedsDisplay];
+    }
+}
+
 - (void)layoutSubviews {
     %orig;
+    if (sActivityColorSupported && RWBUpdateActivityHostingBackground(self)) return;
     if ([NSStringFromClass([self class]) containsString:@"UIHostingView"]) return;
     id original = objc_getAssociatedObject(self, kRWBOriginalBackgroundColorKey);
     if (kIsEnabled && (!kExcludePhotos || self.window)
@@ -378,12 +682,50 @@ static BOOL RWBWindowPreservesPhotoContent(UIWindow *window) {
     }
 }
 
+- (void)setBackgroundColor:(UIColor *)color {
+    if (![NSThread isMainThread]) { %orig(color); return; }
+    if (!sApplyingHostingBackground && RWBActivityHostingViewMatches(self)) {
+        LGActivityHostingBackgroundState *state = RWBCaptureHostingBackground(self);
+        state.viewColor = color;
+        state.layerColor = RWBResolvedHostingColor(self, color);
+        RWBPublishHostingStatus(self, state.viewColor, state.layerColor, state.viewOpaque);
+        sApplyingHostingBackground++;
+        %orig(RWBHostingColorIsBlack(self, color) ? UIColor.clearColor : color);
+        sApplyingHostingBackground--;
+        return;
+    }
+    if (!sApplyingHostingBackground && sActivityColorSupported)
+        RWBRestoreActivityHostingBackground(self.layer);
+    %orig(color);
+}
+
+- (void)setOpaque:(BOOL)opaque {
+    if (![NSThread isMainThread]) { %orig(opaque); return; }
+    if (!sApplyingHostingBackground && RWBActivityHostingViewMatches(self)) {
+        LGActivityHostingBackgroundState *state = RWBCaptureHostingBackground(self);
+        state.viewOpaque = opaque;
+        %orig(NO);
+        return;
+    }
+    if (!sApplyingHostingBackground && sActivityColorSupported)
+        RWBRestoreActivityHostingBackground(self.layer);
+    %orig(opaque);
+}
+
 %end
 
 %hook RBLayer
 
 - (void)display {
     UIView *view = (UIView *)self.delegate;
+
+    if (RWBActivityLayerMatches(self)) {
+        RWBPrepareActivityLayer(self);
+        // Activity content keeps every native shape, glyph and image operation.
+        %orig;
+        return;
+    }
+    if (sActivityColorSupported) RWBRestoreActivityLayer(self);
 
     if (kIsEnabled && [view isKindOfClass:[UIView class]]
         && !RWBWindowPreservesPhotoContent(view.window) && view.window.rwb_shouldHideBackground.boolValue) {
@@ -409,6 +751,42 @@ static BOOL RWBWindowPreservesPhotoContent(UIWindow *window) {
 
 %end
 
+%end
+
+%group RWBActivityClearColor
+%hook CALayer
+- (void)setBackgroundColor:(CGColorRef)color {
+    if (![NSThread isMainThread]) {
+        LGActivityHostingBackgroundState *state = objc_getAssociatedObject(self, &kActivityHostingStateKey);
+        if (state) state.layerColor = color ? [UIColor colorWithCGColor:color] : nil;
+        %orig(color); return;
+    }
+    UIView *view = [self.delegate isKindOfClass:UIView.class] ? (UIView *)self.delegate : nil;
+    if (!sApplyingHostingBackground && view.layer == self && RWBActivityHostingViewMatches(view)) {
+        LGActivityHostingBackgroundState *state = RWBCaptureHostingBackground(view);
+        state.layerColor = color ? [UIColor colorWithCGColor:color] : nil;
+        RWBPublishHostingStatus(view, state.viewColor, state.layerColor, state.viewOpaque);
+        %orig(RWBHostingColorIsBlack(view, state.layerColor) ? NULL : color);
+        return;
+    }
+    if (!sApplyingHostingBackground) RWBRestoreActivityHostingBackground(self);
+    %orig(color);
+}
+%end
+
+%hook RBLayer
+- (void)setClearColor:(LGActivityClearColor)color {
+    if (!sApplyingActivityColor) {
+        if (RWBActivityLayerMatches(self)) {
+            RWBCaptureActivityLayer(self, color, YES);
+            %orig((LGActivityClearColor){0});
+            return;
+        }
+        RWBRestoreActivityLayer(self);
+    }
+    %orig(color);
+}
+%end
 %end
 
 %group RWB_15
@@ -519,6 +897,19 @@ static BOOL RWBWindowPreservesPhotoContent(UIWindow *window) {
     } else if ([bundleIdentifier isEqualToString:@"com.apple.chronod"] ||
                [bundleIdentifier hasPrefix:@"com.apple.chrono.WidgetRenderer-"]) {
         %init(RWB);
+        if (@available(iOS 16.0, *)) {
+            if (sRWBIsChronod) {
+                notify_register_check("dylv.liquidass/activity-background-status", &sActivityDiagnosticToken);
+                notify_register_check("dylv.liquidass/activity-hosting-background-status", &sHostingDiagnosticToken);
+                if (RWBActivityColorABICompatible(objc_getClass("RBLayer"))) {
+                    sActivityLayers = [NSHashTable weakObjectsHashTable];
+                    sActivityColorSupported = YES;
+                    %init(RWBActivityClearColor);
+                }
+                RWBPublishActivityStatus(nil, (LGActivityClearColor){0});
+                RWBPublishHostingStatus(nil, nil, nil, NO);
+            }
+        }
         if (@available(iOS 17, *)) {
             %init(RWB_17);
         } else if (@available(iOS 16, *)) {
