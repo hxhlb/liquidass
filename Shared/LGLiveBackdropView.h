@@ -15,11 +15,22 @@ id LGGlassPreferenceValue(NSString *key);
 void LGInvalidateGlassPreferenceCache(void);
 NSString *LGFilterTypeForHostPrefix(NSString *prefix);
 
+typedef NS_ENUM(NSInteger, LGGlassRimMode) {
+    LGGlassRimModeNone,
+    LGGlassRimModeBorder,
+    LGGlassRimModeGlass,
+};
+
+LGGlassRimMode LGGlassRimModeForFilterType(NSString *filterType);
+
 @interface LGLiveBackdropView : UIView
 
 @property (nonatomic, copy) NSString *lgFilterType;
 
 @property (nonatomic, copy) NSNumber *lgSpecularEnabledOverride;
+@property (nonatomic, copy) NSNumber *lgSpecularOpacityOverride;
+@property (nonatomic, copy) NSNumber *lgNativeBlurRadiusOverride;
+@property (nonatomic, copy) NSNumber *lgQualityScaleOverride;
 
 - (instancetype)initWithFrame:(CGRect)frame groupName:(NSString *)groupName;
 
@@ -31,6 +42,9 @@ NSString *LGFilterTypeForHostPrefix(NSString *prefix);
 - (void)applyFilters;
 - (void)lgInvalidateFilterContents;
 - (BOOL)lgFilterAttached;
+- (void)updateSpecular;
+- (void)invalidateSpecularCache;
+- (void)reapplyFilterForParameterReload;
 
 @property (nonatomic, assign) CGFloat lgBackdropZoom;
 @end

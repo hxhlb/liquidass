@@ -2,13 +2,37 @@
 #import <QuartzCore/QuartzCore.h>
 #import "LGLiveBackdropView.h"
 
-@interface LGAdjustableBlurView : UIView
+@protocol LGBackdropBlurProtocol <NSObject>
+@property (nonatomic, assign) CGFloat cornerRadius;
+@property (nonatomic, assign) CGFloat blurRadius;
+- (instancetype)initWithFrame:(CGRect)frame blurRadius:(CGFloat)radius;
+- (void)setBlurRadius:(CGFloat)blurRadius;
+- (void)setCornerRadius:(CGFloat)cornerRadius;
+@end
+
+@interface LGAdjustableBlurView : UIView <LGBackdropBlurProtocol>
 @property (nonatomic, assign) CGFloat cornerRadius;
 @property (nonatomic, assign) CGFloat blurRadius;
 @property (nonatomic, assign) CGFloat qualityScale;
 @property (nonatomic, assign) BOOL capturesAppIcon;
 - (instancetype)initWithFrame:(CGRect)frame blurRadius:(CGFloat)radius;
 - (void)applyFilters;
+@end
+
+@interface LGSaturatedBlurView : UIView <LGBackdropBlurProtocol>
+@property (nonatomic, assign) CGFloat cornerRadius;
+@property (nonatomic, assign) CGFloat blurRadius;
+- (instancetype)initWithFrame:(CGRect)frame blurRadius:(CGFloat)radius;
+- (void)applyFilters;
+@end
+
+@interface LGFrostedHazeBlurView : LGAdjustableBlurView
+@end
+
+@interface LGFractionalMaterialBlurView : UIView <LGBackdropBlurProtocol>
+@property (nonatomic, assign) CGFloat cornerRadius;
+@property (nonatomic, assign) CGFloat blurRadius;
+- (instancetype)initWithFrame:(CGRect)frame blurRadius:(CGFloat)radius;
 @end
 
 @interface LGSpecularHighlightView : UIView
@@ -22,12 +46,9 @@
 @interface LGButtonView : UIControl
 
 @property (nonatomic, strong) UIView *backgroundContainer;
-@property (nonatomic, strong) LGAdjustableBlurView *blurView;
 @property (nonatomic, strong) LGLiveBackdropView *lgView;
 @property (nonatomic, strong) UIView *darkTintView;
 @property (nonatomic, strong) UIImageView *innerGlowView;
-@property (nonatomic, strong) CAGradientLayer *specularRimLayer;
-@property (nonatomic, strong) CAShapeLayer *specularMaskLayer;
 @property (nonatomic, strong) UIImageView *glyphImageView;
 @property (nonatomic, strong) UILabel *titleLabel;
 
@@ -60,4 +81,3 @@
 
 @interface LGLiquidBlockerGesture : UIPanGestureRecognizer <UIGestureRecognizerDelegate>
 @end
-

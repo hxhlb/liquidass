@@ -2,6 +2,7 @@
 #import "LGPRootListController.h"
 #import "LGPrefsLiquidSlider.h"
 #import "LGPrefsLiquidSwitch.h"
+#import "LGPrefsSurfaceCatalog.h"
 #import "../Shared/LGSharedSupport.h"
 #import "../Shared/LGHostRegistry.h"
 #import <notify.h>
@@ -38,14 +39,19 @@ static NSArray<NSString *> *LGExportablePreferenceKeys(void) {
     NSArray<NSArray<NSDictionary *> *> *sources = @[
         LGAllSurfaceItems(),
         LGMoreOptionsItems(),
+        LGCustomViewsItems(),
         LGPrefsSettingsItems()
     ];
     for (NSArray<NSDictionary *> *items in sources) {
         for (NSDictionary *item in items) {
             NSString *key = item[@"key"];
             if (key.length) [orderedKeys addObject:key];
+            for (NSString *additionalKey in item[@"keys"] ?: @[]) {
+                if (additionalKey.length) [orderedKeys addObject:additionalKey];
+            }
         }
     }
+    [orderedKeys addObjectsFromArray:LGAllCustomViewPreferenceKeys()];
     return orderedKeys.array;
 }
 
@@ -481,20 +487,56 @@ static NSDictionary *LGGlassSpecularSetting(NSString *key, CGFloat fallback, CGF
 static const CGFloat kLGUniversalQualityMax = 1.0f;
 static const CGFloat kLGCoverSheetCornerRadiusPoints = 64.0f;
 
-NSArray<NSDictionary *> *LGRendererItemsForHostPrefix(NSString *prefix) {
-    const LGHostDefinition *host = LGHostDefinitionForPreferencePrefix(prefix.UTF8String);
+static BOOL LGDockUsesHomeButtonBorderByDefault(void) {
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class] ||
+            scene.activationState != UISceneActivationStateForegroundActive) continue;
+        for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+            if (!window.isKeyWindow) continue;
+            return window.safeAreaInsets.bottom <= 0.0;
+        }
+    }
+    return UIScreen.mainScreen.bounds.size.height <= 736.0;
+}
+
+static NSArray<NSDictionary *> *LGRendererItemsForHostAndPreferencePrefix(
+    NSString *hostPrefix, NSString *preferencePrefix) {
+    const LGHostDefinition *host = LGHostDefinitionForPreferencePrefix(hostPrefix.UTF8String);
     if (!host) return @[];
     NSString *(^key)(NSString *) = ^NSString *(NSString *field) {
-        return [prefix stringByAppendingFormat:@".%@", field];
+        return [preferencePrefix stringByAppendingFormat:@".%@", field];
     };
     NSString *lightTint = [NSString stringWithUTF8String:host->lightTintHex];
     NSString *darkTint = [NSString stringWithUTF8String:host->darkTintHex];
     CGFloat dispersionMax = LGHostIdentifierForDefinition(host) == LGHostIdentifierCoverSheet
         ? kLGUniversalDispersionMax : 2.0f;
+    CGFloat specularDefault = host->specularOpacity;
+    if ([hostPrefix isEqualToString:@"Dock"] && LGDockUsesHomeButtonBorderByDefault())
+        specularDefault = 0.0;
     CGFloat bezelWidthDefault = host->bezelWidthPoints;
-    BOOL enabledByDefault = ![prefix isEqualToString:@"AppIcons"];
+    BOOL enabledByDefault = ![hostPrefix isEqualToString:@"AppIcons"];
+    BOOL customScaleEnabledByDefault =
+        [hostPrefix isEqualToString:@"Clock"] ||
+        [hostPrefix isEqualToString:@"CoverSheet"] ||
+        [hostPrefix isEqualToString:@"TabBar"] ||
+        [hostPrefix isEqualToString:@"TabBarSelection"] ||
+        [hostPrefix hasPrefix:@"Prefs"];
+    CGFloat customScaleDefault = [hostPrefix hasPrefix:@"Prefs"] ? 1.50 : 1.00;
     NSMutableArray<NSDictionary *> *items = [NSMutableArray arrayWithArray:@[
         LGGlassEnabledSetting(key(@"Enabled"), enabledByDefault),
+        @{
+            @"type": @"scale_override",
+            @"key": key(@"CustomScale"),
+            @"toggle_key": key(@"CustomScaleEnabled"),
+            @"keys": @[key(@"CustomScaleEnabled")],
+            @"title": LGLocalized(@"prefs.control.force_custom_scale"),
+            @"subtitle": LGLocalized(@"prefs.subtitle.force_custom_scale"),
+            @"default": @(customScaleDefault),
+            @"toggle_default": @(customScaleEnabledByDefault),
+            @"min": @0.10,
+            @"max": @1.50,
+            @"decimals": @2,
+        },
         LGSliderSetting(key(@"BezelWidth"), LGLocalized(@"prefs.control.bezel_width"),
                         LGLocalized(@"prefs.subtitle.bezel_width"),
                         bezelWidthDefault, 0.0, 80.0, 1),
@@ -509,10 +551,10 @@ NSArray<NSDictionary *> *LGRendererItemsForHostPrefix(NSString *prefix) {
                         LGLocalized(@"prefs.control.dispersion_strength"),
                         LGLocalized(@"prefs.subtitle.dispersion_strength"),
                         host->dispersionStrength, 1.0, dispersionMax, 1),
-        LGGlassSpecularSetting(key(@"SpecularOpacity"), host->specularOpacity, 0.0, 1.0, 2),
+        LGGlassSpecularSetting(key(@"SpecularOpacity"), specularDefault, 0.0, 1.0, 2),
         LGGlassBlurSetting(key(@"Blur"), host->blur, 0.0, 50.0, 1),
     ]];
-    if (![prefix isEqualToString:@"AssistiveTouch"]) {
+    if (![hostPrefix isEqualToString:@"AssistiveTouch"]) {
         [items addObject:@{
             @"type": @"color", @"key": key(@"LightTintColor"),
             @"title": LGLocalized(@"prefs.control.light_tint_color"),
@@ -524,7 +566,7 @@ NSArray<NSDictionary *> *LGRendererItemsForHostPrefix(NSString *prefix) {
             @"subtitle": LGLocalized(@"prefs.subtitle.dark_tint_color"), @"default": darkTint
         }];
     }
-    if ([prefix isEqualToString:@"CoverSheet"]) {
+    if ([hostPrefix isEqualToString:@"CoverSheet"]) {
         [items insertObject:LGSliderSetting(key(@"CornerRadius"),
                                             LGLocalized(@"prefs.control.corner_radius"),
                                             LGLocalized(@"prefs.subtitle.corner_radius"),
@@ -533,7 +575,7 @@ NSArray<NSDictionary *> *LGRendererItemsForHostPrefix(NSString *prefix) {
                                             0.0, 200.0, 1)
                       atIndex:2];
     }
-    if ([prefix isEqualToString:@"Notification"]) {
+    if ([hostPrefix isEqualToString:@"Notification"]) {
         [items addObject:LGSettingControlledByKey(
             LGMenuSetting(@"Notification.LabelColor",
                           LGLocalized(@"prefs.notification.label_color.title"),
@@ -546,6 +588,10 @@ NSArray<NSDictionary *> *LGRendererItemsForHostPrefix(NSString *prefix) {
             @"Notification.Enabled", @YES)];
     }
     return [items copy];
+}
+
+NSArray<NSDictionary *> *LGRendererItemsForHostPrefix(NSString *prefix) {
+    return LGRendererItemsForHostAndPreferencePrefix(prefix, prefix);
 }
 
 BOOL LGPrefsItemIsVisible(NSDictionary *item) {
@@ -592,15 +638,30 @@ static NSDictionary *LGGlassRefractionSetting(NSString *key, CGFloat fallback, C
 }
 
 static NSDictionary *LGGlassSpecularSetting(NSString *key, CGFloat fallback, CGFloat min, CGFloat max, NSInteger decimals) {
-    (void)fallback; (void)min; (void)max; (void)decimals;
+    (void)min; (void)max; (void)decimals;
 
     NSString *enabledKey = [key hasSuffix:@".SpecularOpacity"]
         ? [[key substringToIndex:key.length - @".SpecularOpacity".length]
            stringByAppendingString:@".SpecularEnabled"]
         : key;
-    return LGSwitchSetting(enabledKey,
-                           LGLocalized(@"prefs.control.specular"),
-                           LGLocalized(@"prefs.subtitle.specular"), YES);
+    NSString *modeKey = [enabledKey hasSuffix:@".SpecularEnabled"]
+        ? [[enabledKey substringToIndex:enabledKey.length - @".SpecularEnabled".length]
+           stringByAppendingString:@".SpecularMode"]
+        : [enabledKey stringByAppendingString:@".Mode"];
+    return @{
+        @"type": @"segmented",
+        @"key": modeKey,
+        @"keys": @[enabledKey],
+        @"legacy_key": enabledKey,
+        @"title": LGLocalized(@"prefs.control.specular"),
+        @"subtitle": LGLocalized(@"prefs.subtitle.specular"),
+        @"default": fallback <= 0.001 ? @"border" : @"glass",
+        @"choices": @[
+            @{ @"value": @"none", @"title": LGLocalized(@"prefs.specular.none") },
+            @{ @"value": @"border", @"title": LGLocalized(@"prefs.specular.border") },
+            @{ @"value": @"glass", @"title": LGLocalized(@"prefs.specular.glass") },
+        ],
+    };
 }
 
 NSDictionary *LGGlassQualitySetting(NSString *key, CGFloat fallback, CGFloat min, CGFloat max, NSInteger decimals) {
@@ -611,6 +672,13 @@ NSDictionary *LGGlassQualitySetting(NSString *key, CGFloat fallback, CGFloat min
                            min,
                            MIN(max, kLGUniversalQualityMax),
                            decimals);
+}
+
+NSDictionary *LGScaleBudgetSetting(void) {
+    return LGSliderSetting(@"Global.ScaleBudget",
+                           LGLocalized(@"prefs.control.scale_budget"),
+                           LGLocalized(@"prefs.subtitle.scale_budget"),
+                           8000.0, 1000.0, 32000.0, 0);
 }
 
 NSString *LGFormatSliderValue(CGFloat value, NSInteger decimals) {
@@ -854,6 +922,31 @@ NSArray<NSDictionary *> *LGTabBarItems(void) {
     ]);
 }
 
+NSArray<NSDictionary *> *LGNavigationBarItems(void) {
+    return LGJoinItemGroups(@[
+        @[
+            LGKeyedNavSetting(@"NavigationBar.Exclusions",
+                              LGLocalized(@"prefs.navigation_bar.exclusions.title"),
+                              LGLocalized(@"prefs.navigation_bar.exclusions.subtitle"),
+                              @"editNavigationBarExclusions"),
+        ],
+        @[
+            LGSectionSetting(LGLocalized(@"prefs.navigation_bar.top_fade.section"), nil),
+            LGSettingControlledByKey(
+                LGSwitchSetting(@"NavigationBar.TopFade.Enabled",
+                                LGLocalized(@"prefs.navigation_bar.top_fade.title"),
+                                LGLocalized(@"prefs.navigation_bar.top_fade.subtitle"), YES),
+                @"SettingsControls.Enabled", @YES),
+        ],
+        @[
+            LGSectionSetting(LGLocalized(@"prefs.navigation_bar.text_buttons.section"),
+                             LGLocalized(@"prefs.navigation_bar.text_buttons.subtitle")),
+        ],
+        LGSettingsControlledByKey(LGRendererItemsForHostPrefix(@"PrefsButton"),
+                                  @"SettingsControls.Enabled", @YES),
+    ]);
+}
+
 NSArray<NSDictionary *> *LGLockscreenItems(void) {
     return LGJoinItemGroups(@[
         @[
@@ -927,7 +1020,7 @@ NSArray<NSDictionary *> *LGHomescreenItems(void) {
 NSArray<NSDictionary *> *LGAllSurfaceItems(void) {
     NSMutableArray<NSDictionary *> *all = [NSMutableArray array];
     [all addObject:LGSwitchSetting(@"Global.Enabled", LGLocalized(@"prefs.control.enabled"), LGLocalized(@"prefs.subtitle.global_enabled"), NO)];
-    [all addObject:LGGlassQualitySetting(@"Global.Quality", 1.0, 0.1, 1.0, 2)];
+    [all addObject:LGScaleBudgetSetting()];
     [all addObjectsFromArray:LGHomescreenItems()];
     [all addObjectsFromArray:LGLockscreenItems()];
     [all addObjectsFromArray:LGAppLibraryItems()];
@@ -947,29 +1040,57 @@ NSArray<NSDictionary *> *LGPrefsSettingsItems(void) {
 }
 
 NSArray<NSDictionary *> *LGGlobalControlsItems(void) {
-    return @[
+    NSMutableArray<NSDictionary *> *items = [NSMutableArray arrayWithObject:
         LGKeyedNavSetting(@"GlobalControls.Exclusions",
                           LGLocalized(@"prefs.global_controls.exclusions.title"),
                           LGLocalized(@"prefs.global_controls.exclusions.subtitle"),
-                          @"editGlobalControlsExclusions"),
-        LGSectionSetting(LGLocalized(@"prefs.global_controls.section.title"),
-                         LGLocalized(@"prefs.global_controls.section.subtitle")),
-        LGSwitchSetting(@"GlobalControls.Switches.Enabled",
-                        LGLocalized(@"prefs.global_controls.switches.title"),
-                        LGLocalized(@"prefs.global_controls.switches.subtitle"), YES),
-        LGSwitchSetting(@"GlobalControls.Sliders.Enabled",
-                        LGLocalized(@"prefs.global_controls.sliders.title"),
-                        LGLocalized(@"prefs.global_controls.sliders.subtitle"), YES),
-        LGSwitchSetting(@"GlobalControls.Segmented.Enabled",
-                        LGLocalized(@"prefs.global_controls.segmented.title"),
-                        LGLocalized(@"prefs.global_controls.segmented.subtitle"), YES),
+                          @"editGlobalControlsExclusions")];
+    NSArray<NSArray<NSString *> *> *groups = @[
+        @[@"GlobalControls.Switches.Enabled", @"PrefsSwitch",
+          LGLocalized(@"prefs.global_controls.switches.title"),
+          LGLocalized(@"prefs.global_controls.switches.subtitle")],
+        @[@"GlobalControls.Sliders.Enabled", @"PrefsSlider",
+          LGLocalized(@"prefs.global_controls.sliders.title"),
+          LGLocalized(@"prefs.global_controls.sliders.subtitle")],
+        @[@"GlobalControls.Segmented.Enabled", @"PrefsSegment",
+          LGLocalized(@"prefs.global_controls.segmented.title"),
+          LGLocalized(@"prefs.global_controls.segmented.subtitle")],
     ];
+    for (NSArray<NSString *> *group in groups) {
+        [items addObject:LGSectionSetting(group[2], group[3])];
+        NSMutableDictionary *enabled = [LGGlassEnabledSetting(group[0], YES) mutableCopy];
+        enabled[@"subtitle"] = group[3];
+        [items addObject:enabled.copy];
+        NSArray<NSDictionary *> *rendererItems = LGRendererItemsForHostPrefix(group[1]);
+        if (rendererItems.count > 1) {
+            [items addObjectsFromArray:[rendererItems subarrayWithRange:
+                NSMakeRange(1, rendererItems.count - 1)]];
+        }
+    }
+    return items.copy;
 }
 
 NSArray<NSDictionary *> *LGMoreOptionsItems(void) {
     NSMutableArray<NSDictionary *> *items = [NSMutableArray arrayWithArray:@[
         LGSectionSetting(LGLocalized(@"prefs.misc.options_section.title"),
                          LGLocalized(@"prefs.misc.options_section.subtitle"))]];
+    [items addObject:@{
+        @"type": @"nav",
+        @"title": LGLocalized(@"prefs.custom_views.title"),
+        @"subtitle": LGLocalized(@"prefs.custom_views.subtitle"),
+        @"surface_identifier": LGPrefsSurfaceCustomViews,
+    }];
+    [items addObject:LGMenuSetting(@"Renderer.BackdropBlurMethod",
+                                  LGLocalized(@"prefs.control.backdrop_blur_method"),
+                                  LGLocalized(@"prefs.subtitle.backdrop_blur_method"),
+                                  @"adjustable",
+                                  @[
+                                      @{ @"value": @"adjustable", @"title": LGLocalized(@"prefs.blur_method.adjustable") },
+                                      @{ @"value": @"saturated", @"title": LGLocalized(@"prefs.blur_method.saturated") },
+                                      @{ @"value": @"frosted", @"title": LGLocalized(@"prefs.blur_method.frosted") },
+                                      @{ @"value": @"material", @"title": LGLocalized(@"prefs.blur_method.material") },
+                                      @{ @"value": @"none", @"title": LGLocalized(@"prefs.blur_method.none") },
+                                  ])];
     [items addObject:LGSliderSetting(@"Renderer.FresnelGlareStrength",
                                      LGLocalized(@"prefs.control.fresnel_glare"),
                                      LGLocalized(@"prefs.subtitle.fresnel_glare"),
@@ -981,19 +1102,6 @@ NSArray<NSDictionary *> *LGMoreOptionsItems(void) {
                         YES),
         @"Global.Enabled",
         @NO)];
-    [items addObject:LGSectionSetting(LGLocalized(@"prefs.section.motion_highlights.title"),
-                                      LGLocalized(@"prefs.section.motion_highlights.subtitle"))];
-    [items addObject:LGSwitchSetting(@"Specular.Motion.Enabled",
-                                     LGLocalized(@"prefs.control.motion_highlights"),
-                                     LGLocalized(@"prefs.subtitle.motion_highlights"),
-                                     NO)];
-    [items addObject:LGSliderSetting(@"Specular.Motion.Sensitivity",
-                                     LGLocalized(@"prefs.control.motion_highlights_sensitivity"),
-                                     LGLocalized(@"prefs.subtitle.motion_highlights_sensitivity"),
-                                     2.0,
-                                     0.0,
-                                     8.0,
-                                     2)];
     [items addObject:LGSectionSetting(@"", @"")];
     [items addObject:LGSectionSetting(LGLocalized(@"prefs.misc.import_export_section.title"),
                                       LGLocalized(@"prefs.misc.import_export_section.subtitle"))];
@@ -1013,6 +1121,156 @@ NSArray<NSDictionary *> *LGMoreOptionsItems(void) {
                                   @"exportLogs")];
 
     return [items copy];
+}
+
+NSArray<NSDictionary *> *LGCustomViewsItems(void) {
+    NSMutableArray<NSDictionary *> *items = [NSMutableArray arrayWithArray:@[
+        LGSectionSetting(LGLocalized(@"prefs.custom_views.general.title"),
+                         LGLocalized(@"prefs.custom_views.general.subtitle")),
+        LGSwitchSetting(@"CustomViews.Enabled", LGLocalized(@"prefs.control.enabled"),
+                        LGLocalized(@"prefs.custom_views.enabled.subtitle"), NO),
+        LGSectionSetting(@"", @""),
+        @{ @"type": @"nav", @"title": LGLocalized(@"prefs.custom_views.add_rule.title"),
+           @"subtitle": LGLocalized(@"prefs.custom_views.add_rule.subtitle"),
+           @"action": @"addCustomViewRule:" },
+    ]];
+    NSArray<NSString *> *ruleIDs = LGCustomViewRuleIDs();
+    NSUInteger visibleIndex = 0;
+    for (NSString *ruleID in ruleIDs) {
+        NSString *prefix = [@"CustomViews.Rule." stringByAppendingString:ruleID];
+        if ([LGReadPreferenceObject([prefix stringByAppendingString:@".APIHiddenFromPrefs"], @NO) boolValue]) continue;
+        visibleIndex++;
+        NSString *name = LGReadPreferenceObject([prefix stringByAppendingString:@".Name"], @"");
+        NSString *target = LGReadPreferenceObject([prefix stringByAppendingString:@".TargetClass"], @"");
+        [items addObject:@{
+            @"type": @"nav",
+            @"title": name.length ? name : [NSString stringWithFormat:LGLocalized(@"prefs.custom_views.rule_format"), (long)visibleIndex],
+            @"subtitle": target.length ? target : LGLocalized(@"prefs.custom_views.rule_empty.subtitle"),
+            @"action": @"openCustomViewRule:",
+            @"rule_id": ruleID,
+        }];
+    }
+    return items;
+}
+
+NSArray<NSString *> *LGCustomViewRuleIDs(void) {
+    id stored = LGReadPreferenceObject(@"CustomViews.RuleIDs", @[]);
+    if (![stored isKindOfClass:NSArray.class]) return @[];
+    NSMutableOrderedSet<NSString *> *ids = [NSMutableOrderedSet orderedSet];
+    for (id value in stored) {
+        if (![value isKindOfClass:NSString.class]) continue;
+        NSString *ruleID = [value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if (ruleID.length) [ids addObject:ruleID];
+    }
+    return ids.array;
+}
+
+static NSArray<NSString *> *LGCustomViewRuleKeys(NSString *ruleID) {
+    NSString *prefix = [@"CustomViews.Rule." stringByAppendingString:ruleID ?: @""];
+    NSArray<NSString *> *suffixes = @[
+        @"Name", @"Enabled", @"TargetClass", @"ParentClass", @"GrandparentClass",
+        @"AncestorClass", @"ChildClass", @"GrandchildClass", @"DescendantClass",
+        @"SiblingClass", @"ClearBackground", @"BezelWidth",
+        @"GlassThickness", @"RefractionScale", @"RefractiveIndex",
+        @"DispersionEnabled", @"DispersionStrength", @"SpecularEnabled", @"SpecularMode",
+        @"SpecularOpacity", @"Blur", @"CustomScaleEnabled", @"CustomScale",
+        @"LightTintColor", @"DarkTintColor", @"APIManaged", @"APINonRemovable",
+        @"APIHiddenFromPrefs", @"APIDefaults", @"APIUserOverrides"
+    ];
+    NSMutableArray<NSString *> *keys = [NSMutableArray arrayWithCapacity:suffixes.count];
+    for (NSString *suffix in suffixes)
+        [keys addObject:[NSString stringWithFormat:@"%@.%@", prefix, suffix]];
+    return keys;
+}
+
+NSString *LGCreateCustomViewRule(void) {
+    NSString *ruleID = NSUUID.UUID.UUIDString.lowercaseString;
+    NSMutableArray<NSString *> *ids = [LGCustomViewRuleIDs() mutableCopy];
+    [ids addObject:ruleID];
+    LGWritePreferenceObject(@"CustomViews.RuleIDs", ids);
+    NSString *prefix = [@"CustomViews.Rule." stringByAppendingString:ruleID];
+    LGWritePreferenceObject([prefix stringByAppendingString:@".Enabled"], @YES);
+    LGWritePreferenceObject([prefix stringByAppendingString:@".Name"],
+                            [NSString stringWithFormat:LGLocalized(@"prefs.custom_views.rule_format"), (long)ids.count]);
+    return ruleID;
+}
+
+void LGDeleteCustomViewRule(NSString *ruleID) {
+    if (!ruleID.length) return;
+    NSString *nonRemovableKey = [NSString stringWithFormat:@"CustomViews.Rule.%@.APINonRemovable", ruleID];
+    if ([LGReadPreferenceObject(nonRemovableKey, @NO) boolValue]) return;
+    NSMutableArray<NSString *> *ids = [LGCustomViewRuleIDs() mutableCopy];
+    [ids removeObject:ruleID];
+    LGWritePreferenceObject(@"CustomViews.RuleIDs", ids);
+    for (NSString *key in LGCustomViewRuleKeys(ruleID)) LGRemovePreference(key);
+    LGRemovePreference([[@"CustomViews.Rule." stringByAppendingString:ruleID]
+        stringByAppendingString:@".CornerRadius"]);
+}
+
+NSArray<NSString *> *LGAllCustomViewPreferenceKeys(void) {
+    NSMutableArray<NSString *> *keys = [NSMutableArray arrayWithObjects:
+        @"CustomViews.Enabled", @"CustomViews.RuleIDs", nil];
+    for (NSString *ruleID in LGCustomViewRuleIDs())
+        [keys addObjectsFromArray:LGCustomViewRuleKeys(ruleID)];
+    return keys;
+}
+
+NSArray<NSDictionary *> *LGCustomViewRuleItems(NSString *ruleID) {
+    NSString *prefix = [@"CustomViews.Rule." stringByAppendingString:ruleID ?: @""];
+    NSString *(^key)(NSString *) = ^NSString *(NSString *suffix) {
+        return [NSString stringWithFormat:@"%@.%@", prefix, suffix];
+    };
+    NSMutableArray<NSDictionary *> *items = [NSMutableArray arrayWithArray:@[
+        @{ @"type": @"string", @"key": key(@"Name"),
+           @"title": LGLocalized(@"prefs.custom_views.rule_name.title"),
+           @"subtitle": LGLocalized(@"prefs.custom_views.rule_name.subtitle"),
+           @"default": @"", @"placeholder": LGLocalized(@"prefs.custom_views.rule_name.placeholder") },
+        LGSwitchSetting(key(@"Enabled"), LGLocalized(@"prefs.control.enabled"),
+                        LGLocalized(@"prefs.custom_views.rule_enabled.subtitle"), YES),
+        LGSectionSetting(LGLocalized(@"prefs.custom_views.class_filters.title"),
+                         LGLocalized(@"prefs.custom_views.class_filters.subtitle")),
+    ]];
+    NSArray<NSArray<NSString *> *> *fields = @[
+        @[@"TargetClass", @"prefs.custom_views.target_class.title", @"MTMaterialView"],
+        @[@"ParentClass", @"prefs.custom_views.parent_class.title", @""],
+        @[@"GrandparentClass", @"prefs.custom_views.grandparent_class.title", @""],
+        @[@"AncestorClass", @"prefs.custom_views.ancestor_class.title", @""],
+        @[@"ChildClass", @"prefs.custom_views.child_class.title", @""],
+        @[@"GrandchildClass", @"prefs.custom_views.grandchild_class.title", @""],
+        @[@"DescendantClass", @"prefs.custom_views.descendant_class.title", @""],
+        @[@"SiblingClass", @"prefs.custom_views.sibling_class.title", @""],
+    ];
+    for (NSArray<NSString *> *field in fields) {
+        [items addObject:@{
+            @"type": @"string", @"key": key(field[0]),
+            @"title": LGLocalized(field[1]), @"subtitle": @"",
+            @"default": @"", @"placeholder": field[2],
+        }];
+    }
+    [items addObjectsFromArray:@[
+        LGSwitchSetting(key(@"ClearBackground"),
+                        LGLocalized(@"prefs.custom_views.clear_background.title"),
+                        LGLocalized(@"prefs.custom_views.clear_background.subtitle"), YES),
+        LGSectionSetting(LGLocalized(@"prefs.custom_views.appearance.title"),
+                         LGLocalized(@"prefs.custom_views.appearance.subtitle")),
+    ]];
+    NSArray<NSDictionary *> *rendererItems =
+        LGRendererItemsForHostAndPreferencePrefix(@"CustomViews", prefix);
+    if (rendererItems.count > 1) {
+        NSArray<NSDictionary *> *sharedItems = [rendererItems subarrayWithRange:
+            NSMakeRange(1, rendererItems.count - 1)];
+        [items addObjectsFromArray:sharedItems];
+    }
+    NSString *nonRemovableKey = key(@"APINonRemovable");
+    if (![LGReadPreferenceObject(nonRemovableKey, @NO) boolValue]) {
+        [items addObjectsFromArray:@[
+            LGSectionSetting(@"", @""),
+            LGNavSetting(LGLocalized(@"prefs.custom_views.delete_rule.title"),
+                         LGLocalized(@"prefs.custom_views.delete_rule.subtitle"),
+                         @"deleteCustomViewRule"),
+        ]];
+    }
+    return items;
 }
 
 NSString *LGExportPreferencesJSONString(void) {

@@ -3,9 +3,7 @@
 #import "../Shared/LGLiveBackdropView.h"
 #import "../Shared/LGSharedSupport.h"
 #import "../Shared/LGFramework.h"
-#if !TARGET_OS_SIMULATOR
-#import <AltList/ATLApplicationListMultiSelectionController.h>
-#endif
+
 #import <Preferences/PSSpecifier.h>
 #import <notify.h>
 #import <objc/message.h>
@@ -1570,11 +1568,27 @@ static void LGPresentAppList(UIViewController *controller, NSString *key,
     [specifier setProperty:@YES forKey:@"includeIdentifiersInSearch"];
     [specifier setProperty:@YES forKey:@"showIdentifiersAsSubtitle"];
 
-    ATLApplicationListMultiSelectionController *list =
-        [ATLApplicationListMultiSelectionController new];
-    [list setSpecifier:specifier];
-    list.title = title;
-    [controller.navigationController pushViewController:list animated:YES];
+    Class altClass = NSClassFromString(@"ATLApplicationListMultiSelectionController");
+    if (!altClass) {
+        [[NSBundle bundleWithPath:@"/Library/PreferenceBundles/AltList.bundle"] load];
+        altClass = NSClassFromString(@"ATLApplicationListMultiSelectionController");
+    }
+    if (!altClass) {
+        [[NSBundle bundleWithPath:jbroot(@"/Library/PreferenceBundles/AltList.bundle")] load];
+        altClass = NSClassFromString(@"ATLApplicationListMultiSelectionController");
+    }
+    if (!altClass) {
+        [[NSBundle bundleWithPath:jbroot(@"/Library/Frameworks/AltList.framework")] load];
+        altClass = NSClassFromString(@"ATLApplicationListMultiSelectionController");
+    }
+    UIViewController *list = altClass ? [altClass new] : nil;
+    if (list) {
+        if ([list respondsToSelector:@selector(setSpecifier:)]) {
+            [list performSelector:@selector(setSpecifier:) withObject:specifier];
+        }
+        list.title = title;
+        [controller.navigationController pushViewController:list animated:YES];
+    }
 #endif
 }
 
@@ -1590,6 +1604,18 @@ void LGPresentTabBarAppList(UIViewController *controller) {
     LGPresentAppList(controller, @"TabBar.Exclusions",
                      LGLocalized(@"prefs.tab_bar.exclusions.title"),
                      @[@"com.zhiliaoapp.musically"]);
+}
+
+void LGPresentNavigationBarAppList(UIViewController *controller) {
+    id existing = LGReadPreferenceObject(@"NavigationBar.Exclusions",
+                                         LGReadPreferenceObject(@"GlobalControls.Exclusions", nil));
+    NSArray *defaults = [existing isKindOfClass:NSArray.class] ? existing : @[
+        @"ws.hbang.Terminal", @"com.tigisoftware.Filza",
+        @"com.zhiliaoapp.musically", @"com.hammerandchisel.discord",
+        @"com.spotify.client"
+    ];
+    LGPresentAppList(controller, @"NavigationBar.Exclusions",
+                     LGLocalized(@"prefs.navigation_bar.exclusions.title"), defaults);
 }
 
 void LGPresentPreferencesExport(UIViewController *controller) {

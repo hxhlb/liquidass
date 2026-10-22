@@ -23,6 +23,11 @@ static void *kLGControlledByEnabledDefaultsKey =
 static void *kLGScrollTopGlassViewKey = &kLGScrollTopGlassViewKey;
 static const CGFloat kLGGoToTopCornerRadiusRatio = 0.5;
 
+static NSString *LGCustomViewRuleName(NSString *ruleID) {
+    NSString *name = LGReadPreferenceObject([NSString stringWithFormat:@"CustomViews.Rule.%@.Name", ruleID], @"");
+    return name.length ? name : @"Rule";
+}
+
 static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
     return MIN(CGRectGetWidth(view.bounds), CGRectGetHeight(view.bounds)) * kLGGoToTopCornerRadiusRatio;
 }
@@ -63,6 +68,7 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
     BOOL _scrollTopButtonVisible;
     CGSize _lastBackdropLayoutSize;
     CFTimeInterval _lastFloatingGlassScrollRefreshTime;
+    UILabel *_heroTitleLabel;
 }
 
 - (void)updateVisibleValueControlledItemsAnimated:(BOOL)animated {
@@ -136,7 +142,13 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
 }
 
 - (void)reloadLocalizedContent {
-    if (LGPrefsSurfaceIsKnown(_screenIdentifier)) {
+    if ([_screenIdentifier hasPrefix:@"CustomViewRule:"]) {
+        NSString *ruleID = [_screenIdentifier substringFromIndex:@"CustomViewRule:".length];
+        _screenTitle = [LGCustomViewRuleName(ruleID) copy];
+        _screenSubtitle = nil;
+        _accentColor = UIColor.systemPurpleColor;
+        _items = [LGCustomViewRuleItems(ruleID) copy];
+    } else if (LGPrefsSurfaceIsKnown(_screenIdentifier)) {
         _screenTitle = [LGPrefsSurfaceTitle(_screenIdentifier) copy];
         _screenSubtitle = [LGPrefsSurfaceSubtitle(_screenIdentifier) copy];
         _accentColor = LGPrefsSurfaceTintColor(_screenIdentifier);
@@ -196,6 +208,11 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self applyNavigationBarStyle];
+    if ([_screenIdentifier isEqualToString:LGPrefsSurfaceCustomViews] ||
+        [_screenIdentifier hasPrefix:@"CustomViewRule:"]) {
+        [self reloadLocalizedContent];
+        [self reloadVisibleSettings];
+    }
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -332,6 +349,8 @@ static void LGRestartAssistiveTouchDaemon(void) {
 }
 
 - (NSArray<NSString *> *)currentPreferenceKeys {
+    if ([_screenIdentifier isEqualToString:LGPrefsSurfaceCustomViews])
+        return LGAllCustomViewPreferenceKeys();
     NSMutableOrderedSet<NSString *> *keys = [NSMutableOrderedSet orderedSet];
     [self addPreferenceKeysFromItems:_items toOrderedSet:keys];
     return keys.array;
@@ -373,6 +392,49 @@ static void LGRestartAssistiveTouchDaemon(void) {
 
 - (void)exportLogs {
     LGPresentDiagnosticsExport(self);
+}
+
+- (void)openCustomViewRule:(UIButton *)sender {
+    NSDictionary *item = objc_getAssociatedObject(sender, kLGPanelItemKey);
+    NSString *ruleID = item[@"rule_id"];
+    if (!ruleID.length) return;
+    LGPSurfaceController *controller = [[LGPSurfaceController alloc]
+        initWithTitle:LGCustomViewRuleName(ruleID)
+             subtitle:nil
+            tintColor:UIColor.systemPurpleColor
+           identifier:[@"CustomViewRule:" stringByAppendingString:ruleID]
+                items:LGCustomViewRuleItems(ruleID)];
+    [self.navigationController pushViewController:controller animated:YES];
+}
+
+- (void)addCustomViewRule:(UIButton *)sender {
+    (void)sender;
+    NSString *ruleID = LGCreateCustomViewRule();
+    [self reloadLocalizedContent];
+    [self reloadVisibleSettings];
+    if (!ruleID.length) return;
+    LGPSurfaceController *controller = [[LGPSurfaceController alloc]
+        initWithTitle:LGCustomViewRuleName(ruleID)
+             subtitle:nil
+            tintColor:UIColor.systemPurpleColor
+           identifier:[@"CustomViewRule:" stringByAppendingString:ruleID]
+                items:LGCustomViewRuleItems(ruleID)];
+    [self.navigationController pushViewController:controller animated:YES];
+}
+
+- (void)deleteCustomViewRule {
+    if (![_screenIdentifier hasPrefix:@"CustomViewRule:"]) return;
+    NSString *ruleID = [_screenIdentifier substringFromIndex:@"CustomViewRule:".length];
+    __weak typeof(self) weakSelf = self;
+    LGPresentConfirmationSheet(self,
+                               LGLocalized(@"prefs.custom_views.delete_rule.title"),
+                               LGLocalized(@"prefs.custom_views.delete_rule.confirm"),
+                               LGLocalized(@"prefs.button.cancel"),
+                               LGLocalized(@"prefs.custom_views.delete_rule.title"),
+                               YES, ^{
+        LGDeleteCustomViewRule(ruleID);
+        [weakSelf.navigationController popViewControllerAnimated:YES];
+    });
 }
 
 - (void)importPreferences {
@@ -420,6 +482,10 @@ static void LGRestartAssistiveTouchDaemon(void) {
 
 - (void)editTabBarExclusions {
     LGPresentTabBarAppList(self);
+}
+
+- (void)editNavigationBarExclusions {
+    LGPresentNavigationBarAppList(self);
 }
 
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
@@ -809,6 +875,7 @@ static void LGRestartAssistiveTouchDaemon(void) {
     titleLabel.text = _screenTitle;
     titleLabel.font = [UIFont systemFontOfSize:30.0 weight:UIFontWeightBold];
     titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    _heroTitleLabel = titleLabel;
 
     UILabel *subtitleLabel = nil;
     if (_screenSubtitle.length) {
@@ -1374,6 +1441,67 @@ static void LGRestartAssistiveTouchDaemon(void) {
     return body;
 }
 
+- (NSString *)segmentedSelectionValueForItem:(NSDictionary *)item {
+    id stored = LGReadPreferenceObject(item[@"key"], nil);
+    if ([stored isKindOfClass:NSString.class]) return stored;
+
+    NSString *legacyKey = item[@"legacy_key"];
+    id legacy = legacyKey.length ? LGReadPreferenceObject(legacyKey, nil) : nil;
+    if ([legacy isKindOfClass:NSNumber.class] && ![legacy boolValue]) return @"none";
+    return item[@"default"] ?: @"";
+}
+
+- (UIView *)segmentedControlBodyForItem:(NSDictionary *)item titleLabel:(UILabel *)titleLabel {
+    UIView *body = [[UIView alloc] initWithFrame:CGRectZero];
+    UIStackView *stack = [[UIStackView alloc] initWithFrame:CGRectZero];
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.spacing = 9.0;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [body addSubview:stack];
+
+    NSArray<NSDictionary *> *choices = item[@"choices"] ?: @[];
+    NSMutableArray<NSString *> *titles = [NSMutableArray arrayWithCapacity:choices.count];
+    for (NSDictionary *choice in choices) [titles addObject:choice[@"title"] ?: @""];
+    UISegmentedControl *segmented = [[UISegmentedControl alloc] initWithItems:titles];
+    segmented.accessibilityIdentifier = item[@"key"];
+
+    NSString *currentValue = [self segmentedSelectionValueForItem:item];
+    for (NSUInteger index = 0; index < choices.count; index++) {
+        if ([choices[index][@"value"] isEqual:currentValue]) {
+            segmented.selectedSegmentIndex = (NSInteger)index;
+            break;
+        }
+    }
+
+    [segmented addAction:[UIAction actionWithHandler:^(__kindof UIAction *action) {
+        UISegmentedControl *sender = (UISegmentedControl *)action.sender;
+        NSInteger index = sender.selectedSegmentIndex;
+        if (index < 0 || index >= (NSInteger)choices.count) return;
+        NSString *value = choices[(NSUInteger)index][@"value"];
+        if (!value.length) return;
+        LGWritePreferenceObject(item[@"key"], value);
+        CFPreferencesSetAppValue((__bridge CFStringRef)item[@"key"],
+                                 (__bridge CFPropertyListRef)value,
+                                 (__bridge CFStringRef)LGPrefsDomain);
+        CFPreferencesAppSynchronize((__bridge CFStringRef)LGPrefsDomain);
+        notify_post(LGPrefsChangedNotificationCString);
+    }] forControlEvents:UIControlEventValueChanged];
+
+    [stack addArrangedSubview:titleLabel];
+    [stack addArrangedSubview:segmented];
+    NSString *subtitle = item[@"subtitle"];
+    if (subtitle.length) {
+        [stack addArrangedSubview:[self controlSubtitleLabelWithText:subtitle]];
+    }
+    [NSLayoutConstraint activateConstraints:@[
+        [stack.topAnchor constraintEqualToAnchor:body.topAnchor constant:13.0],
+        [stack.leadingAnchor constraintEqualToAnchor:body.leadingAnchor constant:14.0],
+        [stack.trailingAnchor constraintEqualToAnchor:body.trailingAnchor constant:-14.0],
+        [stack.bottomAnchor constraintEqualToAnchor:body.bottomAnchor constant:-13.0],
+    ]];
+    return body;
+}
+
 - (UIView *)switchControlBodyForItem:(NSDictionary *)item titleLabel:(UILabel *)titleLabel {
     UIView *body = [[UIView alloc] initWithFrame:CGRectZero];
     UIStackView *stack = [[UIStackView alloc] initWithFrame:CGRectZero];
@@ -1453,6 +1581,76 @@ static void LGRestartAssistiveTouchDaemon(void) {
     }] forControlEvents:commitEvents];
 
     [stack addArrangedSubview:headerRow];
+    [stack addArrangedSubview:slider];
+    [NSLayoutConstraint activateConstraints:@[
+        [stack.topAnchor constraintEqualToAnchor:body.topAnchor constant:13.0],
+        [stack.leadingAnchor constraintEqualToAnchor:body.leadingAnchor constant:14.0],
+        [stack.trailingAnchor constraintEqualToAnchor:body.trailingAnchor constant:-14.0],
+        [stack.bottomAnchor constraintEqualToAnchor:body.bottomAnchor constant:-13.0],
+    ]];
+    return body;
+}
+
+- (UIView *)scaleOverrideControlBodyForItem:(NSDictionary *)item titleLabel:(UILabel *)titleLabel {
+    UIView *body = [[UIView alloc] initWithFrame:CGRectZero];
+    UIStackView *stack = [[UIStackView alloc] initWithFrame:CGRectZero];
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.spacing = 9.0;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [body addSubview:stack];
+
+    NSNumber *stored = LGReadPreference(item[@"key"], item[@"default"]);
+    CGFloat minValue = [item[@"min"] doubleValue];
+    CGFloat maxValue = [item[@"max"] doubleValue];
+    NSInteger decimals = [item[@"decimals"] integerValue];
+    NSString *subtitle = item[@"subtitle"];
+
+    UISlider *slider = [[LGPrefsSliderClass() alloc] initWithFrame:CGRectZero];
+    slider.minimumValue = minValue;
+    slider.maximumValue = maxValue;
+    slider.value = stored.doubleValue;
+    slider.minimumTrackTintColor = _accentColor;
+
+    UILabel *valueLabel = [self sliderValueLabelForStoredValue:stored
+                                                      decimals:decimals
+                                                          item:item
+                                                      subtitle:subtitle
+                                                      minValue:minValue
+                                                      maxValue:maxValue
+                                                        slider:slider];
+    UIButton *infoButton = [self sliderInfoButtonForItem:item
+                                                subtitle:subtitle
+                                                minValue:minValue
+                                                maxValue:maxValue
+                                                decimals:decimals];
+    NSMutableDictionary *toggleItem = [item mutableCopy];
+    toggleItem[@"key"] = item[@"toggle_key"];
+    toggleItem[@"default"] = item[@"toggle_default"];
+    UISwitch *toggle = [self configuredToggleForItem:toggleItem];
+
+    void (^applyEnabled)(BOOL) = ^(BOOL enabled) {
+        slider.enabled = enabled;
+        slider.alpha = enabled ? 1.0 : 0.35;
+        valueLabel.alpha = enabled ? 1.0 : 0.35;
+        valueLabel.userInteractionEnabled = enabled;
+    };
+    applyEnabled(toggle.isOn);
+    [toggle addAction:[UIAction actionWithHandler:^(__kindof UIAction *action) {
+        applyEnabled(((UISwitch *)action.sender).isOn);
+    }] forControlEvents:UIControlEventValueChanged];
+
+    [slider addAction:[UIAction actionWithHandler:^(__kindof UIAction *action) {
+        valueLabel.text = LGFormatSliderValue(((UISlider *)action.sender).value, decimals);
+    }] forControlEvents:UIControlEventValueChanged];
+    [slider addAction:[UIAction actionWithHandler:^(__kindof UIAction *action) {
+        CGFloat value = ((UISlider *)action.sender).value;
+        valueLabel.text = LGFormatSliderValue(value, decimals);
+        LGWritePreference(item[@"key"], @(value));
+    }] forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
+
+    [stack addArrangedSubview:[self controlHeaderRowWithTitleLabel:titleLabel
+                                                    accessoryViews:@[toggle, valueLabel, infoButton]
+                                                           spacing:8.0]];
     [stack addArrangedSubview:slider];
     [NSLayoutConstraint activateConstraints:@[
         [stack.topAnchor constraintEqualToAnchor:body.topAnchor constant:13.0],
@@ -1578,6 +1776,14 @@ static void LGRestartAssistiveTouchDaemon(void) {
             if (!text.length) text = fallback ?: @"";
             weakValueLabel.text = text;
             LGWritePreferenceObject(preferenceKey, text);
+            if ([strongSelf->_screenIdentifier hasPrefix:@"CustomViewRule:"] &&
+                [preferenceKey hasSuffix:@".Name"]) {
+                NSString *ruleID = [strongSelf->_screenIdentifier substringFromIndex:@"CustomViewRule:".length];
+                NSString *title = LGCustomViewRuleName(ruleID);
+                strongSelf->_screenTitle = [title copy];
+                strongSelf.title = title;
+                strongSelf->_heroTitleLabel.text = title;
+            }
         });
     }] forControlEvents:UIControlEventTouchUpInside];
     return button;
@@ -1668,6 +1874,9 @@ static void LGRestartAssistiveTouchDaemon(void) {
     if ([item[@"type"] isEqualToString:@"menu"]) {
         return [self menuControlBodyForItem:item titleLabel:titleLabel];
     }
+    if ([item[@"type"] isEqualToString:@"segmented"]) {
+        return [self segmentedControlBodyForItem:item titleLabel:titleLabel];
+    }
     if ([item[@"type"] isEqualToString:@"switch"]) {
         return [self switchControlBodyForItem:item titleLabel:titleLabel];
     }
@@ -1676,6 +1885,9 @@ static void LGRestartAssistiveTouchDaemon(void) {
     }
     if ([item[@"type"] isEqualToString:@"string"]) {
         return [self stringControlBodyForItem:item titleLabel:titleLabel];
+    }
+    if ([item[@"type"] isEqualToString:@"scale_override"]) {
+        return [self scaleOverrideControlBodyForItem:item titleLabel:titleLabel];
     }
     return [self sliderControlBodyForItem:item titleLabel:titleLabel];
 }
@@ -1726,6 +1938,7 @@ static void LGRestartAssistiveTouchDaemon(void) {
     NSUInteger startIndex = 0;
     NSDictionary *fpsItem = nil;
     NSDictionary *enabledItem = nil;
+    NSDictionary *scaleOverrideItem = nil;
 
     if (startIndex < items.count) {
         NSDictionary *candidate = items[startIndex];
@@ -1742,6 +1955,14 @@ static void LGRestartAssistiveTouchDaemon(void) {
         if ([candidate[@"type"] isEqualToString:@"switch"]
             && [candidate[@"controls_following_panel"] boolValue]) {
             enabledItem = candidate;
+            startIndex += 1;
+        }
+    }
+
+    if (startIndex < items.count) {
+        NSDictionary *candidate = items[startIndex];
+        if ([candidate[@"type"] isEqualToString:@"scale_override"]) {
+            scaleOverrideItem = candidate;
             startIndex += 1;
         }
     }
@@ -1766,6 +1987,22 @@ static void LGRestartAssistiveTouchDaemon(void) {
             enabledPanel.userInteractionEnabled = parentEnabled;
         }
         [_contentStack addArrangedSubview:enabledPanel];
+    }
+
+    if (scaleOverrideItem) {
+        UIView *scalePanel = [self groupedPanelForItems:@[scaleOverrideItem]];
+        NSString *controllerKey = enabledItem[@"key"];
+        if (controllerKey.length) {
+            id controllerDefault = enabledItem[@"default"] ?: @YES;
+            objc_setAssociatedObject(scalePanel, kLGControlledByEnabledKey,
+                                     @[controllerKey], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(scalePanel, kLGControlledByEnabledDefaultsKey,
+                                     @{controllerKey: controllerDefault}, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            BOOL enabled = [LGReadPreference(controllerKey, controllerDefault) boolValue];
+            scalePanel.alpha = enabled ? 1.0 : 0.42;
+            scalePanel.userInteractionEnabled = enabled;
+        }
+        [_contentStack addArrangedSubview:scalePanel];
     }
 
     if (startIndex >= items.count) return;
